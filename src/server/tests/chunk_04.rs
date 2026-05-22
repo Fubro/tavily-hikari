@@ -1059,6 +1059,7 @@ colo=LAX
             .create_user_session(&user, 3600)
             .await
             .expect("create user session");
+        let proxy_for_test = proxy.clone();
 
         let mut oauth_options = linuxdo_oauth_options_for_test();
         oauth_options.authorize_url = "http://oauth.internal:3000/oauth2/authorize".to_string();
@@ -1256,6 +1257,58 @@ colo=LAX
             Some(bound_token.token.as_str())
         );
 
+        let token_rotate_url = format!(
+            "http://{}/api/user/tokens/{}/secret/rotate",
+            addr, bound_token.id
+        );
+        let unauth_rotate_resp = client
+            .post(&token_rotate_url)
+            .send()
+            .await
+            .expect("anonymous user token rotate request");
+        assert_eq!(unauth_rotate_resp.status(), reqwest::StatusCode::UNAUTHORIZED);
+
+        let rotate_resp = client
+            .post(&token_rotate_url)
+            .header(reqwest::header::COOKIE, user_cookie.clone())
+            .send()
+            .await
+            .expect("user token rotate request");
+        assert_eq!(rotate_resp.status(), reqwest::StatusCode::OK);
+        let rotate_body: serde_json::Value =
+            rotate_resp.json().await.expect("user token rotate json");
+        let rotated_token = rotate_body
+            .get("token")
+            .and_then(|value| value.as_str())
+            .expect("rotated token is present");
+        assert_ne!(rotated_token, bound_token.token.as_str());
+        assert!(
+            rotated_token.starts_with(&format!("th-{}-", bound_token.id)),
+            "rotated token should keep the same token id"
+        );
+
+        let token_secret_after_rotate_resp = client
+            .get(&token_secret_url)
+            .header(reqwest::header::COOKIE, user_cookie.clone())
+            .send()
+            .await
+            .expect("user token secret after rotate request");
+        assert_eq!(
+            token_secret_after_rotate_resp.status(),
+            reqwest::StatusCode::OK
+        );
+        let token_secret_after_rotate_body: serde_json::Value =
+            token_secret_after_rotate_resp
+                .json()
+                .await
+                .expect("user token secret after rotate json");
+        assert_eq!(
+            token_secret_after_rotate_body
+                .get("token")
+                .and_then(|value| value.as_str()),
+            Some(rotated_token)
+        );
+
         let token_logs_url = format!(
             "http://{}/api/user/tokens/{}/logs?limit=20",
             addr, bound_token.id
@@ -1268,6 +1321,21 @@ colo=LAX
             .expect("user token logs request");
         assert_eq!(token_logs_resp.status(), reqwest::StatusCode::OK);
 
+        proxy_for_test
+            .set_access_token_enabled(&bound_token.id, false)
+            .await
+            .expect("disable user token");
+        let disabled_rotate_resp = client
+            .post(&token_rotate_url)
+            .header(reqwest::header::COOKIE, user_cookie.clone())
+            .send()
+            .await
+            .expect("disabled user token rotate request");
+        assert_eq!(
+            disabled_rotate_resp.status(),
+            reqwest::StatusCode::NOT_FOUND
+        );
+
         let forbidden_detail_url = format!("http://{}/api/user/tokens/notmine", addr);
         let forbidden_detail_resp = client
             .get(&forbidden_detail_url)
@@ -1277,6 +1345,18 @@ colo=LAX
             .expect("forbidden token detail request");
         assert_eq!(
             forbidden_detail_resp.status(),
+            reqwest::StatusCode::NOT_FOUND
+        );
+
+        let forbidden_rotate_url = format!("http://{}/api/user/tokens/notmine/secret/rotate", addr);
+        let forbidden_rotate_resp = client
+            .post(&forbidden_rotate_url)
+            .header(reqwest::header::COOKIE, user_cookie.clone())
+            .send()
+            .await
+            .expect("forbidden token rotate request");
+        assert_eq!(
+            forbidden_rotate_resp.status(),
             reqwest::StatusCode::NOT_FOUND
         );
 
@@ -2417,4 +2497,3 @@ colo=LAX
                 .is_some_and(|value| value.contains("建议：这是 Tavily 限流")),
         );
     }
-

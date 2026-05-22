@@ -97,6 +97,10 @@ pub async fn serve(
         .route("/api/user/tokens", get(get_user_tokens))
         .route("/api/user/tokens/:id", get(get_user_token_detail))
         .route("/api/user/tokens/:id/secret", get(get_user_token_secret))
+        .route(
+            "/api/user/tokens/:id/secret/rotate",
+            post(rotate_user_token_secret),
+        )
         .route("/api/user/tokens/:id/logs", get(get_user_token_logs))
         .route("/api/user/tokens/:id/events", get(sse_user_token))
         .route("/api/admin/registration", get(get_admin_registration_settings))

@@ -32,15 +32,15 @@ const EXCEPTIONS = new Map<string, { max: number; reason: string }>([
   [
     'src/api/runtime.ts',
     {
-      max: 3250,
-      reason: 'API barrel still carries the forward proxy admin runtime contract until the proxy API surface is split out.',
+      max: 3260,
+      reason: 'API barrel still carries the forward proxy admin runtime and user-console rotate contracts until the proxy API surface is split out.',
     },
   ],
   [
     'src/user-console/runtime.tsx',
     {
-      max: 3000,
-      reason: 'User console runtime is still carrying the route-level shell while guide/text were split into dedicated modules.',
+      max: 3100,
+      reason: 'User console runtime still carries the route-level shell; token reset dialogs/actions have been split out as the next extraction step.',
     },
   ],
   [

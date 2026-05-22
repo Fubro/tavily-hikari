@@ -11,6 +11,8 @@ import ConnectivityChecksPanel, {
 import TokenSecretField, { type TokenSecretCopyState } from '../components/TokenSecretField'
 import ManualCopyBubble from '../components/ManualCopyBubble'
 import UserConsoleHeader from '../components/UserConsoleHeader'
+import TokenListActions from './TokenListActions'
+import TokenResetDialogs from './TokenResetDialogs'
 
 import {
   createBrowserTodayWindow,
@@ -35,6 +37,7 @@ import {
   fetchUserTokenSecret,
   fetchUserTokens,
   postUserLogout,
+  rotateUserTokenSecret,
   parseUserTokenEventSnapshot,
   type Profile,
   type PublicTokenLog,
@@ -1166,6 +1169,11 @@ export default function UserConsole(): JSX.Element {
   const [apiProbe, setApiProbe] = useState<ProbeButtonModel>(() => createProbeButtonModel(BASE_API_PROBE_STEP_COUNT))
   const [probeBubble, setProbeBubble] = useState<ProbeBubbleModel | null>(null)
   const [manualCopyBubble, setManualCopyBubble] = useState<ManualCopyBubbleState | null>(null)
+  const [resetTokenId, setResetTokenId] = useState<string | null>(null)
+  const [resettingTokenId, setResettingTokenId] = useState<string | null>(null)
+  const [resetTokenError, setResetTokenError] = useState<string | null>(null)
+  const [resetResultToken, setResetResultToken] = useState<string | null>(null)
+  const [resetResultCopyState, setResetResultCopyState] = useState<TokenSecretCopyState>('idle')
   const [showLoggedOutState, setShowLoggedOutState] = useState(false)
   const [revealedGuideContextKey, setRevealedGuideContextKey] = useState<string | null>(null)
   const [guideTokenValue, setGuideTokenValue] = useState<string | null>(null)
@@ -1191,6 +1199,7 @@ export default function UserConsole(): JSX.Element {
   const tokensSectionRef = useRef<HTMLElement | null>(null)
   const detailHeadingRef = useRef<HTMLHeadingElement | null>(null)
   const detailTokenFieldRef = useRef<HTMLInputElement | null>(null)
+  const resetResultFieldRef = useRef<HTMLTextAreaElement | null>(null)
   const historyTraversalRef = useRef(false)
   const landingScrollBehaviorRef = useRef<ScrollBehavior>('auto')
   const shouldScrollLandingSectionRef = useRef(route.name === 'landing' && route.section !== null)
@@ -1283,6 +1292,11 @@ export default function UserConsole(): JSX.Element {
     clearTokenSecretState()
     clearGuideTokenState()
     setCopyState({})
+    setResetTokenId(null)
+    setResettingTokenId(null)
+    setResetTokenError(null)
+    setResetResultToken(null)
+    setResetResultCopyState('idle')
   }, [abortActiveProbeRun, clearConsoleData, clearGuideTokenState, clearProbeUi, clearTokenSecretState])
 
   const redirectAfterLogoutIfNeeded = useCallback(async (
@@ -1723,6 +1737,14 @@ export default function UserConsole(): JSX.Element {
     return true
   }, [route])
 
+  const guideTokenId = useMemo(() => resolveGuideTokenId(route, tokens), [route, tokens])
+  const maskedGuideToken = useMemo(() => resolveGuideToken(route, tokens), [route, tokens])
+  const guideRevealContextKey = useMemo(() => resolveGuideRevealContextKey(route, tokens), [route, tokens])
+  const guideTokenVisible =
+    consoleAvailability === 'enabled'
+    && guideTokenValue != null
+    && isActiveGuideRevealContext(revealedGuideContextKey, guideRevealContextKey)
+
   const copyToken = useCallback(async (tokenId: string, anchorEl?: HTMLElement | null) => {
     setManualCopyBubble(null)
     commitWarmTokenSecret(tokenId)
@@ -1756,6 +1778,98 @@ export default function UserConsole(): JSX.Element {
       setCopyState((prev) => ({ ...prev, [tokenId]: 'idle' }))
     }, 1800)
   }, [clearCachedTokenSecret, commitWarmTokenSecret, resolveTokenSecret, revealDetailTokenForManualCopy, route, tokenSecretTokenId, tokenSecretValue])
+
+  const invalidateTokenSecretAfterReset = useCallback((tokenId: string, token: string) => {
+    cancelWarmTokenSecret(tokenId)
+    abortPendingTokenSecretRequest(tokenId)
+    clearCachedTokenSecret(tokenId)
+    cacheTokenSecret(tokenId, token)
+    if (route.name === 'token' && route.id === tokenId) {
+      setTokenSecretTokenId(tokenId)
+      setTokenSecretValue(token)
+      setTokenSecretVisible(true)
+      setTokenSecretLoading(false)
+      setTokenSecretError(null)
+    }
+    if (guideTokenId === tokenId && guideTokenVisible) {
+      setGuideTokenValue(token)
+      setRevealedGuideContextKey(guideRevealContextKey)
+    }
+    setCopyState((prev) => ({ ...prev, [tokenId]: 'idle' }))
+  }, [
+    abortPendingTokenSecretRequest,
+    cacheTokenSecret,
+    cancelWarmTokenSecret,
+    clearCachedTokenSecret,
+    guideRevealContextKey,
+    guideTokenId,
+    guideTokenVisible,
+    route,
+  ])
+
+  const openResetTokenDialog = useCallback((tokenId: string) => {
+    setManualCopyBubble(null)
+    setResetTokenError(null)
+    setResetTokenId(tokenId)
+  }, [])
+
+  const closeResetTokenDialog = useCallback(() => {
+    if (resettingTokenId) return
+    setResetTokenId(null)
+    setResetTokenError(null)
+  }, [resettingTokenId])
+
+  const handleResetToken = useCallback(async () => {
+    if (!resetTokenId || resettingTokenId) return
+    const tokenId = resetTokenId
+    setResettingTokenId(tokenId)
+    setResetTokenError(null)
+
+    try {
+      const result = await rotateUserTokenSecret(tokenId)
+      invalidateTokenSecretAfterReset(tokenId, result.token)
+      const copyResult = await copyText(result.token)
+      setResetResultToken(result.token)
+      setResetResultCopyState(copyResult.ok ? 'copied' : 'error')
+      setResetTokenId(null)
+      setManualCopyBubble(null)
+    } catch (err) {
+      if (errorStatus(err) === 401) {
+        abortActiveConsoleLoads()
+        void redirectAfterLogoutIfNeeded(window.location)
+      }
+      setResetTokenError(formatTemplate(text.tokens.resetDialog.failed, {
+        message: getProbeErrorMessage(err),
+      }))
+    } finally {
+      setResettingTokenId(null)
+    }
+  }, [
+    abortActiveConsoleLoads,
+    invalidateTokenSecretAfterReset,
+    redirectAfterLogoutIfNeeded,
+    resetTokenId,
+    resettingTokenId,
+    text.tokens.resetDialog.failed,
+  ])
+
+  const handleCopyResetResultToken = useCallback(async () => {
+    if (!resetResultToken) return
+    const result = await copyText(resetResultToken, { preferExecCommand: true })
+    setResetResultCopyState(result.ok ? 'copied' : 'error')
+    if (!result.ok) {
+      window.requestAnimationFrame(() => {
+        selectAllReadonlyText(resetResultFieldRef.current)
+      })
+    }
+  }, [resetResultToken])
+
+  useEffect(() => {
+    if (!resetResultToken) return
+    window.requestAnimationFrame(() => {
+      selectAllReadonlyText(resetResultFieldRef.current)
+    })
+  }, [resetResultToken])
 
   const toggleTokenSecretVisibility = useCallback(async () => {
     if (route.name !== 'token') return
@@ -1799,14 +1913,6 @@ export default function UserConsole(): JSX.Element {
       }
     }
   }, [route, text.detail.tokenSecret.revealFailed, tokenSecretLoading, tokenSecretVisible])
-
-  const guideTokenId = useMemo(() => resolveGuideTokenId(route, tokens), [route, tokens])
-  const maskedGuideToken = useMemo(() => resolveGuideToken(route, tokens), [route, tokens])
-  const guideRevealContextKey = useMemo(() => resolveGuideRevealContextKey(route, tokens), [route, tokens])
-  const guideTokenVisible =
-    consoleAvailability === 'enabled'
-    && guideTokenValue != null
-    && isActiveGuideRevealContext(revealedGuideContextKey, guideRevealContextKey)
 
   const toggleGuideTokenVisibility = useCallback(async () => {
     if (!guideTokenId) return
@@ -2587,26 +2693,19 @@ export default function UserConsole(): JSX.Element {
                             </div>
                           </td>
                           <td>
-                            <div className="table-actions">
-                              <button
-                                type="button"
-                                className={`btn btn-outline btn-sm ${state === 'copied' ? 'btn-success' : state === 'error' ? 'btn-warning' : ''}`}
-                                onPointerEnter={() => scheduleWarmTokenSecret(item.tokenId)}
-                                onPointerLeave={() => cancelWarmTokenSecret(item.tokenId)}
-                                onBlur={() => cancelWarmTokenSecret(item.tokenId)}
-                                onPointerDown={() => warmTokenSecret(item.tokenId)}
-                                onKeyDown={(event) => {
-                                  if (!isCopyIntentKey(event.key)) return
-                                  warmTokenSecret(item.tokenId)
-                                }}
-                                onClick={(event) => void copyToken(item.tokenId, event.currentTarget)}
-                              >
-                                {state === 'copied' ? text.tokens.copied : state === 'error' ? text.tokens.copyFailed : text.tokens.copy}
-                              </button>
-                              <button type="button" className="btn btn-primary btn-sm" onClick={() => goTokenDetail(item.tokenId)}>
-                                {text.tokens.detail}
-                              </button>
-                            </div>
+                            <TokenListActions
+                              tokenId={item.tokenId}
+                              text={text.tokens}
+                              copyState={state}
+                              onScheduleWarmSecret={scheduleWarmTokenSecret}
+                              onCancelWarmSecret={cancelWarmTokenSecret}
+                              onWarmSecret={warmTokenSecret}
+                              onCopy={(tokenId, anchorEl) => void copyToken(tokenId, anchorEl)}
+                              onDetail={goTokenDetail}
+                              onReset={openResetTokenDialog}
+                              isCopyIntentKey={isCopyIntentKey}
+                              canReset={item.enabled}
+                            />
                           </td>
                         </tr>
                       )
@@ -2662,26 +2761,20 @@ export default function UserConsole(): JSX.Element {
                         <span>{text.dashboard.monthlySuccess}</span>
                         <strong>{formatNumber(item.monthlySuccess)}</strong>
                       </div>
-                      <div className="table-actions user-console-mobile-actions">
-                        <button
-                          type="button"
-                          className={`btn btn-outline btn-sm ${state === 'copied' ? 'btn-success' : state === 'error' ? 'btn-warning' : ''}`}
-                          onPointerEnter={() => scheduleWarmTokenSecret(item.tokenId)}
-                          onPointerLeave={() => cancelWarmTokenSecret(item.tokenId)}
-                          onBlur={() => cancelWarmTokenSecret(item.tokenId)}
-                          onPointerDown={() => warmTokenSecret(item.tokenId)}
-                          onKeyDown={(event) => {
-                            if (!isCopyIntentKey(event.key)) return
-                            warmTokenSecret(item.tokenId)
-                          }}
-                          onClick={(event) => void copyToken(item.tokenId, event.currentTarget)}
-                        >
-                          {state === 'copied' ? text.tokens.copied : state === 'error' ? text.tokens.copyFailed : text.tokens.copy}
-                        </button>
-                        <button type="button" className="btn btn-primary btn-sm" onClick={() => goTokenDetail(item.tokenId)}>
-                          {text.tokens.detail}
-                        </button>
-                      </div>
+                      <TokenListActions
+                        tokenId={item.tokenId}
+                        text={text.tokens}
+                        copyState={state}
+                        onScheduleWarmSecret={scheduleWarmTokenSecret}
+                        onCancelWarmSecret={cancelWarmTokenSecret}
+                        onWarmSecret={warmTokenSecret}
+                        onCopy={(tokenId, anchorEl) => void copyToken(tokenId, anchorEl)}
+                        onDetail={goTokenDetail}
+                        onReset={openResetTokenDialog}
+                        isCopyIntentKey={isCopyIntentKey}
+                        canReset={item.enabled}
+                        className="user-console-mobile-actions"
+                      />
                     </article>
                   )
                 })
@@ -2942,6 +3035,23 @@ export default function UserConsole(): JSX.Element {
         </>
       )}
       <UserConsoleFooter strings={text.footer} versionState={versionState} />
+      <TokenResetDialogs
+        text={text}
+        resetTokenId={resetTokenId}
+        resettingTokenId={resettingTokenId}
+        resetTokenError={resetTokenError}
+        resetResultToken={resetResultToken}
+        resetResultCopyState={resetResultCopyState}
+        resetResultFieldRef={resetResultFieldRef}
+        formatTemplate={formatTemplate}
+        onCloseResetTokenDialog={closeResetTokenDialog}
+        onResetToken={() => void handleResetToken()}
+        onCloseResetResult={() => {
+          setResetResultToken(null)
+          setResetResultCopyState('idle')
+        }}
+        onCopyResetResultToken={() => void handleCopyResetResultToken()}
+      />
       <ManualCopyBubble
         open={manualCopyBubble != null}
         anchorEl={manualCopyBubble?.anchorEl ?? null}
