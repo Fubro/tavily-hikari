@@ -1860,6 +1860,11 @@ export function fetchUserTokenSecret(id: string, signal?: AbortSignal): Promise<
   return requestJson(`/api/user/tokens/${encoded}/secret`, { signal })
 }
 
+export function rotateUserTokenSecret(id: string, signal?: AbortSignal): Promise<UserTokenResponse> {
+  const encoded = encodeURIComponent(id)
+  return requestJson(`/api/user/tokens/${encoded}/secret/rotate`, { method: 'POST', signal })
+}
+
 export function buildUserTokenEventsUrl(id: string, todayWindow?: TodayWindowRange): string {
   const encoded = encodeURIComponent(id)
   const params = new URLSearchParams()

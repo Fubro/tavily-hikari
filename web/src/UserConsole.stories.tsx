@@ -369,7 +369,7 @@ function installUserConsoleFetchMock(state: UserConsoleStoryState): () => void {
       return jsonResponse(tokenList)
     }
 
-    const tokenRoute = url.pathname.match(/^\/api\/user\/tokens\/([^/]+)(?:\/(secret|logs))?$/)
+    const tokenRoute = url.pathname.match(/^\/api\/user\/tokens\/([^/]+)(?:\/(secret|logs)(?:\/rotate)?)?$/)
     if (tokenRoute) {
       const tokenId = decodeURIComponent(tokenRoute[1])
       const action = tokenRoute[2] ?? 'detail'
@@ -379,6 +379,9 @@ function installUserConsoleFetchMock(state: UserConsoleStoryState): () => void {
       }
 
       if (action === 'secret') {
+        if (request.method === 'POST' && url.pathname.endsWith('/secret/rotate')) {
+          return jsonResponse({ token: 'th-a1b2-reset1234567890abcdef' })
+        }
         return jsonResponse({ token: 'th-a1b2-1234567890abcdef' })
       }
 

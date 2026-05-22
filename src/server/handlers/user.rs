@@ -1094,6 +1094,40 @@ async fn get_user_token_secret(
     }
 }
 
+async fn rotate_user_token_secret(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+) -> Result<Json<UserTokenView>, StatusCode> {
+    if !state.linuxdo_oauth.is_enabled_and_configured() {
+        return Err(StatusCode::NOT_FOUND);
+    }
+    let Some(user_session) = resolve_user_session(state.as_ref(), &headers).await else {
+        return Err(StatusCode::UNAUTHORIZED);
+    };
+    let owned = state
+        .proxy
+        .is_user_token_bound(&user_session.user.user_id, &id)
+        .await
+        .map_err(|err| {
+            eprintln!("rotate user token secret ownership error: {err}");
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?;
+    if !owned {
+        return Err(StatusCode::NOT_FOUND);
+    }
+    match state.proxy.rotate_access_token_secret(&id).await {
+        Ok(secret) => Ok(Json(UserTokenView {
+            token: secret.token,
+        })),
+        Err(ProxyError::Database(sqlx::Error::RowNotFound)) => Err(StatusCode::NOT_FOUND),
+        Err(err) => {
+            eprintln!("rotate user token secret error: {err}");
+            Err(StatusCode::INTERNAL_SERVER_ERROR)
+        }
+    }
+}
+
 async fn get_user_token_logs(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
