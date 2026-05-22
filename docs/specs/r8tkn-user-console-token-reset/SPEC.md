@@ -141,7 +141,7 @@ state: reset confirmation
 target_program: mock-only
 capture_scope: browser-viewport
 sensitive_exclusion: N/A
-submission_gate: pending-owner-approval
+submission_gate: approved
 evidence_note: 证明 Token 列表桌面操作区展示 Reset 按钮，并在确认前不会直接重置。
 
 PR: include
@@ -153,7 +153,7 @@ state: reset result
 target_program: mock-only
 capture_scope: browser-viewport
 sensitive_exclusion: N/A
-submission_gate: pending-owner-approval
+submission_gate: approved
 evidence_note: 证明重置成功后展示新完整 Token，并提供复制/手动复制结果界面。
 
 PR: include
