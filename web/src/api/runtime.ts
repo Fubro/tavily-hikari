@@ -3246,11 +3246,7 @@ export function fetchForwardProxyErrorStats(
   return requestJson('/api/stats/forward-proxy/errors', { signal })
 }
 
-export function updateForwardProxyNodesDisabled(
-  proxyKeys: string[],
-  disabled: boolean,
-  signal?: AbortSignal,
-): Promise<ForwardProxyNodeStateUpdateResponse> {
+export function updateForwardProxyNodesDisabled(proxyKeys: string[], disabled: boolean, signal?: AbortSignal): Promise<ForwardProxyNodeStateUpdateResponse> {
   return requestJson('/api/settings/forward-proxy/nodes/state', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -3259,8 +3255,6 @@ export function updateForwardProxyNodesDisabled(
   })
 }
 
-export function fetchForwardProxyDashboardSummary(
-  signal?: AbortSignal,
-): Promise<ForwardProxyDashboardSummaryResponse> {
+export function fetchForwardProxyDashboardSummary(signal?: AbortSignal): Promise<ForwardProxyDashboardSummaryResponse> {
   return requestJson('/api/stats/forward-proxy/summary', { signal })
 }
