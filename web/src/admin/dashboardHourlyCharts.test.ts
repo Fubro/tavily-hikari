@@ -10,6 +10,7 @@ import {
   DASHBOARD_TYPE_SERIES_ORDER,
   getCurrentDayHourlyBuckets,
   formatHourlyBucketLabel,
+  getHourlyBucketsInRange,
   getVisibleHourlyBuckets,
   readDashboardHourlyChartPreferences,
   toggleSeriesSelection,
@@ -74,6 +75,19 @@ describe('dashboardHourlyCharts helpers', () => {
     expect(shanghaiBuckets).toHaveLength(13)
     expect(shanghaiBuckets[0]?.bucketStart).toBe(Date.UTC(2026, 3, 6, 16, 0, 0) / 1000)
     expect(shanghaiBuckets.at(-1)?.bucketStart).toBe(currentHourStart)
+  })
+
+  it('filters buckets using explicit server epoch boundaries', () => {
+    const currentHourStart = Date.UTC(2026, 3, 7, 4, 0, 0) / 1000
+    const window = buildDashboardHourlyRequestWindowFixture({ currentHourStart })
+    const rangeStart = Date.UTC(2026, 3, 6, 16, 0, 0) / 1000
+
+    const buckets = getHourlyBucketsInRange(window, rangeStart, currentHourStart + 1)
+
+    expect(buckets).toHaveLength(13)
+    expect(buckets[0]?.bucketStart).toBe(rangeStart)
+    expect(buckets.at(-1)?.bucketStart).toBe(currentHourStart)
+    expect(getHourlyBucketsInRange(window, rangeStart, rangeStart)).toEqual([])
   })
 
   it('toggles absolute-series visibility without mutating the source array', () => {

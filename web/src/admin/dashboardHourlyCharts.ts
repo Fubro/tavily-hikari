@@ -226,6 +226,15 @@ export function getCurrentDayHourlyBuckets(
   return window.buckets.filter((bucket) => getHourlyBucketDayKey(bucket.bucketStart, timeZone) === latestDayKey)
 }
 
+export function getHourlyBucketsInRange(
+  window: DashboardHourlyRequestWindow,
+  rangeStart: number,
+  rangeEnd: number,
+): DashboardHourlyRequestBucket[] {
+  if (!Number.isFinite(rangeStart) || !Number.isFinite(rangeEnd) || rangeEnd <= rangeStart) return []
+  return window.buckets.filter((bucket) => bucket.bucketStart >= rangeStart && bucket.bucketStart < rangeEnd)
+}
+
 export function buildHourlyBucketLookup(
   buckets: ReadonlyArray<DashboardHourlyRequestBucket>,
 ): Map<number, DashboardHourlyRequestBucket> {

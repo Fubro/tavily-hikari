@@ -362,6 +362,12 @@ const summaryWindows: SummaryWindowsResponse = {
     new_keys: 3,
     new_quarantines: 0,
   },
+  today_start: Date.UTC(2026, 3, 7, 0, 0, 0) / 1000,
+  today_end: Date.UTC(2026, 3, 7, 12, 0, 0) / 1000 + 1,
+  yesterday_start: Date.UTC(2026, 3, 6, 0, 0, 0) / 1000,
+  yesterday_end: Date.UTC(2026, 3, 6, 12, 0, 0) / 1000 + 1,
+  month_start: Date.UTC(2026, 3, 1, 0, 0, 0) / 1000,
+  month_end: Date.UTC(2026, 3, 7, 12, 0, 0) / 1000 + 1,
 }
 
 const defaultHourlyRequestWindow = buildDashboardHourlyRequestWindowFixture({
@@ -940,9 +946,13 @@ export const ZhDarkEvidence: Story = {
     if (canvasElement.querySelectorAll('.dashboard-quota-charge-card').length < 2) {
       throw new Error('Expected both today and month quota charge cards to render')
     }
-    const backdropCanvases = canvasElement.querySelectorAll('.dashboard-summary-block-backdrop canvas')
-    if (backdropCanvases.length !== 2) {
-      throw new Error(`Expected 2 backdrop charts, received ${backdropCanvases.length}`)
+    const cardBackdropCanvases = canvasElement.querySelectorAll('.dashboard-summary-card-backdrop canvas')
+    if (cardBackdropCanvases.length !== 18) {
+      throw new Error(`Expected 18 card backdrop charts, received ${cardBackdropCanvases.length}`)
+    }
+    const blockBackdropCanvases = canvasElement.querySelectorAll('.dashboard-summary-block-backdrop canvas')
+    if (blockBackdropCanvases.length !== 0) {
+      throw new Error(`Expected no block backdrop charts, received ${blockBackdropCanvases.length}`)
     }
     for (const selector of ['.metric-delta-positive', '.metric-delta-negative']) {
       if (canvasElement.querySelector(selector) == null) {

@@ -423,7 +423,8 @@ function demoSummary() {
   }
 }
 
-function demoSummaryWindows() {
+function demoSummaryWindows(currentHourStart = Math.floor(Date.now() / 3_600_000) * 3_600) {
+  const todayStart = currentHourStart - 23 * 3_600
   const quotaCharge = {
     local_estimated_credits: 1260,
     upstream_actual_credits: 1218,
@@ -477,19 +478,26 @@ function demoSummaryWindows() {
       new_quarantines: 2,
       quota_charge: quotaCharge,
     },
+    today_start: todayStart,
+    today_end: currentHourStart + 1,
+    yesterday_start: todayStart - 24 * 3_600,
+    yesterday_end: currentHourStart - 24 * 3_600 + 1,
+    month_start: todayStart - 14 * 24 * 3_600,
+    month_end: currentHourStart + 1,
   }
 }
 
 function demoDashboardOverview() {
+  const currentHourStart = Math.floor(Date.now() / 3_600_000) * 3_600
   return {
     summary: demoSummary(),
-    summaryWindows: demoSummaryWindows(),
+    summaryWindows: demoSummaryWindows(currentHourStart),
     hourlyRequestWindow: {
       bucketSeconds: 3600,
       visibleBuckets: 24,
       retainedBuckets: 24,
       buckets: range(24).map((index) => ({
-        bucketStart: nowSeconds(-(23 - index) * 3600),
+        bucketStart: currentHourStart - (23 - index) * 3_600,
         secondarySuccess: 8 + index,
         primarySuccess: 24 + index * 2,
         secondaryFailure: index % 5,

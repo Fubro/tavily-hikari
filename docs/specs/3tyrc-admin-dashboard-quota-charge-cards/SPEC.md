@@ -44,6 +44,8 @@
 ### `GET /api/summary/windows`
 
 - `today / yesterday / month` 继续保留既有请求量与生命周期字段。
+- 顶层返回 `today_start / today_end / yesterday_start / yesterday_end / month_start / month_end`
+  epoch 秒边界，前端必须以这些服务端窗口边界过滤小时桶，不使用浏览器本地时区推断。
 - 每个窗口新增 `quota_charge`：
   - `local_estimated_credits`
   - `upstream_actual_credits`
@@ -84,7 +86,7 @@
 
 - `今日` 与 `本月` 的 `总请求数` 固定为第一行全宽卡。
 - 新增 `额度扣减` 卡固定为第二行全宽卡，独立于现有单值指标卡。
-- `今日` 与 `本月` 总览块需要使用小时请求窗口渲染累计用量背景图，当前窗口与昨日同刻窗口叠加显示；今日图必须按服务端日界线只取当前日小时桶，本月图使用月累计总量作为今日小时增量的基线，不伪造月内历史逐日形状；图表必须铺满整块卡片背景且不参与交互。
+- `今日` 与 `本月` 总览块需要使用小时请求窗口渲染累计用量背景图，当前窗口与昨日同刻窗口叠加显示；今日图必须按 `summaryWindows` 服务端窗口边界只取当前日小时桶，本月图使用月累计总量作为今日小时增量的基线，不伪造月内历史逐日形状；图表必须铺满整块卡片背景且不参与交互。
 - 管理端 dashboard 主体区域允许放宽最大宽度，以便桌面全宽场景能容纳更高密度的今日/本月信息。
 - `QuotaChargeCard` 固定展示：
   - `本地估算`
@@ -97,7 +99,7 @@
 
 - `今日` 与 `本月` 的 `总请求数`、`额度扣减` 均独占各自一整行；桌面/移动端无横向滚动。
 - `今日` 与 `本月` 总览块都有背景累计折线图，今日块叠加当前日小时桶与昨日同刻，本月块叠加月累计基线后的今日小时进度与对照进度；前景卡片仍保持数字可读。
-- `GET /api/summary/windows` 与 admin SSE `summaryWindows` 返回 `quota_charge`，前端不额外拼接。
+- `GET /api/summary/windows` 与 admin SSE `summaryWindows` 返回 `quota_charge` 与窗口边界字段，前端不额外拼接或猜测日界线。
 - `upstream_actual_credits` 对跨窗口基线、额度回升、月切换都不会重复扣减或出现负数。
 - 热路径只覆盖近期活跃 key；冷路径仍控制在 24h 级校准，不退化成全量高频轮询。
 - Storybook 提供稳定证据，浏览器实机复核真实 `/admin/dashboard` 与 Storybook 都通过。
