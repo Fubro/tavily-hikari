@@ -22,7 +22,7 @@ export function UserDetailTokenTable({
   formatTimestamp,
   onViewToken,
   onDeleteToken,
-  deletingTokenId,
+  deletingTokenId = null,
 }: UserDetailTokenTableProps): JSX.Element {
   if (tokens.length === 0) {
     return <div className="empty-state alert">{usersStrings.empty.noTokens}</div>

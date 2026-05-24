@@ -6405,12 +6405,27 @@ function AdminDashboard(): JSX.Element {
 
   const openTokenDeleteConfirm = (id: string) => {
     if (!id) return
+    if (
+      routeRef.current.name === 'user' &&
+      selectedUserDetail?.tokens.length === 1 &&
+      selectedUserDetail.tokens[0]?.tokenId === id
+    ) {
+      return
+    }
     setPendingTokenDeleteId(id)
   }
 
   const confirmTokenDelete = async () => {
     if (!pendingTokenDeleteId) return
     const id = pendingTokenDeleteId
+    if (
+      routeRef.current.name === 'user' &&
+      selectedUserDetail?.tokens.length === 1 &&
+      selectedUserDetail.tokens[0]?.tokenId === id
+    ) {
+      setPendingTokenDeleteId(null)
+      return
+    }
     setDeletingId(id)
     try {
       await deleteToken(id)

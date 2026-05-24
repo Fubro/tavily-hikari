@@ -1,5 +1,5 @@
 import { Icon } from '../../lib/icons'
-import type { Meta, StoryObj } from '@storybook/react-vite'
+import type { StoryObj } from '@storybook/react-vite'
 import { addons } from 'storybook/preview-api'
 import { SELECT_STORY } from 'storybook/internal/core-events'
 import { ArrowDown, ArrowUp, ArrowUpDown, ChartColumnIncreasing } from 'lucide-react'
@@ -67,7 +67,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '../../components/ui/too
 import { UserTagBindingControls } from '../UserTagBindingControls'
 import { Card } from '../../components/ui/card'
 import { Badge } from '../../components/ui/badge'
-import { LanguageProvider, useLanguage, useTranslate, type AdminTranslations } from '../../i18n'
+import { useLanguage, useTranslate, type AdminTranslations } from '../../i18n'
 import { KeyDetails } from '../../AdminDashboard'
 import { TokenDetailStoryCanvas } from '../../pages/TokenDetail.stories'
 import {
@@ -1720,6 +1720,12 @@ const MOCK_USER_DETAIL: AdminUserDetail = {
       requestCount: 19,
     },
   ],
+}
+
+const MOCK_USER_DETAIL_SINGLE_TOKEN: AdminUserDetail = {
+  ...MOCK_USER_DETAIL,
+  tokenCount: 1,
+  tokens: [MOCK_USER_TOKENS[0]],
 }
 
 const MOCK_MONTHLY_BROKEN_ITEMS: Record<string, MonthlyBrokenKeyDetail[]> = {
@@ -5832,14 +5838,14 @@ function UserTagsPageCanvas({ editorMode = 'view' }: { editorMode?: StoryTagCard
 }
 function UserDetailPageCanvas({
   initialUsageSeries = 'quota1h',
-  detail: detailOverride,
+  initialDetail = MOCK_USER_DETAIL,
 }: {
   initialUsageSeries?: AdminUserUsageSeriesKey | 'ip'
-  detail?: AdminUserDetail
+  initialDetail?: AdminUserDetail
 } = {}): JSX.Element {
   const users = useTranslate().admin.users
   const { language } = useLanguage()
-  const detail = detailOverride ?? MOCK_USER_DETAIL
+  const [detail, setDetail] = useState<AdminUserDetail>(initialDetail)
   const quotaSnapshot = buildStoryQuotaSnapshot(detail)
   const [quotaDraft, setQuotaDraft] = useState<Record<QuotaSliderField, string>>({
     hourlyAnyLimit: String(detail.quotaBase.hourlyAnyLimit),
@@ -5852,6 +5858,31 @@ function UserDetailPageCanvas({
   const hasBlockAllTag = detail.tags.some((tag) => tag.effectKind === 'block_all')
   const systemTagCount = detail.tags.filter((tag) => isSystemUserTag(tag)).length
   const manualTagCount = detail.tags.length - systemTagCount
+  const addToken = () => {
+    setDetail((current) => {
+      const nextIndex = current.tokens.length + 1
+      const nextToken: AdminUserTokenSummary = {
+        tokenId: `story_${nextIndex}`,
+        enabled: true,
+        note: `Story token ${nextIndex}`,
+        createdAt: now,
+        lastUsedAt: null,
+        totalRequests: 0,
+        dailySuccess: 0,
+        dailyFailure: 0,
+        monthlySuccess: 0,
+      }
+      const tokens = [...current.tokens, nextToken]
+      return { ...current, tokenCount: tokens.length, tokens }
+    })
+  }
+  const deleteToken = (tokenId: string) => {
+    setDetail((current) => {
+      if (current.tokens.length <= 1) return current
+      const tokens = current.tokens.filter((token) => token.tokenId !== tokenId)
+      return { ...current, tokenCount: tokens.length, tokens }
+    })
+  }
   return (
     <AdminPageFrame
       activeModule="users"
@@ -6126,7 +6157,7 @@ function UserDetailPageCanvas({
             <h2>{users.detail.tokensTitle}</h2>
             <p className="panel-description">{users.detail.tokensDescription}</p>
           </div>
-          <Button type="button" variant="secondary" size="sm">
+          <Button type="button" variant="secondary" size="sm" onClick={addToken}>
             <Icon icon="mdi:key-plus" width={16} height={16} />
             <span>{users.detail.addToken}</span>
           </Button>
@@ -6138,7 +6169,7 @@ function UserDetailPageCanvas({
             formatNumber={formatNumber}
             formatTimestamp={(value) => formatTimestamp(value ?? null)}
             onViewToken={() => {}}
-            onDeleteToken={() => {}}
+            onDeleteToken={deleteToken}
           />
         </div>
       </section>
@@ -6239,47 +6270,7 @@ function SystemSettingsPageCanvas(): JSX.Element {
   )
 }
 
-const meta = {
-  title: 'Admin/Pages',
-  tags: ['autodocs'],
-  parameters: {
-    docs: {
-      description: {
-        component: [
-          'Route-level admin review surface covering dashboard, keys, tokens, users, jobs, system settings, and forward proxy settings.',
-          '',
-          'Public docs: [Configuration & Access](../configuration-access.html) · [Deployment & Anonymity](../deployment-anonymity.html) · [Storybook Guide](../storybook-guide.html)',
-        ].join('\n'),
-      },
-    },
-    layout: 'fullscreen',
-  },
-  decorators: [
-    (Story) => (
-      <LanguageProvider>
-        <div
-          style={{
-            minHeight: '100vh',
-            padding: 24,
-            color: 'hsl(var(--foreground))',
-            background: [
-              'radial-gradient(1000px 520px at 6% -8%, hsl(var(--primary) / 0.14), transparent 62%)',
-              'radial-gradient(900px 460px at 95% -14%, hsl(var(--accent) / 0.12), transparent 64%)',
-              'linear-gradient(180deg, hsl(var(--background)) 0%, hsl(var(--background)) 62%, hsl(var(--muted) / 0.58) 100%)',
-              'hsl(var(--background))',
-            ].join(', '),
-          }}
-        >
-          <Story />
-        </div>
-      </LanguageProvider>
-    ),
-  ],
-} satisfies Meta
-
-export default meta
-
-type Story = StoryObj<typeof meta>
+type Story = StoryObj
 
 export const Dashboard: Story = {
   render: () => <DashboardPageCanvas />,
@@ -6924,6 +6915,29 @@ export const UserDetail: Story = {
       throw new Error('Expected the token table headers to include total requests and created time.')
     }
 
+    const addButton = Array.from(canvasElement.querySelectorAll<HTMLButtonElement>('button'))
+      .find((item) => item.textContent?.trim() === 'Add token')
+    if (!addButton) {
+      throw new Error('Expected the user detail token header to expose an Add token button.')
+    }
+    addButton.click()
+    await new Promise((resolve) => window.setTimeout(resolve, 40))
+    const tokenRowsAfterAdd = canvasElement.querySelectorAll('.admin-user-tokens-table tbody tr')
+    if (tokenRowsAfterAdd.length !== MOCK_USER_DETAIL.tokens.length + 1) {
+      throw new Error('Expected Add token to append one token row in the story runtime.')
+    }
+
+    const deleteButtons = Array.from(canvasElement.querySelectorAll<HTMLButtonElement>('.admin-user-tokens-table button[aria-label="Delete token"]'))
+    if (deleteButtons.length !== tokenRowsAfterAdd.length) {
+      throw new Error('Expected every token row to expose a delete action.')
+    }
+    deleteButtons[0]?.click()
+    await new Promise((resolve) => window.setTimeout(resolve, 40))
+    const tokenRowsAfterDelete = canvasElement.querySelectorAll('.admin-user-tokens-table tbody tr')
+    if (tokenRowsAfterDelete.length !== MOCK_USER_DETAIL.tokens.length) {
+      throw new Error('Expected deleting a token to refresh the story table.')
+    }
+
     const tokenTableWrapper = canvasElement.querySelector('.admin-user-tokens-table')?.closest<HTMLElement>('.admin-responsive-up')
     const breakdownTableWrapper = canvasElement.querySelector('.user-tag-breakdown-table')?.closest<HTMLElement>('.admin-responsive-up')
     for (const [label, wrapper] of [
@@ -6949,6 +6963,32 @@ export const UserDetail: Story = {
     const expected = ['quota1h', 'rate5m', 'quota24h', 'quotaMonth']
     if (expected.some((value) => !loadedSeries.includes(value))) {
       throw new Error(`Expected shared usage tabs to lazy-load all series after interaction, received ${loadedSeries.join(',')}.`)
+    }
+  },
+}
+
+export const UserDetailSingleTokenGuard: Story = {
+  render: () => <UserDetailPageCanvas initialDetail={MOCK_USER_DETAIL_SINGLE_TOKEN} />,
+  play: async ({ canvasElement }) => {
+    await new Promise((resolve) => window.setTimeout(resolve, 80))
+
+    const deleteButton = canvasElement.querySelector<HTMLButtonElement>(
+      '.admin-user-tokens-table button[aria-label="Delete token"]',
+    )
+    if (!deleteButton) {
+      throw new Error('Expected the single-token story to show a token delete button.')
+    }
+    if (!deleteButton.disabled) {
+      throw new Error('Expected the single-token delete button to be disabled.')
+    }
+    if (deleteButton.title !== 'At least one token must remain.') {
+      throw new Error('Expected the single-token delete guard to explain why deletion is disabled.')
+    }
+
+    const addButton = Array.from(canvasElement.querySelectorAll<HTMLButtonElement>('button'))
+      .find((item) => item.textContent?.trim() === 'Add token')
+    if (!addButton) {
+      throw new Error('Expected the single-token story to keep the Add token action available.')
     }
   },
 }
@@ -6994,32 +7034,6 @@ export const UserDetailCompact: Story = {
       if (cards.some((card) => card.scrollWidth > card.clientWidth + 1)) {
         throw new Error(`Expected compact ${label} cards to avoid horizontal overflow.`)
       }
-    }
-  },
-}
-
-export const UserDetailSingleTokenGuard: Story = {
-  render: () => (
-    <UserDetailPageCanvas
-      detail={{
-        ...MOCK_USER_DETAIL,
-        tokenCount: 1,
-        tokens: [MOCK_USER_TOKENS[0]],
-      }}
-    />
-  ),
-  play: async ({ canvasElement }) => {
-    await new Promise((resolve) => window.setTimeout(resolve, 80))
-    const addButton = Array.from(canvasElement.querySelectorAll<HTMLButtonElement>('button'))
-      .find((button) => button.textContent?.includes('添加令牌'))
-    if (!addButton) {
-      throw new Error('Expected user detail story to expose the add-token action.')
-    }
-    const disabledDeleteButton = canvasElement.querySelector<HTMLButtonElement>(
-      'button[aria-label="至少保留一个令牌"]',
-    )
-    if (!disabledDeleteButton?.disabled) {
-      throw new Error('Expected single-token user detail story to disable token deletion.')
     }
   },
 }

@@ -876,7 +876,7 @@ export const EN: TranslationShape = {
           actions: {
             view: 'Open token detail',
             delete: 'Delete token',
-            deleteDisabled: 'Keep at least one token',
+            deleteDisabled: 'At least one token must remain.',
           },
         },
       },
