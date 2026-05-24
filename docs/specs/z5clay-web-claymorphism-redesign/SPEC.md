@@ -19,7 +19,7 @@ Tavily Hikari's web surfaces adopt a high-fidelity claymorphism visual system ac
 ## Non-goals
 
 - No backend API, database, authentication, proxy, or quota behavior changes.
-- No new design framework or daisyUI runtime dependency.
+- No new design framework or legacy UI runtime dependency.
 - No marketing-only landing page rewrite that hides the actual proxy workflows.
 - No hard-coded dark-only visual language that bypasses the shared token system.
 

@@ -82,7 +82,6 @@
 ### Project-Specific Notes
 
 - 2025-03-??: During high-anonymity testing we accidentally hit the official Tavily MCP endpoint. All future tests must target a local/mock upstream. Never hit production Tavily without explicit approval.
-- daisyUI llms.txt: https://daisyui.com/llms.txt give me a light daisyUI 5 theme with tropical color palette
 
 ## Agent Review Prep
 

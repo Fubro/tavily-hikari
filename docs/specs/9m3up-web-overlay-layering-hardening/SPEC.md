@@ -8,7 +8,7 @@
 
 ## 背景 / 问题陈述
 
-- 前端当前同时存在 Radix portal 浮层、DaisyUI 风格 `.tooltip::after` / `dropdown-content`，以及若干局部 `position: absolute` 气泡。
+- 前端当前同时存在 Radix portal 浮层、遗留 `.tooltip::after` / `dropdown-content` 浮层模式，以及若干局部 `position: absolute` 气泡。
 - 表格滚动壳、`overflow` 容器、sticky 区块与 modal/drawer 叠加后，局部布局树里的气泡会被截断或被更高层内容盖住。
 - 单点追加 `z-index` 只能修个别页面，不能从根上杜绝新浮层继续落在错误的层级模型里。
 
@@ -17,7 +17,7 @@
 ### Goals
 
 - 为 `web/` 建立统一的浮层层级 tokens、共享 `Tooltip` primitive、共享 anchored floating 定位 hook。
-- 迁移生产态遗留 `.tooltip[data-tip]`、局部 `absolute` 气泡、DaisyUI mobile guide dropdown。
+- 迁移生产态遗留 `.tooltip[data-tip]`、局部 `absolute` 气泡、旧 mobile guide dropdown。
 - 让 tooltip / popover / dropdown / modal 在滚动表格、裁剪容器和对话框里保持稳定可见。
 - 增加静态 guard、Storybook proof 与测试，阻止旧模式回流。
 
