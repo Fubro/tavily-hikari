@@ -38,7 +38,7 @@ function collectSourceFiles(dir: string): string[] {
 }
 
 describe('overlay legacy pattern guard', () => {
-  it('forbids non-portal tooltip and DaisyUI dropdown regressions in production source files', () => {
+  it('forbids non-portal tooltip and legacy dropdown regressions in production source files', () => {
     const findings: string[] = []
 
     for (const filePath of collectSourceFiles(SOURCE_ROOT)) {

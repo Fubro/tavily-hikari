@@ -8,7 +8,7 @@
 
 ## 背景 / 问题陈述
 
-- 现有前端依赖 DaisyUI 组件语义类，样式体系与组件体系耦合较深，难以持续演进。
+- 重构前前端依赖旧组件语义类，样式体系与组件体系耦合较深，难以持续演进。
 - 现有主题仅浅色主路径，缺少可持久化的主题模式切换与统一 token 约束。
 - 品牌视觉与 Tavily 官网配色存在偏差，页面间视觉一致性不足。
 
@@ -66,7 +66,7 @@
   Then 行为语义与结果保持一致。
 - Given 前端构建与 Storybook 构建
   When 执行构建命令
-  Then 均可通过且不依赖 DaisyUI runtime/plugin。
+  Then 均可通过且不依赖旧 UI runtime/plugin。
 - Given 多语言与现有路由
   When 页面访问 `/` `/login` `/admin` 与 hash 子路由
   Then 文案、导航、功能不回归。

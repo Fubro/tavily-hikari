@@ -359,7 +359,7 @@ const result = await client.search("hello from Hikari proxy", {
 
 ### 8.2 Cherry Studio 设置示意界面（前端 HTML Mock）
 
-为帮助终端用户快速理解 Cherry Studio 中的配置路径，前端需要在「用户总览页」的 Cherry Studio 指南区域，使用纯 HTML/CSS（React + Tailwind + DaisyUI）构建一个简化版的设置页示意界面。
+为帮助终端用户快速理解 Cherry Studio 中的配置路径，前端需要在「用户总览页」的 Cherry Studio 指南区域，使用纯 HTML/CSS（React + Tailwind + 项目现有设计 token）构建一个简化版的设置页示意界面。
 
 该示意界面的设计要求：
 
@@ -393,7 +393,7 @@ const result = await client.search("hello from Hikari proxy", {
 实现细节建议：
 
 - 将该示意界面实现为独立的 React 组件（例如 `CherryStudioMock`），仅在 Public 用户首页的 Cherry Studio 指南 tab 下展示。
-- 使用现有的 Tailwind + DaisyUI 工具类构建布局和样式；整体风格与用户总览页其它卡片保持一致（圆角、浅灰背景、轻微阴影等）。
+- 使用现有的 Tailwind 工具类、项目设计 token 与共享 UI 组件构建布局和样式；整体风格与用户总览页其它卡片保持一致（圆角、浅灰背景、轻微阴影等）。
 - 所有文字文案（标题、字段名、说明）应通过 `web/src/i18n.tsx` 的 i18n 管线管理，保证中英双语切换时示意界面同步更新。
 
 示意界面对应的 UI 参考截图应保存到仓库的 `docs/assets` 目录，例如：
