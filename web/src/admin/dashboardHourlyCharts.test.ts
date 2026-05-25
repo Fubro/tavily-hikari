@@ -10,7 +10,6 @@ import {
   createEmptyDashboardHourlyRequestWindow,
   DASHBOARD_RESULT_SERIES_ORDER,
   DASHBOARD_TYPE_SERIES_ORDER,
-  derivePreviousMonthRange,
   getCurrentDayHourlyBuckets,
   formatHourlyBucketLabel,
   getHourlyBucketsInRange,
@@ -115,6 +114,23 @@ describe('dashboardHourlyCharts helpers', () => {
     expect(slots[4]?.bucket).toBeNull()
   })
 
+  it('builds fixed slots using the server bucket alignment offset', () => {
+    const kathmanduOffsetSeconds = 45 * 60
+    const currentHourStart = Date.UTC(2026, 3, 7, 12, 0, 0) / 1000 + kathmanduOffsetSeconds
+    const window = buildDashboardHourlyRequestWindowFixture({
+      currentHourStart,
+      retainedBuckets: 4,
+    })
+    const slots = buildHourlyRangeSlots(window, currentHourStart - 2 * 3600 - 60, currentHourStart + 3600)
+
+    expect(slots.map((slot) => slot.bucketStart)).toEqual([
+      currentHourStart - 2 * 3600,
+      currentHourStart - 3600,
+      currentHourStart,
+    ])
+    expect(slots.every((slot) => slot.bucket?.bucketStart === slot.bucketStart)).toBe(true)
+  })
+
   it('returns null deltas when either fixed-range side is missing', () => {
     const currentHourStart = Date.UTC(2026, 3, 7, 4, 0, 0) / 1000
     const window = buildDashboardHourlyRequestWindowFixture({
@@ -133,15 +149,6 @@ describe('dashboardHourlyCharts helpers', () => {
       null,
       null,
     ])
-  })
-
-  it('derives the previous month from a server-local month boundary', () => {
-    const shanghaiAprilStart = Date.UTC(2026, 2, 31, 16, 0, 0) / 1000
-
-    expect(derivePreviousMonthRange(shanghaiAprilStart)).toEqual({
-      rangeStart: Date.UTC(2026, 1, 28, 16, 0, 0) / 1000,
-      rangeEnd: shanghaiAprilStart,
-    })
   })
 
   it('toggles absolute-series visibility without mutating the source array', () => {

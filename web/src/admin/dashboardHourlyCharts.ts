@@ -63,6 +63,10 @@ export interface DashboardHourlyRangeSlot {
   bucket: DashboardHourlyRequestBucket | null
 }
 
+function positiveModulo(value: number, divisor: number): number {
+  return ((value % divisor) + divisor) % divisor
+}
+
 function normalizeSeriesSelection<T extends string>(
   value: unknown,
   allowed: ReadonlyArray<T>,
@@ -250,44 +254,21 @@ export function buildHourlyRangeSlots(
     ? Math.trunc(window.bucketSeconds)
     : 3600
   const lookup = buildHourlyBucketLookup(window.buckets)
-  const firstBucketStart = Math.floor(rangeStart / bucketSeconds) * bucketSeconds
+  const alignmentOffset = window.buckets[0]
+    ? positiveModulo(window.buckets[0].bucketStart, bucketSeconds)
+    : positiveModulo(rangeStart, bucketSeconds)
+  const rangeOffset = positiveModulo(rangeStart - alignmentOffset, bucketSeconds)
+  const firstBucketStart = rangeOffset === 0
+    ? rangeStart
+    : rangeStart + bucketSeconds - rangeOffset
   const slots: DashboardHourlyRangeSlot[] = []
   for (let bucketStart = firstBucketStart; bucketStart < rangeEnd; bucketStart += bucketSeconds) {
-    if (bucketStart < rangeStart) continue
     slots.push({
       bucketStart,
       bucket: lookup.get(bucketStart) ?? null,
     })
   }
   return slots
-}
-
-export function derivePreviousMonthRange(monthStart: number): { rangeStart: number; rangeEnd: number } | null {
-  if (!Number.isFinite(monthStart)) return null
-  const utcBoundary = new Date(monthStart * 1000)
-  const secondsIntoUtcDay = (
-    utcBoundary.getUTCHours() * 3600
-    + utcBoundary.getUTCMinutes() * 60
-    + utcBoundary.getUTCSeconds()
-  )
-  const inferredLocalOffsetSeconds = secondsIntoUtcDay === 0
-    ? 0
-    : utcBoundary.getUTCDate() === 1
-      ? -secondsIntoUtcDay
-      : 24 * 3600 - secondsIntoUtcDay
-  const localMonthStart = new Date((monthStart + inferredLocalOffsetSeconds) * 1000)
-  const previousMonthStart = Date.UTC(
-    localMonthStart.getUTCFullYear(),
-    localMonthStart.getUTCMonth() - 1,
-    1,
-    0,
-    0,
-    0,
-  ) / 1000 - inferredLocalOffsetSeconds
-  return {
-    rangeStart: previousMonthStart,
-    rangeEnd: monthStart,
-  }
 }
 
 export function buildHourlyBucketLookup(

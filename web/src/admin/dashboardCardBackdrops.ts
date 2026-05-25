@@ -1,4 +1,9 @@
-import type { DashboardHourlyRequestBucket, DashboardHourlyRequestWindow } from '../api'
+import type {
+  DashboardHourlyRequestBucket,
+  DashboardHourlyRequestWindow,
+  SummaryWindowMetrics,
+  SummaryWindowsResponse,
+} from '../api'
 import { buildHourlyRangeSlots } from './dashboardHourlyCharts'
 
 export type DashboardBackdropMetricKey =
@@ -21,6 +26,47 @@ export interface DashboardCardBackdropSeries {
 }
 
 export type DashboardCardBackdropMap = Partial<Record<DashboardBackdropMetricKey, DashboardCardBackdropSeries>>
+
+export function buildBackdropBaseline(total: number, values: ReadonlyArray<number | null>): number {
+  const visibleTotal = values.reduce<number>((sum, value) => sum + (value ?? 0), 0)
+  return Math.max(total - visibleTotal, 0)
+}
+
+export function buildMonthBackdropBaseline(
+  month: SummaryWindowMetrics,
+  metricKey: DashboardBackdropMetricKey,
+  values: ReadonlyArray<number | null>,
+): number {
+  return buildBackdropBaseline(getSummaryMetricValue(month, metricKey), values)
+}
+
+export function getPreviousMonthRange(summaryWindows: SummaryWindowsResponse): { rangeStart: number; rangeEnd: number } {
+  const rangeStart = summaryWindows.previous_month_start
+  const rangeEnd = summaryWindows.previous_month_end
+  if (Number.isFinite(rangeStart) && Number.isFinite(rangeEnd) && rangeEnd! > rangeStart!) {
+    return { rangeStart: rangeStart!, rangeEnd: rangeEnd! }
+  }
+  return { rangeStart: summaryWindows.month_start, rangeEnd: summaryWindows.month_start }
+}
+
+function getSummaryMetricValue(month: SummaryWindowMetrics, metricKey: DashboardBackdropMetricKey): number {
+  switch (metricKey) {
+    case 'total':
+      return month.total_requests
+    case 'valuableSuccess':
+      return month.valuable_success_count
+    case 'valuableFailure':
+      return month.valuable_failure_count
+    case 'otherSuccess':
+      return month.other_success_count
+    case 'otherFailure':
+      return month.other_failure_count
+    case 'unknown':
+      return month.unknown_count
+    default:
+      return 0
+  }
+}
 
 export function getBackdropMetricKey(id: string): DashboardBackdropMetricKey | null {
   const normalizedId = id.replace(/^(today|month)-/, '')

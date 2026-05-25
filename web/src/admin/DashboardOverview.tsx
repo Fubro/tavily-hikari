@@ -36,7 +36,6 @@ import {
   DASHBOARD_TYPE_SERIES_ORDER,
   DEFAULT_VISIBLE_RESULT_SERIES,
   DEFAULT_VISIBLE_TYPE_SERIES,
-  derivePreviousMonthRange,
   createDashboardHourlyChartPreferences,
   formatHourlyBucketLabel,
   getResultSeriesValue,
@@ -52,7 +51,9 @@ import {
 } from './dashboardHourlyCharts'
 import {
   buildHourlyBackdropSeries,
+  buildMonthBackdropBaseline,
   getBackdropMetricKey,
+  getPreviousMonthRange,
   type DashboardBackdropMetricKey,
   type DashboardCardBackdropMap,
   type DashboardCardBackdropSeries,
@@ -603,19 +604,10 @@ function DashboardTrendPanel({
   ])
 
   const palette = readDashboardChartPalette()
-  const comparisonMonthRange = useMemo(
-    () => derivePreviousMonthRange(summaryWindows.month_start),
-    [summaryWindows.month_start],
-  )
-  const isMonthMode = chartMode === 'types' || chartMode === 'typesDelta'
-  const currentRangeStart = isMonthMode ? summaryWindows.month_start : summaryWindows.today_start
-  const currentRangeEnd = isMonthMode ? summaryWindows.month_end : summaryWindows.today_end
-  const comparisonRangeStart = isMonthMode
-    ? comparisonMonthRange?.rangeStart ?? summaryWindows.month_start
-    : summaryWindows.yesterday_start
-  const comparisonRangeEnd = isMonthMode
-    ? comparisonMonthRange?.rangeEnd ?? summaryWindows.month_start
-    : summaryWindows.yesterday_end
+  const currentRangeStart = summaryWindows.today_start
+  const currentRangeEnd = summaryWindows.today_end
+  const comparisonRangeStart = summaryWindows.yesterday_start
+  const comparisonRangeEnd = summaryWindows.yesterday_end
   const rangeSlots = useMemo(
     () => buildHourlyRangeSlots(hourlyRequestWindow, currentRangeStart, currentRangeEnd),
     [currentRangeEnd, currentRangeStart, hourlyRequestWindow],
@@ -624,17 +616,17 @@ function DashboardTrendPanel({
     () => buildHourlyRangeSlots(hourlyRequestWindow, comparisonRangeStart, comparisonRangeEnd),
     [comparisonRangeEnd, comparisonRangeStart, hourlyRequestWindow],
   )
+  const isDeltaMode = chartMode === 'resultsDelta' || chartMode === 'typesDelta'
   const labels = useMemo(
     () => {
-      const slotCount = Math.max(rangeSlots.length, comparisonRangeSlots.length)
+      const slotCount = isDeltaMode ? Math.max(rangeSlots.length, comparisonRangeSlots.length) : rangeSlots.length
       return Array.from({ length: slotCount }, (_, index) => {
         const bucketStart = rangeSlots[index]?.bucketStart ?? comparisonRangeSlots[index]?.bucketStart
         return bucketStart == null ? ['', ''] : formatHourlyBucketLabel(bucketStart, chartLabelTimeZone ?? undefined)
       })
     },
-    [chartLabelTimeZone, comparisonRangeSlots, rangeSlots],
+    [chartLabelTimeZone, comparisonRangeSlots, isDeltaMode, rangeSlots],
   )
-
   const resultSeriesLabels: Record<DashboardResultSeriesId, string> = {
     secondarySuccess: strings.chartResultSecondarySuccess,
     primarySuccess: strings.chartResultPrimarySuccess,
@@ -1036,9 +1028,9 @@ export default function DashboardOverview({
   }
   const comparisonRangeStart = summaryWindowValues.yesterday_start
   const comparisonRangeEnd = summaryWindowValues.yesterday_end
-  const previousMonthRange = derivePreviousMonthRange(summaryWindowValues.month_start)
-  const monthComparisonRangeStart = previousMonthRange?.rangeStart ?? summaryWindowValues.month_start
-  const monthComparisonRangeEnd = previousMonthRange?.rangeEnd ?? summaryWindowValues.month_start
+  const previousMonthRange = getPreviousMonthRange(summaryWindowValues)
+  const monthComparisonRangeStart = previousMonthRange.rangeStart
+  const monthComparisonRangeEnd = previousMonthRange.rangeEnd
   const todayBackdrop = useMemo(
     () => buildHourlyBackdropSeries(
       hourlyRequestWindow,
@@ -1147,19 +1139,26 @@ export default function DashboardOverview({
     todayBackdrop,
   ])
   const monthBackdrop = useMemo(
-    () => buildHourlyBackdropSeries(
-      hourlyRequestWindow,
-      summaryWindowValues.month_start,
-      summaryWindowValues.month_end,
-      'total',
-      monthComparisonRangeStart,
-      monthComparisonRangeEnd,
-    ),
+    () => {
+      const backdrop = buildHourlyBackdropSeries(
+        hourlyRequestWindow,
+        summaryWindowValues.month_start,
+        summaryWindowValues.month_end,
+        'total',
+        monthComparisonRangeStart,
+        monthComparisonRangeEnd,
+      )
+      return {
+        ...backdrop,
+        baseline: buildMonthBackdropBaseline(summaryWindowValues.month, 'total', backdrop.current),
+      }
+    },
     [
       hourlyRequestWindow,
       monthComparisonRangeEnd,
       monthComparisonRangeStart,
       summaryWindowValues.month_end,
+      summaryWindowValues.month,
       summaryWindowValues.month_start,
     ],
   )
@@ -1167,18 +1166,22 @@ export default function DashboardOverview({
     const buildMonthCardBackdrop = (
       metricKey: DashboardBackdropMetricKey,
       color = backdropColors.month,
-    ): DashboardCardBackdropSeries => ({
-      ...buildHourlyBackdropSeries(
+    ): DashboardCardBackdropSeries => {
+      const backdrop = buildHourlyBackdropSeries(
         hourlyRequestWindow,
         summaryWindowValues.month_start,
         summaryWindowValues.month_end,
         metricKey,
         monthComparisonRangeStart,
         monthComparisonRangeEnd,
-      ),
-      color,
-      comparisonColor: backdropColors.yesterday,
-    })
+      )
+      return {
+        ...backdrop,
+        baseline: buildMonthBackdropBaseline(summaryWindowValues.month, metricKey, backdrop.current),
+        color,
+        comparisonColor: backdropColors.yesterday,
+      }
+    }
     return {
       total: {
         ...monthBackdrop,
@@ -1199,6 +1202,7 @@ export default function DashboardOverview({
     monthComparisonRangeEnd,
     monthComparisonRangeStart,
     monthBackdrop,
+    summaryWindowValues.month,
     summaryWindowValues.month_end,
     summaryWindowValues.month_start,
   ])

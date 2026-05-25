@@ -83,7 +83,9 @@
   - `apiBillable`
 - 与昨日对比：
   - 今日图使用 `summaryWindows.today_start/today_end`；对比图使用完整 `summaryWindows.yesterday_start/yesterday_end`。
-  - 本月图使用 `summaryWindows.month_start/month_end`；若需要上月对比，前端从 `month_start` 推导完整上月起止，只筛选已有 buckets，不伪造历史数据。
+  - 本月图使用 `summaryWindows.month_start/month_end`；上月对比使用服务端提供的
+    `summaryWindows.previous_month_start/previous_month_end`，只筛选已有 buckets，不伪造历史数据。
+  - 若旧 payload 缺少上月边界，前端展示空上月对比范围，不根据当前月边界自行推导。
   - 当前小时不做分钟截断，直接对比固定范围内对应序号的完整 bucket。
   - delta 图 Y 轴允许正负值
 

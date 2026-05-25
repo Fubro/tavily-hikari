@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'bun:test'
 
 import { buildDashboardHourlyRequestWindowFixture } from './dashboardHourlyCharts'
-import { buildHourlyBackdropSeries } from './dashboardCardBackdrops'
+import { buildBackdropBaseline, buildHourlyBackdropSeries } from './dashboardCardBackdrops'
 
 describe('dashboardCardBackdrops helpers', () => {
   it('uses explicit comparison window bounds instead of a fixed 24h offset', () => {
@@ -57,5 +57,9 @@ describe('dashboardCardBackdrops helpers', () => {
 
     expect(current).toEqual([10, 20, null])
     expect(comparison).toEqual([10, 20, null])
+  })
+
+  it('keeps a month-to-date baseline when retained buckets cover only part of the month', () => {
+    expect(buildBackdropBaseline(150, [null, 12, null, 8])).toBe(130)
   })
 })
