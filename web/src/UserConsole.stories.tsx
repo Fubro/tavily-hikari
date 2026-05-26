@@ -111,10 +111,6 @@ const rechargeConfigSample: RechargeConfig = {
 
 const rechargeTestPriceConfigSample: RechargeConfig = {
   ...rechargeConfigSample,
-  unitCredits: 1,
-  unitPriceLdc: 1,
-  minCredits: 1,
-  creditsStep: 1,
   defaultCredits: 1,
   testPriceEnabled: true,
   currentEntitlementCredits: 1,

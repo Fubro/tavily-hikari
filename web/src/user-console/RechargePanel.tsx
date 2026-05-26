@@ -4,7 +4,16 @@ import { Minus, Plus } from 'lucide-react'
 import { Icon } from '../lib/icons'
 import { Button } from '../components/ui/button'
 import { StatusBadge, type StatusTone } from '../components/StatusBadge'
-import { DEFAULT_RECHARGE_UNIT_CREDITS, clampRechargeStep } from './rechargeControls'
+import {
+  DEFAULT_RECHARGE_UNIT_CREDITS,
+  TEST_RECHARGE_AMOUNT_LDC,
+  TEST_RECHARGE_CREDITS,
+  TEST_RECHARGE_MONTHS,
+  isTestRechargeSelection,
+  nextRechargeCredits,
+  normalizeRechargeMonths,
+  normalizeRechargeSelection,
+} from './rechargeControls'
 
 const DEFAULT_RECHARGE_MAX_CREDITS = 20_000
 const DEFAULT_RECHARGE_MAX_MONTHS = 12
@@ -80,10 +89,25 @@ export default function RechargePanel({
   const creditsStep = config?.creditsStep ?? unitCredits
   const minMonths = config?.minMonths ?? 1
   const maxMonths = config?.maxMonths ?? DEFAULT_RECHARGE_MAX_MONTHS
-  const normalizedCredits = clampRechargeStep(credits, minCredits, maxCredits, creditsStep)
-  const normalizedMonths = Math.min(maxMonths, Math.max(minMonths, months))
+  const stepConfig = {
+    minCredits,
+    maxCredits,
+    creditsStep,
+    minMonths,
+    maxMonths,
+    testPriceEnabled: config?.testPriceEnabled ?? false,
+  }
+  const { credits: normalizedCredits, months: normalizedMonths } = normalizeRechargeSelection(
+    credits,
+    months,
+    stepConfig,
+  )
+  const isTestOffer = config?.testPriceEnabled
+    && isTestRechargeSelection(normalizedCredits, normalizedMonths)
   const amount = config
-    ? (normalizedCredits / config.unitCredits) * normalizedMonths * config.unitPriceLdc
+    ? isTestOffer
+      ? TEST_RECHARGE_AMOUNT_LDC
+      : (normalizedCredits / config.unitCredits) * normalizedMonths * config.unitPriceLdc
     : 0
   const quotaBaseCredits = config?.quotaDeltaBaseCredits && config.quotaDeltaBaseCredits > 0
     ? config.quotaDeltaBaseCredits
@@ -101,6 +125,12 @@ export default function RechargePanel({
   const currentEntitlement = dashboard?.recharge.currentEntitlementCredits
     ?? config?.currentEntitlementCredits
     ?? 0
+  const applyCreditsChange = (value: number) => {
+    onCreditsChange(value)
+    if (config?.testPriceEnabled && value === TEST_RECHARGE_CREDITS) {
+      onMonthsChange(TEST_RECHARGE_MONTHS)
+    }
+  }
 
   return (
     <section className="surface panel user-console-section user-console-recharge-section">
@@ -141,8 +171,13 @@ export default function RechargePanel({
                     <button
                       type="button"
                       className="btn btn-outline btn-sm"
-                      onClick={() => onCreditsChange(clampRechargeStep(normalizedCredits - creditsStep, minCredits, maxCredits, creditsStep))}
-                      disabled={normalizedCredits <= minCredits}
+                      onClick={() =>
+                        applyCreditsChange(nextRechargeCredits(normalizedCredits, -1, stepConfig))}
+                      disabled={
+                        normalizedCredits <= (
+                          config?.testPriceEnabled ? TEST_RECHARGE_CREDITS : minCredits
+                        )
+                      }
                       aria-label={`Decrease ${text.credits}`}
                     >
                       <Minus size={16} strokeWidth={2.2} aria-hidden="true" />
@@ -157,7 +192,8 @@ export default function RechargePanel({
                     <button
                       type="button"
                       className="btn btn-outline btn-sm"
-                      onClick={() => onCreditsChange(clampRechargeStep(normalizedCredits + creditsStep, minCredits, maxCredits, creditsStep))}
+                      onClick={() =>
+                        applyCreditsChange(nextRechargeCredits(normalizedCredits, 1, stepConfig))}
                       disabled={normalizedCredits >= maxCredits}
                       aria-label={`Increase ${text.credits}`}
                     >
@@ -171,8 +207,11 @@ export default function RechargePanel({
                     <button
                       type="button"
                       className="btn btn-outline btn-sm"
-                      onClick={() => onMonthsChange(Math.max(minMonths, normalizedMonths - 1))}
-                      disabled={normalizedMonths <= minMonths}
+                      onClick={() =>
+                        onMonthsChange(
+                          normalizeRechargeMonths(normalizedMonths - 1, normalizedCredits, stepConfig),
+                        )}
+                      disabled={isTestOffer || normalizedMonths <= minMonths}
                       aria-label={`Decrease ${text.months}`}
                     >
                       <Minus size={16} strokeWidth={2.2} aria-hidden="true" />
@@ -187,8 +226,11 @@ export default function RechargePanel({
                     <button
                       type="button"
                       className="btn btn-outline btn-sm"
-                      onClick={() => onMonthsChange(Math.min(maxMonths, normalizedMonths + 1))}
-                      disabled={normalizedMonths >= maxMonths}
+                      onClick={() =>
+                        onMonthsChange(
+                          normalizeRechargeMonths(normalizedMonths + 1, normalizedCredits, stepConfig),
+                        )}
+                      disabled={isTestOffer || normalizedMonths >= maxMonths}
                       aria-label={`Increase ${text.months}`}
                     >
                       <Plus size={16} strokeWidth={2.2} aria-hidden="true" />

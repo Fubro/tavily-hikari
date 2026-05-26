@@ -100,6 +100,12 @@ fn linuxdo_credit_recharge_price_config_enforces_normal_and_test_ranges() {
         linuxdo_credit_recharge_money_cents(1, 1, test),
         Some(100)
     );
+    assert_eq!(linuxdo_credit_recharge_money_cents(2, 1, test), None);
+    assert_eq!(linuxdo_credit_recharge_money_cents(1, 2, test), None);
+    assert_eq!(
+        linuxdo_credit_recharge_money_cents(1000, 1, test),
+        Some(10_000)
+    );
     assert_eq!(linuxdo_credit_recharge_quota_delta(1).hourly_delta, 1);
     assert_eq!(linuxdo_credit_recharge_quota_delta(1).daily_delta, 1);
 }

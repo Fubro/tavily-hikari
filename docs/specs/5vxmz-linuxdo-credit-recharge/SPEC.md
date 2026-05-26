@@ -160,7 +160,7 @@
 
 ![Normal recharge quota controls](./assets/recharge-normal-story.png)
 
-![Test-price recharge quota controls](./assets/recharge-test-price-story.png)
+![Test-price recharge quota controls in the web demo](./assets/recharge-test-price-web-demo.png)
 
 ## Related PRs
 

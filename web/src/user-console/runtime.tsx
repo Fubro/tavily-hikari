@@ -14,7 +14,7 @@ import UserConsoleHeader from '../components/UserConsoleHeader'
 import DashboardQuotaGrid from './DashboardQuotaGrid'
 import TokenListActions from './TokenListActions'
 import RechargePanel from './RechargePanel'
-import { DEFAULT_RECHARGE_UNIT_CREDITS, clampRechargeStep } from './rechargeControls'
+import { DEFAULT_RECHARGE_UNIT_CREDITS, normalizeRechargeSelection } from './rechargeControls'
 import TokenResetDialogs from './TokenResetDialogs'
 import {
   createBrowserTodayWindow,
@@ -1394,8 +1394,7 @@ export default function UserConsole(): JSX.Element {
       if (nextRechargeConfig) {
         setRechargeCredits((current) => {
           const next = current > 0 && current !== DEFAULT_RECHARGE_UNIT_CREDITS ? current : nextRechargeConfig.defaultCredits
-          const { minCredits, maxCredits, creditsStep } = nextRechargeConfig
-          return clampRechargeStep(next, minCredits, maxCredits, creditsStep)
+          return next
         })
         setRechargeMonths((current) =>
           Math.min(nextRechargeConfig.maxMonths, Math.max(nextRechargeConfig.minMonths, current)))
@@ -2044,13 +2043,11 @@ export default function UserConsole(): JSX.Element {
 
   const handleRechargeSubmit = useCallback(async () => {
     if (!rechargeConfig?.enabled || rechargeBusy) return
+    const rechargeSelection = normalizeRechargeSelection(rechargeCredits, rechargeMonths, rechargeConfig)
     setRechargeBusy(true)
     setRechargeError(null)
     try {
-      const result = await createUserRechargeOrder({
-        credits: rechargeCredits,
-        months: rechargeMonths,
-      })
+      const result = await createUserRechargeOrder(rechargeSelection)
       window.location.href = result.paymentUrl
     } catch (err) {
       setRechargeError(formatTemplate(text.recharge.createFailed, {

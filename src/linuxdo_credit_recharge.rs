@@ -10,9 +10,9 @@ pub const LINUXDO_CREDIT_RECHARGE_MAX_MONTHS: i64 = 12;
 pub const LINUXDO_CREDIT_RECHARGE_MIN_CREDITS: i64 = 1000;
 pub const LINUXDO_CREDIT_RECHARGE_MAX_CREDITS: i64 = 20_000;
 pub const LINUXDO_CREDIT_RECHARGE_DEFAULT_CREDITS: i64 = 1000;
-pub const LINUXDO_CREDIT_RECHARGE_TEST_UNIT_CREDITS: i64 = 1;
-pub const LINUXDO_CREDIT_RECHARGE_TEST_UNIT_PRICE_CENTS: i64 = 100;
-pub const LINUXDO_CREDIT_RECHARGE_TEST_MIN_CREDITS: i64 = 1;
+pub const LINUXDO_CREDIT_RECHARGE_TEST_CREDITS: i64 = 1;
+pub const LINUXDO_CREDIT_RECHARGE_TEST_MONTHS: i64 = 1;
+pub const LINUXDO_CREDIT_RECHARGE_TEST_PRICE_CENTS: i64 = 100;
 pub const LINUXDO_CREDIT_RECHARGE_HOURLY_PER_1000_CREDITS: i64 = 100;
 pub const LINUXDO_CREDIT_RECHARGE_DAILY_PER_1000_CREDITS: i64 = 500;
 
@@ -77,6 +77,7 @@ pub struct LinuxDoCreditRechargePriceConfig {
     pub min_months: i64,
     pub max_months: i64,
     pub default_credits: i64,
+    pub test_price_enabled: bool,
 }
 
 impl LinuxDoCreditRechargePriceConfig {
@@ -90,19 +91,21 @@ impl LinuxDoCreditRechargePriceConfig {
             min_months: LINUXDO_CREDIT_RECHARGE_MIN_MONTHS,
             max_months: LINUXDO_CREDIT_RECHARGE_MAX_MONTHS,
             default_credits: LINUXDO_CREDIT_RECHARGE_DEFAULT_CREDITS,
+            test_price_enabled: false,
         }
     }
 
     pub fn test_price() -> Self {
         Self {
-            unit_credits: LINUXDO_CREDIT_RECHARGE_TEST_UNIT_CREDITS,
-            unit_price_cents: LINUXDO_CREDIT_RECHARGE_TEST_UNIT_PRICE_CENTS,
-            min_credits: LINUXDO_CREDIT_RECHARGE_TEST_MIN_CREDITS,
+            unit_credits: LINUXDO_CREDIT_RECHARGE_UNIT_CREDITS,
+            unit_price_cents: LINUXDO_CREDIT_RECHARGE_UNIT_PRICE_CENTS,
+            min_credits: LINUXDO_CREDIT_RECHARGE_MIN_CREDITS,
             max_credits: LINUXDO_CREDIT_RECHARGE_MAX_CREDITS,
-            credits_step: LINUXDO_CREDIT_RECHARGE_TEST_UNIT_CREDITS,
+            credits_step: LINUXDO_CREDIT_RECHARGE_UNIT_CREDITS,
             min_months: LINUXDO_CREDIT_RECHARGE_MIN_MONTHS,
             max_months: LINUXDO_CREDIT_RECHARGE_MAX_MONTHS,
-            default_credits: LINUXDO_CREDIT_RECHARGE_TEST_MIN_CREDITS,
+            default_credits: LINUXDO_CREDIT_RECHARGE_TEST_CREDITS,
+            test_price_enabled: true,
         }
     }
 }
@@ -125,6 +128,12 @@ pub fn linuxdo_credit_recharge_money_cents(
     months: i64,
     price: LinuxDoCreditRechargePriceConfig,
 ) -> Option<i64> {
+    if price.test_price_enabled
+        && credits == LINUXDO_CREDIT_RECHARGE_TEST_CREDITS
+        && months == LINUXDO_CREDIT_RECHARGE_TEST_MONTHS
+    {
+        return Some(LINUXDO_CREDIT_RECHARGE_TEST_PRICE_CENTS);
+    }
     if credits <= 0
         || credits < price.min_credits
         || credits > price.max_credits

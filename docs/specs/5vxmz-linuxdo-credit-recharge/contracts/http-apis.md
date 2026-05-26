@@ -5,19 +5,20 @@
 - Auth: `hikari_user_session`
 - Response `200`:
   - `enabled`: boolean
-  - `unitCredits`: `1000` in normal mode, `1` when test pricing is enabled
-  - `unitPriceLdc`: `100` in normal mode, `1` when test pricing is enabled
-  - `minCredits`: `1000` in normal mode, `1` when test pricing is enabled
+  - `unitCredits`: `1000`
+  - `unitPriceLdc`: `100`
+  - `minCredits`: `1000`
   - `maxCredits`: `20000`
-  - `creditsStep`: `1000` in normal mode, `1` when test pricing is enabled
-  - `defaultCredits`: initial UI value for the current pricing mode
+  - `creditsStep`: `1000`
+  - `defaultCredits`: initial UI value; `1` only when the test-price offer is enabled
   - `minMonths`: `1`
   - `maxMonths`: `12`
   - `quotaDeltaBaseCredits`: quota increment calculation base, currently `1000`
   - `hourlyDeltaPerQuotaUnit`: quota-hour increment for one `quotaDeltaBaseCredits`
   - `dailyDeltaPerQuotaUnit`: quota-day increment for one `quotaDeltaBaseCredits`
   - `monthlyDeltaPerQuotaUnit`: quota-month increment for one `quotaDeltaBaseCredits`
-  - `testPriceEnabled`: boolean
+  - `testPriceEnabled`: boolean; when enabled, this only adds the extra `1 credit × 1 month`
+    offer for `1 LDC`
   - `currentMonthStart`: Unix timestamp for current server-local month start in UTC
   - `currentEntitlementCredits`: current month purchased credits
   - `effectiveUntilMonthStart`: latest entitled month start, or `null`
@@ -40,8 +41,9 @@
 - Request JSON:
   - `credits`: positive integer, multiple of `1000`
     - normal mode: `1000..=20000`, step `1000`
-    - test pricing: `1..=20000`, step `1`
+    - test pricing: additionally allows exactly `1` credit when `months` is exactly `1`
   - `months`: integer in `1..=12`
+    - test pricing does not allow `1` credit with more than one month
 - Response `200`:
   - `order`: `RechargeOrder`
   - `paymentUrl`: Linux.do Credit payment URL
