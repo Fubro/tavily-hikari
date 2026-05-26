@@ -55,6 +55,13 @@ function isClosed(item: Announcement, closedRecords: Record<string, number>): bo
   return closedRecords[item.id] != null
 }
 
+function announcementHistoryTime(item: Announcement): number | null {
+  if (item.status === 'archived') {
+    return item.archivedAt ?? item.publishedAt ?? item.updatedAt
+  }
+  return item.publishedAt ?? item.updatedAt
+}
+
 export default function UserConsoleAnnouncements({
   language,
   text,
@@ -141,7 +148,7 @@ export default function UserConsoleAnnouncements({
                       <span>
                         {item.displayKind === 'ticker' ? strings.ticker : strings.modal}
                         {' · '}
-                        {formatAnnouncementTime(item.publishedAt ?? item.archivedAt ?? item.updatedAt, language)}
+                        {formatAnnouncementTime(announcementHistoryTime(item), language)}
                       </span>
                     </div>
                     <StatusBadge tone={item.status === 'published' ? 'success' : 'neutral'}>

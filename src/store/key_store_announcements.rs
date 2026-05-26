@@ -238,6 +238,48 @@ impl KeyStore {
             }
         }
 
+        if existing.status == ANNOUNCEMENT_STATUS_ARCHIVED {
+            loop {
+                let new_id = Self::new_announcement_id();
+                let res = sqlx::query(
+                    r#"
+                    INSERT INTO announcements (
+                        id, title, body, display_kind, status,
+                        created_at, updated_at, published_at, archived_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, NULL, NULL)
+                    "#,
+                )
+                .bind(&new_id)
+                .bind(&input.title)
+                .bind(&input.body)
+                .bind(&input.display_kind)
+                .bind(ANNOUNCEMENT_STATUS_DRAFT)
+                .bind(now)
+                .bind(now)
+                .execute(&mut *tx)
+                .await;
+
+                match res {
+                    Ok(_) => {
+                        tx.commit().await?;
+                        return Ok(Some(Announcement {
+                            id: new_id,
+                            title: input.title,
+                            body: input.body,
+                            display_kind: input.display_kind,
+                            status: ANNOUNCEMENT_STATUS_DRAFT.to_string(),
+                            created_at: now,
+                            updated_at: now,
+                            published_at: None,
+                            archived_at: None,
+                        }));
+                    }
+                    Err(sqlx::Error::Database(db_err)) if db_err.is_unique_violation() => continue,
+                    Err(err) => return Err(ProxyError::Database(err)),
+                }
+            }
+        }
+
         sqlx::query(
             r#"UPDATE announcements
                   SET title = ?, body = ?, display_kind = ?, updated_at = ?
@@ -267,26 +309,96 @@ impl KeyStore {
 
     pub(crate) async fn publish_announcement(&self, id: &str) -> Result<Option<Announcement>, ProxyError> {
         let now = Utc::now().timestamp();
-        let updated = sqlx::query(
-            r#"UPDATE announcements
-                  SET status = ?, updated_at = ?, published_at = COALESCE(published_at, ?), archived_at = NULL
-                WHERE id = ?
-                  AND status IN (?, ?)"#,
+        let mut tx = self.pool.begin().await?;
+        let existing = sqlx::query(
+            r#"
+            SELECT id, title, body, display_kind, status, created_at, updated_at, published_at, archived_at
+              FROM announcements
+             WHERE id = ?
+            "#,
         )
-        .bind(ANNOUNCEMENT_STATUS_PUBLISHED)
-        .bind(now)
-        .bind(now)
         .bind(id)
-        .bind(ANNOUNCEMENT_STATUS_DRAFT)
-        .bind(ANNOUNCEMENT_STATUS_ARCHIVED)
-        .execute(&self.pool)
-        .await?
-        .rows_affected();
+        .try_map(announcement_from_row)
+        .fetch_optional(&mut *tx)
+        .await?;
 
-        if updated == 0 {
-            return self.get_announcement(id).await;
+        let Some(existing) = existing else {
+            tx.rollback().await?;
+            return Ok(None);
+        };
+
+        if existing.status == ANNOUNCEMENT_STATUS_PUBLISHED {
+            tx.commit().await?;
+            return Ok(Some(existing));
         }
-        self.get_announcement(id).await
+
+        if existing.status == ANNOUNCEMENT_STATUS_DRAFT {
+            let published_at = existing.published_at.or(Some(now));
+            sqlx::query(
+                r#"UPDATE announcements
+                      SET status = ?, updated_at = ?, published_at = ?, archived_at = NULL
+                    WHERE id = ?"#,
+            )
+            .bind(ANNOUNCEMENT_STATUS_PUBLISHED)
+            .bind(now)
+            .bind(published_at)
+            .bind(id)
+            .execute(&mut *tx)
+            .await?;
+            tx.commit().await?;
+            return Ok(Some(Announcement {
+                id: existing.id,
+                title: existing.title,
+                body: existing.body,
+                display_kind: existing.display_kind,
+                status: ANNOUNCEMENT_STATUS_PUBLISHED.to_string(),
+                created_at: existing.created_at,
+                updated_at: now,
+                published_at,
+                archived_at: None,
+            }));
+        }
+
+        loop {
+            let new_id = Self::new_announcement_id();
+            let res = sqlx::query(
+                r#"
+                INSERT INTO announcements (
+                    id, title, body, display_kind, status,
+                    created_at, updated_at, published_at, archived_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL)
+                "#,
+            )
+            .bind(&new_id)
+            .bind(&existing.title)
+            .bind(&existing.body)
+            .bind(&existing.display_kind)
+            .bind(ANNOUNCEMENT_STATUS_PUBLISHED)
+            .bind(now)
+            .bind(now)
+            .bind(now)
+            .execute(&mut *tx)
+            .await;
+
+            match res {
+                Ok(_) => {
+                    tx.commit().await?;
+                    return Ok(Some(Announcement {
+                        id: new_id,
+                        title: existing.title,
+                        body: existing.body,
+                        display_kind: existing.display_kind,
+                        status: ANNOUNCEMENT_STATUS_PUBLISHED.to_string(),
+                        created_at: now,
+                        updated_at: now,
+                        published_at: Some(now),
+                        archived_at: None,
+                    }));
+                }
+                Err(sqlx::Error::Database(db_err)) if db_err.is_unique_violation() => continue,
+                Err(err) => return Err(ProxyError::Database(err)),
+            }
+        }
     }
 
     pub(crate) async fn archive_announcement(&self, id: &str) -> Result<Option<Announcement>, ProxyError> {
@@ -357,10 +469,17 @@ impl KeyStore {
             SELECT id, title, body, display_kind, status, created_at, updated_at, published_at, archived_at
               FROM announcements
              WHERE status IN (?, ?)
-             ORDER BY COALESCE(published_at, archived_at, updated_at, created_at) DESC, id DESC
+               AND (status != ? OR published_at IS NOT NULL)
+             ORDER BY
+               CASE
+                 WHEN status = 'archived' THEN COALESCE(archived_at, published_at, updated_at, created_at)
+                 ELSE COALESCE(published_at, updated_at, created_at)
+               END DESC,
+               id DESC
             "#,
         )
         .bind(ANNOUNCEMENT_STATUS_PUBLISHED)
+        .bind(ANNOUNCEMENT_STATUS_ARCHIVED)
         .bind(ANNOUNCEMENT_STATUS_ARCHIVED)
         .try_map(announcement_from_row)
         .fetch_all(&self.pool)

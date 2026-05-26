@@ -10,7 +10,7 @@
 
 ## Coverage / rollout summary
 
-- Backend: SQLite announcement persistence, admin CRUD lifecycle APIs, and user active/history APIs are implemented.
+- Backend: SQLite announcement persistence, admin CRUD lifecycle APIs, archive edit/republish ID handling, and user active/history APIs are implemented.
 - Frontend: admin announcement management, user console modal/ticker/history UI, local close memory, and i18n copy are implemented.
 - Storybook: admin default/empty/mobile coverage and user console active/history announcement states are implemented.
 - Visual evidence: stored in `./assets/` and referenced from `./SPEC.md`.

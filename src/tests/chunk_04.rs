@@ -2549,6 +2549,90 @@ async fn published_announcement_update_archives_previous_version() {
     assert!(history.iter().any(|item| item.id == revised.id));
     assert!(history.iter().any(|item| item.id == published.id));
 
+    let draft_only = store
+        .create_announcement(AnnouncementMutation {
+            title: "Draft-only notice".to_string(),
+            body: "Never published".to_string(),
+            display_kind: ANNOUNCEMENT_DISPLAY_TICKER.to_string(),
+        })
+        .await
+        .expect("create draft-only announcement");
+    let archived_draft = store
+        .archive_announcement(&draft_only.id)
+        .await
+        .expect("archive draft-only announcement")
+        .expect("archived draft exists");
+    assert_eq!(archived_draft.status, ANNOUNCEMENT_STATUS_ARCHIVED);
+
+    let history_after_draft_archive = store
+        .list_user_announcement_history()
+        .await
+        .expect("list announcement history after draft archive");
+    assert!(!history_after_draft_archive
+        .iter()
+        .any(|item| item.id == archived_draft.id));
+
+    let archived_revised = store
+        .archive_announcement(&revised.id)
+        .await
+        .expect("archive revised announcement")
+        .expect("archived revised announcement exists");
+    assert_eq!(archived_revised.status, ANNOUNCEMENT_STATUS_ARCHIVED);
+
+    let edited_archived = store
+        .update_announcement(
+            &archived_revised.id,
+            AnnouncementMutation {
+                title: "Edited archived notice".to_string(),
+                body: "Edited archived body".to_string(),
+                display_kind: ANNOUNCEMENT_DISPLAY_TICKER.to_string(),
+            },
+        )
+        .await
+        .expect("edit archived announcement")
+        .expect("edited archived announcement creates draft");
+    assert_ne!(edited_archived.id, archived_revised.id);
+    assert_eq!(edited_archived.status, ANNOUNCEMENT_STATUS_DRAFT);
+
+    let archived_revised_after_edit = store
+        .get_announcement(&archived_revised.id)
+        .await
+        .expect("load archived revised after edit")
+        .expect("archived revised still exists after edit");
+    assert_eq!(archived_revised_after_edit.status, ANNOUNCEMENT_STATUS_ARCHIVED);
+    assert_eq!(archived_revised_after_edit.title, archived_revised.title);
+
+    let history_after_archived_edit = store
+        .list_user_announcement_history()
+        .await
+        .expect("list announcement history after archived edit");
+    assert!(!history_after_archived_edit
+        .iter()
+        .any(|item| item.id == edited_archived.id));
+
+    let republished = store
+        .publish_announcement(&archived_revised.id)
+        .await
+        .expect("republish archived announcement")
+        .expect("republished announcement exists");
+    assert_ne!(republished.id, archived_revised.id);
+    assert_eq!(republished.status, ANNOUNCEMENT_STATUS_PUBLISHED);
+    assert_eq!(republished.title, archived_revised.title);
+
+    let archived_revised_after_republish = store
+        .get_announcement(&archived_revised.id)
+        .await
+        .expect("load archived revised after republish")
+        .expect("archived revised still exists");
+    assert_eq!(archived_revised_after_republish.status, ANNOUNCEMENT_STATUS_ARCHIVED);
+
+    let active_after_republish = store
+        .list_user_active_announcements()
+        .await
+        .expect("list active after republish");
+    assert_eq!(active_after_republish.len(), 1);
+    assert_eq!(active_after_republish[0].id, republished.id);
+
     let _ = std::fs::remove_file(db_path);
 }
 
