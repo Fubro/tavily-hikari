@@ -164,6 +164,8 @@
 
 ![Reduced hourly and daily recharge deltas in the web demo](./assets/recharge-reduced-quota-web-demo.png)
 
+![Recharge orders empty state fills the parent column](./assets/recharge-orders-fill-web-demo.png)
+
 ## Related PRs
 
 - None
