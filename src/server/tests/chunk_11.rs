@@ -2785,8 +2785,8 @@
         assert_eq!(system_settings["requestRateLimit"].as_i64(), Some(request_rate_limit()));
         assert_eq!(system_settings["rebalanceMcpEnabled"].as_bool(), Some(false));
         assert_eq!(system_settings["rebalanceMcpSessionPercent"].as_i64(), Some(100));
-        assert_eq!(system_settings["rechargeFeatureEnabled"].as_bool(), Some(true));
-        assert_eq!(system_settings["rechargeUserEnabled"].as_bool(), Some(true));
+        assert_eq!(system_settings["rechargeFeatureEnabled"].as_bool(), Some(false));
+        assert_eq!(system_settings["rechargeUserEnabled"].as_bool(), Some(false));
         assert_eq!(
             system_settings["userBlockedKeyBaseLimit"].as_i64(),
             Some(tavily_hikari::USER_MONTHLY_BROKEN_LIMIT_DEFAULT)
