@@ -270,6 +270,18 @@
   overflow-wrap: anywhere;
 }
 
+.user-console-recharge-preview-note {
+  margin: 0;
+  border-radius: 12px;
+  border: 1px solid hsl(var(--warning) / 0.28);
+  background: hsl(var(--warning) / 0.12);
+  color: hsl(var(--foreground));
+  font-size: 0.86rem;
+  font-weight: 700;
+  line-height: 1.5;
+  padding: 9px 11px;
+}
+
 .user-console-recharge-preview-table {
   display: grid;
   gap: 6px;
@@ -372,7 +384,6 @@
     flex-direction: column;
   }
 
-  .user-console-recharge-preview-summary,
   .user-console-recharge-preview-row {
     grid-template-columns: 1fr;
   }

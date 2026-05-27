@@ -55,6 +55,7 @@ interface RechargePanelText {
   preview: string
   previewTitle: string
   previewDescription: string
+  previewScopeNote: string
   previewMonth: string
   previewCurrentQuota: string
   previewDelta: string
@@ -480,6 +481,7 @@ function RechargePreviewBody({
           <strong>{formatRechargeMoney(amount)} LDC</strong>
         </div>
       </div>
+      <p className="user-console-recharge-preview-note">{text.previewScopeNote}</p>
 
       <div className="user-console-recharge-preview-table" role="table">
         <div className="user-console-recharge-preview-row user-console-recharge-preview-head" role="row">
