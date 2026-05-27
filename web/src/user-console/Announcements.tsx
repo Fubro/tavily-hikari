@@ -5,7 +5,6 @@ import { Button } from '../components/ui/button'
 import {
   Dialog,
   DialogContent,
-  DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
@@ -112,12 +111,9 @@ export default function UserConsoleAnnouncements({
         }}
       >
         {modalAnnouncement ? (
-          <DialogContent className="user-console-announcement-dialog">
+          <DialogContent className="user-console-announcement-dialog" aria-describedby={undefined}>
             <DialogHeader>
               <DialogTitle>{modalAnnouncement.title}</DialogTitle>
-              <DialogDescription>
-                {strings.modalDescription}
-              </DialogDescription>
             </DialogHeader>
             <MarkdownContent
               content={modalAnnouncement.body}

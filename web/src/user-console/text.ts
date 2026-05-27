@@ -23,7 +23,6 @@ export const EN = {
     },
   },
   announcements: {
-    modalDescription: 'Announcement from the service operator.',
     modalAcknowledge: 'Got it',
     tickerClose: 'Dismiss announcement',
     historyTitle: 'Announcements',
@@ -260,7 +259,6 @@ export const ZH = {
     },
   },
   announcements: {
-    modalDescription: '服务管理员发布的公告。',
     modalAcknowledge: '知道了',
     tickerClose: '关闭公告',
     historyTitle: '公告',
