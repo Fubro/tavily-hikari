@@ -199,6 +199,31 @@ export const CreateAnnouncement: Story = {
     if (canvasElement.querySelector('.markdown-editor-shell') == null) {
       throw new Error('Expected Markdown editor to render.')
     }
+    if (canvasElement.querySelector('.markdown-editor-storybook-toolbar') != null) {
+      throw new Error('Expected create editor to avoid persistent toolbar chrome.')
+    }
+    if (canvasElement.querySelector('.announcements-preview') == null) {
+      throw new Error('Expected user-side announcement preview to render.')
+    }
+    if (!canvasElement.textContent?.includes('保存并发布')) {
+      throw new Error('Expected create editor to expose save-and-publish action.')
+    }
+  },
+}
+
+export const CreateAnnouncementMobile: Story = {
+  parameters: {
+    viewport: { defaultViewport: '0390-device-iphone-14' },
+  },
+  render: () => <AnnouncementsModuleStory initialMode="create" />,
+  play: async ({ canvasElement }) => {
+    await new Promise((resolve) => window.setTimeout(resolve, 180))
+    if (canvasElement.querySelector('.announcements-editor-actions') == null) {
+      throw new Error('Expected mobile create view to render editor actions.')
+    }
+    if (canvasElement.querySelector('.announcements-preview') == null) {
+      throw new Error('Expected mobile create view to render preview.')
+    }
   },
 }
 

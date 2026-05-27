@@ -17,11 +17,15 @@
   display: grid;
   gap: 14px;
   padding: 16px;
-  max-width: 760px;
+  max-width: 1040px;
   border-radius: 22px;
   border: 1px solid hsl(var(--border) / 0.72);
   background: hsl(var(--muted) / 0.32);
   box-shadow: var(--shadow-clay-card);
+}
+
+.announcements-editor-actions {
+  display: flex;
 }
 
 .announcements-editor-header,
@@ -63,13 +67,20 @@
   font-weight: 700;
 }
 
+.announcements-editor-body-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.2fr) minmax(280px, 0.8fr);
+  gap: 14px;
+  align-items: start;
+}
+
 .announcements-field textarea {
   resize: vertical;
 }
 
 .markdown-editor-shell {
   overflow: hidden;
-  min-height: 220px;
+  min-height: 190px;
   border: 1px solid hsl(var(--border) / 0.82);
   border-radius: 18px;
   background: hsl(var(--background) / 0.86);
@@ -81,12 +92,13 @@
 }
 
 .markdown-editor-shell .ProseMirror {
-  min-height: 220px;
+  min-height: 190px;
   padding: 16px 18px;
   color: hsl(var(--foreground));
   font-family: var(--font-sans);
   font-size: 0.95rem;
   line-height: 1.62;
+  white-space: pre-wrap;
   outline: none;
 }
 
@@ -96,28 +108,6 @@
 
 .markdown-editor-shell--storybook {
   display: grid;
-  grid-template-rows: auto 1fr;
-}
-
-.markdown-editor-storybook-toolbar {
-  display: flex;
-  gap: 6px;
-  padding: 8px 10px;
-  border-bottom: 1px solid hsl(var(--border) / 0.72);
-  background: hsl(var(--muted) / 0.24);
-}
-
-.markdown-editor-storybook-toolbar span {
-  min-width: 30px;
-  padding: 5px 7px;
-  border: 1px solid hsl(var(--border) / 0.68);
-  border-radius: 10px;
-  background: hsl(var(--background) / 0.72);
-  color: hsl(var(--muted-foreground));
-  font-size: 0.8rem;
-  font-weight: 800;
-  line-height: 1;
-  text-align: center;
 }
 
 .markdown-editor-storybook-input {
@@ -150,6 +140,85 @@
   border-color: hsl(var(--border) / 0.72);
   background: hsl(var(--card) / 0.96);
   color: hsl(var(--foreground));
+}
+
+.announcements-preview {
+  display: grid;
+  gap: 10px;
+}
+
+.announcements-preview-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  color: hsl(var(--muted-foreground));
+  font-size: 0.86rem;
+  font-weight: 800;
+}
+
+.announcements-preview-ticker,
+.announcements-preview-modal {
+  border: 1px solid hsl(var(--border) / 0.72);
+  background: hsl(var(--background) / 0.8);
+  box-shadow: var(--shadow-clay-pressed);
+}
+
+.announcements-preview-ticker {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  min-height: 74px;
+  padding: 12px;
+  border-radius: 18px;
+}
+
+.announcements-preview-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 34px;
+  height: 34px;
+  border-radius: 999px;
+  background: hsl(var(--primary) / 0.12);
+  color: hsl(var(--primary));
+}
+
+.announcements-preview-copy,
+.announcements-preview-body {
+  min-width: 0;
+  color: hsl(var(--foreground));
+  font-size: 0.9rem;
+}
+
+.announcements-preview-copy {
+  display: grid;
+  gap: 4px;
+}
+
+.announcements-preview-copy strong,
+.announcements-preview-modal-header strong {
+  color: hsl(var(--foreground));
+}
+
+.announcements-preview-modal {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+  border-radius: 20px;
+}
+
+.announcements-preview-modal-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: hsl(var(--primary));
+}
+
+.announcements-preview-modal-actions {
+  display: flex;
+  justify-content: flex-end;
 }
 
 .announcements-editor-actions,
@@ -247,5 +316,40 @@
 
   .markdown-editor-shell .ProseMirror {
     padding: 14px;
+  }
+
+  .announcements-editor {
+    max-width: none;
+    padding: 14px;
+  }
+
+  .markdown-editor-shell,
+  .markdown-editor-shell .ProseMirror {
+    min-height: 180px;
+  }
+
+  .announcements-editor-body-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .announcements-editor-actions {
+    position: sticky;
+    bottom: 10px;
+    z-index: 90;
+    display: grid;
+    grid-template-columns: 1fr;
+    padding: 10px;
+    border: 1px solid hsl(var(--border) / 0.7);
+    border-radius: 20px;
+    background: hsl(var(--card));
+    box-shadow: var(--shadow-clay-card);
+  }
+
+  .announcements-editor-actions button {
+    width: 100%;
+  }
+
+  .announcements-preview-modal {
+    max-width: none;
   }
 }

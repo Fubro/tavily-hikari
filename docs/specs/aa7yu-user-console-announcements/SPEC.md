@@ -138,10 +138,17 @@
 
 - source_type: mock_ui
   story_id_or_title: `http://127.0.0.1:62400/admin/announcements`
-  state: admin announcement create view with Milkdown editor
-  evidence_note: 新建公告页面使用真实 Milkdown Crepe 编辑器加载正文区域；块插入菜单默认不展开，发布前编辑路径保留原 Markdown 字符串。
+  state: admin announcement create view with polished Milkdown editor
+  evidence_note: 新建公告页面使用真实 Milkdown Crepe 编辑器；空状态不暴露残缺工具条，正文与用户侧预览双栏展示，保存草稿和保存并发布操作同屏可达。
   image:
-  ![Admin announcements Milkdown editor](./assets/admin-announcements-milkdown-editor.png)
+  ![Admin announcements polished editor](./assets/admin-announcements-editor-polished.png)
+
+- source_type: mock_ui
+  story_id_or_title: `http://127.0.0.1:62400/admin/announcements`
+  state: mobile admin announcement create view with sticky actions
+  evidence_note: 移动端创建公告时正文、用户侧预览和保存动作保持单栏阅读，保存草稿与保存并发布作为底部 sticky 操作可达。
+  image:
+  ![Admin announcements polished editor mobile](./assets/admin-announcements-editor-mobile-polished.png)
 
 ## Related PRs
 

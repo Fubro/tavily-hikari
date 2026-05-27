@@ -5,17 +5,23 @@ import '@milkdown/crepe/theme/frame.css'
 import { Textarea } from './ui/textarea'
 
 interface MarkdownEditorProps {
+  id?: string
+  name?: string
   value: string
   placeholder: string
   ariaLabelledBy?: string
+  ariaDescribedBy?: string
   disabled?: boolean
   onChange: (value: string) => void
 }
 
 export default function MarkdownEditor({
+  id,
+  name,
   value,
   placeholder,
   ariaLabelledBy,
+  ariaDescribedBy,
   disabled = false,
   onChange,
 }: MarkdownEditorProps): JSX.Element {
@@ -42,10 +48,10 @@ export default function MarkdownEditor({
       features: {
         [CrepeFeature.Cursor]: true,
         [CrepeFeature.BlockEdit]: false,
-        [CrepeFeature.Toolbar]: true,
+        [CrepeFeature.Toolbar]: false,
         [CrepeFeature.Placeholder]: true,
         [CrepeFeature.ListItem]: true,
-        [CrepeFeature.LinkTooltip]: true,
+        [CrepeFeature.LinkTooltip]: false,
         [CrepeFeature.Table]: true,
         [CrepeFeature.CodeMirror]: true,
         [CrepeFeature.ImageBlock]: false,
@@ -92,8 +98,11 @@ export default function MarkdownEditor({
   if (fallback) {
     return (
       <Textarea
+        id={id}
+        name={name}
         value={value}
         aria-labelledby={ariaLabelledBy}
+        aria-describedby={ariaDescribedBy}
         placeholder={placeholder}
         rows={7}
         maxLength={4000}
@@ -104,7 +113,12 @@ export default function MarkdownEditor({
   }
 
   return (
-    <div className="markdown-editor-shell" aria-labelledby={ariaLabelledBy}>
+    <div
+      id={id}
+      className="markdown-editor-shell"
+      aria-labelledby={ariaLabelledBy}
+      aria-describedby={ariaDescribedBy}
+    >
       <div ref={rootRef} />
     </div>
   )

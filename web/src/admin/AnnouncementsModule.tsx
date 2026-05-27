@@ -34,7 +34,9 @@ interface AnnouncementDraft {
 
 type AnnouncementEditorMode =
   | { kind: 'create' }
-  | { kind: 'edit'; id: string }
+  | { kind: 'edit'; id: string; status: AnnouncementStatus }
+
+type AnnouncementSubmitAction = 'draft' | 'publish'
 
 type AnnouncementCopy = ReturnType<typeof copy>
 
@@ -62,17 +64,27 @@ function copy(language: Language) {
         backToList: '返回列表',
         formTitleNew: '新建公告',
         formTitleEdit: '编辑公告',
-        formDescription: '已发布公告保存后会归档旧公告，并生成新公告 ID 重新提醒用户。',
+        formDescriptionNew: '编写公告正文，选择展示方式后可保存草稿或直接发布。',
+        formDescriptionEdit: '保存修改会更新草稿；发布会让用户控制台显示最新内容。',
+        formDescriptionPublished: '保存已发布公告会归档旧公告，并生成新公告 ID 重新提醒用户。',
+        formDescriptionArchived: '编辑归档公告会保留历史记录，并生成新的草稿或发布项。',
         titleLabel: '标题',
         titlePlaceholder: '例如：维护窗口通知',
         bodyLabel: '正文',
         bodyPlaceholder: '写给用户看的公告内容。',
+        bodyA11yHint: '正文支持 Markdown，保存时保留 Markdown 原文。',
         displayLabel: '展示方式',
         modal: '弹窗',
         ticker: '滚动',
+        previewTitle: '用户侧预览',
+        previewEmpty: '填写标题和正文后显示预览。',
+        previewAcknowledge: '知道了',
         saveDraft: '保存草稿',
         saveChanges: '保存修改',
+        saveAndPublish: '保存并发布',
+        saveAndPublishVersion: '保存并发布新版本',
         saving: '保存中…',
+        publishing: '发布中…',
         cancel: '取消',
         status: {
           draft: '草稿',
@@ -94,6 +106,7 @@ function copy(language: Language) {
         actionBusy: '处理中…',
         validation: '标题和正文不能为空。',
         saved: '公告已保存。',
+        savedAndPublished: '公告已保存并发布。',
         published: '公告已发布。',
         archived: '公告已归档。',
       }
@@ -111,17 +124,27 @@ function copy(language: Language) {
         backToList: 'Back to list',
         formTitleNew: 'New announcement',
         formTitleEdit: 'Edit announcement',
-        formDescription: 'Saving a published announcement archives the old item and creates a new ID so users are reminded again.',
+        formDescriptionNew: 'Write the announcement body, choose a display mode, then save a draft or publish directly.',
+        formDescriptionEdit: 'Saving updates the draft; publishing makes the latest content visible in the user console.',
+        formDescriptionPublished: 'Saving a published announcement archives the old item and creates a new ID so users are reminded again.',
+        formDescriptionArchived: 'Editing an archived announcement keeps the history entry and creates a new draft or published item.',
         titleLabel: 'Title',
         titlePlaceholder: 'For example: maintenance window',
         bodyLabel: 'Body',
         bodyPlaceholder: 'Write the user-facing announcement body.',
+        bodyA11yHint: 'The body supports Markdown and is saved as the original Markdown text.',
         displayLabel: 'Display',
         modal: 'Modal',
         ticker: 'Ticker',
+        previewTitle: 'User preview',
+        previewEmpty: 'Add a title and body to show the preview.',
+        previewAcknowledge: 'Got it',
         saveDraft: 'Save draft',
         saveChanges: 'Save changes',
+        saveAndPublish: 'Save and publish',
+        saveAndPublishVersion: 'Save and publish version',
         saving: 'Saving…',
+        publishing: 'Publishing…',
         cancel: 'Cancel',
         status: {
           draft: 'Draft',
@@ -143,6 +166,7 @@ function copy(language: Language) {
         actionBusy: 'Working…',
         validation: 'Title and body are required.',
         saved: 'Announcement saved.',
+        savedAndPublished: 'Announcement saved and published.',
         published: 'Announcement published.',
         archived: 'Announcement archived.',
       }
@@ -195,10 +219,66 @@ function toPayload(draft: AnnouncementDraft): AnnouncementMutationPayload {
   }
 }
 
+function editorDescription(mode: AnnouncementEditorMode, strings: AnnouncementCopy): string {
+  if (mode.kind === 'create') return strings.formDescriptionNew
+  if (mode.status === 'published') return strings.formDescriptionPublished
+  if (mode.status === 'archived') return strings.formDescriptionArchived
+  return strings.formDescriptionEdit
+}
+
+function AnnouncementDisplayPreview({
+  draft,
+  strings,
+}: {
+  draft: AnnouncementDraft
+  strings: AnnouncementCopy
+}): JSX.Element {
+  const title = draft.title.trim()
+  const body = draft.body.trim()
+  const hasContent = title.length > 0 || body.length > 0
+  const previewTitle = title || strings.titlePlaceholder
+  const previewBody = body || strings.previewEmpty
+
+  return (
+    <section className="announcements-preview" aria-labelledby="announcement-preview-label">
+      <div className="announcements-preview-header">
+        <span id="announcement-preview-label">{strings.previewTitle}</span>
+        <StatusBadge tone="neutral">
+          {displayLabel(draft.displayKind, strings)}
+        </StatusBadge>
+      </div>
+      {draft.displayKind === 'ticker' ? (
+        <div className="announcements-preview-ticker" aria-label={strings.ticker}>
+          <div className="announcements-preview-icon" aria-hidden="true">
+            <Icon icon="mdi:bullhorn-outline" width={18} height={18} />
+          </div>
+          <div className="announcements-preview-copy">
+            <strong>{previewTitle}</strong>
+            <MarkdownContent content={previewBody} compact={!hasContent} />
+          </div>
+        </div>
+      ) : (
+        <div className="announcements-preview-modal" aria-label={strings.modal}>
+          <div className="announcements-preview-modal-header">
+            <Icon icon="mdi:bullhorn-outline" width={18} height={18} aria-hidden="true" />
+            <strong>{previewTitle}</strong>
+          </div>
+          <MarkdownContent content={previewBody} className="announcements-preview-body" />
+          <div className="announcements-preview-modal-actions">
+            <Button type="button" size="xs" disabled>
+              {strings.previewAcknowledge}
+            </Button>
+          </div>
+        </div>
+      )}
+    </section>
+  )
+}
+
 function AnnouncementEditorPanel({
   mode,
   draft,
-  saving,
+  submittingAction,
   strings,
   onBack,
   onChangeDraft,
@@ -206,24 +286,27 @@ function AnnouncementEditorPanel({
 }: {
   mode: AnnouncementEditorMode
   draft: AnnouncementDraft
-  saving: boolean
+  submittingAction: AnnouncementSubmitAction | null
   strings: AnnouncementCopy
   onBack: () => void
   onChangeDraft: (draft: AnnouncementDraft) => void
-  onSubmit: () => void
+  onSubmit: (action: AnnouncementSubmitAction) => void
 }): JSX.Element {
+  const saving = submittingAction != null
+  const isPublishedEdit = mode.kind === 'edit' && mode.status === 'published'
+
   return (
     <form
       className="announcements-editor"
       onSubmit={(event) => {
         event.preventDefault()
-        onSubmit()
+        onSubmit('draft')
       }}
     >
       <div className="announcements-editor-header">
         <div>
           <h3>{mode.kind === 'edit' ? strings.formTitleEdit : strings.formTitleNew}</h3>
-          <p>{strings.formDescription}</p>
+          <p>{editorDescription(mode, strings)}</p>
         </div>
         <Button type="button" variant="outline" size="sm" onClick={onBack} disabled={saving}>
           <Icon icon="mdi:arrow-left" width={16} height={16} aria-hidden="true" />
@@ -233,34 +316,18 @@ function AnnouncementEditorPanel({
       <label className="announcements-field">
         <span>{strings.titleLabel}</span>
         <Input
+          id="announcement-title"
+          name="announcement-title"
           value={draft.title}
           placeholder={strings.titlePlaceholder}
           onChange={(event) => onChangeDraft({ ...draft, title: event.target.value })}
           maxLength={120}
         />
       </label>
-      <div className="announcements-field">
-        <span id="announcement-body-editor-label">{strings.bodyLabel}</span>
-        <LazyMarkdownEditor
-          ariaLabelledBy="announcement-body-editor-label"
-          value={draft.body}
-          placeholder={strings.bodyPlaceholder}
-          disabled={saving}
-          onChange={(body) => onChangeDraft({ ...draft, body })}
-          fallback={(
-            <TextareaFallback
-              ariaLabelledBy="announcement-body-editor-label"
-              value={draft.body}
-              placeholder={strings.bodyPlaceholder}
-              disabled={saving}
-              onChange={(body) => onChangeDraft({ ...draft, body })}
-            />
-          )}
-        />
-      </div>
       <label className="announcements-field">
         <span>{strings.displayLabel}</span>
         <Select
+          name="announcement-display-kind"
           value={draft.displayKind}
           onValueChange={(value) => {
             onChangeDraft({
@@ -278,12 +345,52 @@ function AnnouncementEditorPanel({
           </SelectContent>
         </Select>
       </label>
+      <div className="announcements-editor-body-grid">
+        <div className="announcements-field">
+          <span id="announcement-body-editor-label">{strings.bodyLabel}</span>
+          <span id="announcement-body-editor-hint" className="sr-only">{strings.bodyA11yHint}</span>
+          <LazyMarkdownEditor
+            id="announcement-body-editor"
+            name="announcement-body"
+            ariaLabelledBy="announcement-body-editor-label"
+            ariaDescribedBy="announcement-body-editor-hint"
+            value={draft.body}
+            placeholder={strings.bodyPlaceholder}
+            disabled={saving}
+            onChange={(body) => onChangeDraft({ ...draft, body })}
+            fallback={(
+              <TextareaFallback
+                id="announcement-body-editor"
+                name="announcement-body"
+                ariaLabelledBy="announcement-body-editor-label"
+                ariaDescribedBy="announcement-body-editor-hint"
+                value={draft.body}
+                placeholder={strings.bodyPlaceholder}
+                disabled={saving}
+                onChange={(body) => onChangeDraft({ ...draft, body })}
+              />
+            )}
+          />
+        </div>
+        <AnnouncementDisplayPreview draft={draft} strings={strings} />
+      </div>
       <div className="announcements-editor-actions">
         <Button type="button" variant="outline" onClick={onBack} disabled={saving}>
           {strings.cancel}
         </Button>
-        <Button type="submit" disabled={saving}>
-          {saving ? strings.saving : mode.kind === 'edit' ? strings.saveChanges : strings.saveDraft}
+        <Button type="submit" variant="secondary" disabled={saving}>
+          {submittingAction === 'draft'
+            ? strings.saving
+            : mode.kind === 'edit' ? strings.saveChanges : strings.saveDraft}
+        </Button>
+        <Button
+          type="button"
+          onClick={() => onSubmit('publish')}
+          disabled={saving}
+        >
+          {submittingAction === 'publish'
+            ? strings.publishing
+            : isPublishedEdit ? strings.saveAndPublishVersion : strings.saveAndPublish}
         </Button>
       </div>
     </form>
@@ -291,23 +398,32 @@ function AnnouncementEditorPanel({
 }
 
 function TextareaFallback({
+  id,
+  name,
   value,
   placeholder,
   ariaLabelledBy,
+  ariaDescribedBy,
   disabled,
   onChange,
 }: {
+  id: string
+  name: string
   value: string
   placeholder: string
   ariaLabelledBy: string
+  ariaDescribedBy: string
   disabled: boolean
   onChange: (value: string) => void
 }): JSX.Element {
   return (
     <textarea
+      id={id}
+      name={name}
       className="textarea announcements-body-fallback"
       value={value}
       aria-labelledby={ariaLabelledBy}
+      aria-describedby={ariaDescribedBy}
       placeholder={placeholder}
       rows={7}
       maxLength={4000}
@@ -318,9 +434,12 @@ function TextareaFallback({
 }
 
 interface LazyMarkdownEditorProps {
+  id: string
+  name: string
   value: string
   placeholder: string
   ariaLabelledBy: string
+  ariaDescribedBy: string
   disabled: boolean
   onChange: (value: string) => void
   fallback: JSX.Element
@@ -518,7 +637,7 @@ export default function AnnouncementsModule({
   const [editorMode, setEditorMode] = useState<AnnouncementEditorMode | null>(
     () => initialMode === 'create' ? { kind: 'create' } : null,
   )
-  const [saving, setSaving] = useState(false)
+  const [submittingAction, setSubmittingAction] = useState<AnnouncementSubmitAction | null>(null)
   const [busyId, setBusyId] = useState<string | null>(null)
 
   const load = useCallback(async (signal?: AbortSignal, mode: 'initial' | 'refresh' = 'refresh') => {
@@ -556,7 +675,7 @@ export default function AnnouncementsModule({
   }
 
   const startEdit = (item: Announcement) => {
-    setEditorMode({ kind: 'edit', id: item.id })
+    setEditorMode({ kind: 'edit', id: item.id, status: item.status })
     setDraft(toDraft(item))
     setMessage(null)
     setError(null)
@@ -567,27 +686,31 @@ export default function AnnouncementsModule({
     setDraft(EMPTY_DRAFT)
   }
 
-  const submit = async () => {
+  const submit = async (action: AnnouncementSubmitAction) => {
     const payload = toPayload(draft)
     if (!payload.title || !payload.body) {
       setError(strings.validation)
       return
     }
-    setSaving(true)
+    setSubmittingAction(action)
     setError(null)
     try {
+      let saved: Announcement
       if (editorMode?.kind === 'edit') {
-        await updateAnnouncement(editorMode.id, payload)
+        saved = await updateAnnouncement(editorMode.id, payload)
       } else {
-        await createAnnouncement(payload)
+        saved = await createAnnouncement(payload)
+      }
+      if (action === 'publish') {
+        await publishAnnouncement(saved.id)
       }
       closeEditor()
-      setMessage(strings.saved)
+      setMessage(action === 'publish' ? strings.savedAndPublished : strings.saved)
       await load(undefined, 'refresh')
     } catch (err) {
       setError(err instanceof Error ? err.message : strings.error)
     } finally {
-      setSaving(false)
+      setSubmittingAction(null)
     }
   }
 
@@ -642,11 +765,11 @@ export default function AnnouncementsModule({
         <AnnouncementEditorPanel
           mode={editorMode}
           draft={draft}
-          saving={saving}
+          submittingAction={submittingAction}
           strings={strings}
           onBack={closeEditor}
           onChangeDraft={setDraft}
-          onSubmit={() => void submit()}
+          onSubmit={(action) => void submit(action)}
         />
       ) : (
         <AnnouncementsListPanel
