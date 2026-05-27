@@ -1,3 +1,4 @@
+mod admin_token_filters;
 mod analysis;
 mod forward_proxy;
 mod models;
@@ -6,6 +7,7 @@ mod tavily_proxy;
 #[cfg(test)]
 mod tests;
 
+pub use admin_token_filters::*;
 pub use analysis::{
     analyze_http_attempt, analyze_mcp_attempt, canonical_request_kind_key_for_filter,
     canonicalize_request_log_request_kind, classify_token_request_kind,
