@@ -260,7 +260,7 @@ impl KeyStore {
         .await?;
 
         let start_month = start_of_local_month_utc_ts(
-            Utc.timestamp_opt(order.created_at, 0)
+            Utc.timestamp_opt(paid_at, 0)
                 .single()
                 .unwrap_or_else(Utc::now)
                 .with_timezone(&Local),
