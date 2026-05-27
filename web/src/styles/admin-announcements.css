@@ -204,10 +204,20 @@
 }
 
 .announcements-editor-actions,
-.announcements-actions,
 .announcements-mobile-actions {
   justify-content: flex-end;
   flex-wrap: wrap;
+}
+
+.announcements-actions {
+  justify-content: flex-end;
+  flex-wrap: nowrap;
+  white-space: nowrap;
+}
+
+.announcements-actions button {
+  flex: 0 0 auto;
+  padding-inline: 0.62rem;
 }
 
 .announcements-message,
@@ -234,6 +244,26 @@
   table-layout: fixed;
 }
 
+.announcements-col-title {
+  width: 27%;
+}
+
+.announcements-col-display {
+  width: 10%;
+}
+
+.announcements-col-status {
+  width: 12%;
+}
+
+.announcements-col-updated {
+  width: 17%;
+}
+
+.announcements-col-actions {
+  width: 34%;
+}
+
 .announcements-empty-state {
   display: flex;
   align-items: center;
@@ -243,24 +273,27 @@
 
 .announcements-table th:nth-child(1),
 .announcements-table td:nth-child(1) {
-  width: 38%;
+  width: 27%;
 }
 
 .announcements-table th:nth-child(2),
-.announcements-table td:nth-child(2),
+.announcements-table td:nth-child(2) {
+  width: 10%;
+}
+
 .announcements-table th:nth-child(3),
 .announcements-table td:nth-child(3) {
-  width: 9rem;
+  width: 12%;
 }
 
 .announcements-table th:nth-child(4),
 .announcements-table td:nth-child(4) {
-  width: 10rem;
+  width: 17%;
 }
 
-.announcements-table th:nth-child(5),
-.announcements-table td:nth-child(5) {
-  width: 15rem;
+.jobs-table.announcements-table th:nth-child(5),
+.jobs-table.announcements-table td:nth-child(5) {
+  width: 34%;
 }
 
 .announcements-title-cell {

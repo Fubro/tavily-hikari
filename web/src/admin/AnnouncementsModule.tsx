@@ -562,6 +562,13 @@ function AnnouncementsListPanel({
           <>
             <div className="table-wrapper announcements-table-wrapper admin-responsive-up">
               <table className="jobs-table announcements-table">
+                <colgroup>
+                  <col className="announcements-col-title" />
+                  <col className="announcements-col-display" />
+                  <col className="announcements-col-status" />
+                  <col className="announcements-col-updated" />
+                  <col className="announcements-col-actions" />
+                </colgroup>
                 <thead>
                   <tr>
                     <th>{strings.table.announcement}</th>

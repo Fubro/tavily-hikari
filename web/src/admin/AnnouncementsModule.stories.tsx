@@ -184,6 +184,19 @@ export const Default: Story = {
     if (duplicatePageHeader) {
       throw new Error('Expected announcements module to leave the page title to the admin shell.')
     }
+    const actionRows = Array.from(canvasElement.querySelectorAll<HTMLElement>('.announcements-actions'))
+    if (actionRows.length === 0) {
+      throw new Error('Expected announcement action rows to render.')
+    }
+    for (const row of actionRows) {
+      const buttonTopLines = new Set(
+        Array.from(row.querySelectorAll<HTMLElement>('button'))
+          .map((button) => Math.round(button.getBoundingClientRect().top)),
+      )
+      if (buttonTopLines.size > 1) {
+        throw new Error('Expected desktop announcement actions to stay on one line.')
+      }
+    }
   },
 }
 
