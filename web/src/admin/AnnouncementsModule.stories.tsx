@@ -228,6 +228,20 @@ export const CreateAnnouncement: Story = {
     if (canvasElement.querySelector('.announcements-body-milkdown-preview') == null) {
       throw new Error('Expected split mode to render a Milkdown-backed read-only render.')
     }
+    const splitEditor = canvasElement.querySelector<HTMLElement>('.announcements-body-split')
+    const splitInput = canvasElement.querySelector<HTMLElement>('.announcements-body-split > .announcements-body-fallback')
+    const splitPreview = canvasElement.querySelector<HTMLElement>('.announcements-body-split > .markdown-editor-shell')
+    if (splitEditor == null || splitInput == null || splitPreview == null) {
+      throw new Error('Expected split mode to render as one joined editor surface.')
+    }
+    const splitStyle = window.getComputedStyle(splitEditor)
+    const previewStyle = window.getComputedStyle(splitPreview)
+    if (splitStyle.gap !== '0px') {
+      throw new Error('Expected split mode panes to share one surface without a wide gap.')
+    }
+    if (previewStyle.borderLeftWidth !== '1px') {
+      throw new Error('Expected split mode preview to use a light divider.')
+    }
     if (canvasElement.querySelector('.announcements-preview') != null) {
       throw new Error('Expected create editor to avoid editor-side user preview.')
     }

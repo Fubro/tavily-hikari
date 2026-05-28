@@ -152,7 +152,7 @@
 - source_type: storybook_canvas
   story_id_or_title: `Admin/AnnouncementsModule/Create Announcement`
   state: admin announcement editor Markdown, split, and WYSIWYG modes
-  evidence_note: 正文编辑器提供 Markdown、左右对比、所见即所得三种模式；编辑器内只保留编辑相关渲染，不再提供自制用户侧预览。
+  evidence_note: 正文编辑器提供 Markdown、左右对比、所见即所得三种模式；左右对比使用同一个整体编辑面并仅用轻分隔区分编辑与预览，编辑器内只保留编辑相关渲染，不再提供自制用户侧预览。
   image:
   ![Admin announcement editor modes](./assets/admin-announcements-editor-modes.png)
 
