@@ -157,6 +157,13 @@
   ![Admin announcement editor modes](./assets/admin-announcements-editor-modes.png)
 
 - source_type: storybook_canvas
+  story_id_or_title: `Admin/AnnouncementsModule/Create Announcement`
+  state: focused announcement editor
+  evidence_note: 正文编辑器选中时由外层编辑面绘制连续圆角轮廓，避免内部编辑层在四角被裁切成断续边线。
+  image:
+  ![Admin announcement editor focus ring](./assets/admin-announcements-editor-focus-ring.png)
+
+- source_type: storybook_canvas
   story_id_or_title: `Admin/AnnouncementsModule/Default`
   state: admin list preview using user-console ticker display
   evidence_note: 管理端列表页点击滚动公告预览时，直接渲染用户控制台的滚动公告组件，而不是编辑器内仿制预览。
