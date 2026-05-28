@@ -267,7 +267,7 @@ export const ZH = {
     historyDescription: '查看服务管理员发布的当前与历史公告。',
     emptyHistory: '暂无公告。',
     modal: '弹窗',
-    ticker: '滚动',
+    ticker: '横幅',
     published: '发布中',
     archived: '已归档',
     closedAt: '已于 {time} 关闭',
