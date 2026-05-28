@@ -1,7 +1,7 @@
 import { useLayoutEffect, useState } from 'react'
 import type { Meta, StoryObj } from '@storybook/react-vite'
 
-import AnnouncementsModule from './AnnouncementsModule'
+import AnnouncementsModule, { type AnnouncementRouteMode } from './AnnouncementsModule'
 import type { Announcement } from '../api'
 
 const sampleAnnouncements: Announcement[] = [
@@ -117,11 +117,16 @@ function installAnnouncementsFetchMock(items: Announcement[]): () => void {
 function AnnouncementsModuleStory({
   items = sampleAnnouncements,
   initialMode = 'list',
+  routeMode,
 }: {
   items?: Announcement[]
   initialMode?: 'list' | 'create'
+  routeMode?: AnnouncementRouteMode
 }): JSX.Element {
   const [ready, setReady] = useState(false)
+  const [storyRouteMode, setStoryRouteMode] = useState<AnnouncementRouteMode>(
+    routeMode ?? (initialMode === 'create' ? { kind: 'create' } : { kind: 'list' }),
+  )
 
   useLayoutEffect(() => {
     const cleanup = installAnnouncementsFetchMock(items)
@@ -131,13 +136,28 @@ function AnnouncementsModuleStory({
     }
   }, [items])
 
+  useLayoutEffect(() => {
+    setStoryRouteMode(routeMode ?? (initialMode === 'create' ? { kind: 'create' } : { kind: 'list' }))
+  }, [initialMode, routeMode])
+
+  const navigate = (path: string) => {
+    const editMatch = path.match(/^\/admin\/announcements\/([^/]+)\/edit$/)
+    if (path === '/admin/announcements/new') {
+      setStoryRouteMode({ kind: 'create' })
+    } else if (editMatch?.[1]) {
+      setStoryRouteMode({ kind: 'edit', id: decodeURIComponent(editMatch[1]) })
+    } else {
+      setStoryRouteMode({ kind: 'list' })
+    }
+  }
+
   if (!ready) {
     return <div style={{ minHeight: 360 }} />
   }
 
   return (
     <div style={{ padding: 24, background: 'hsl(var(--background))' }}>
-      <AnnouncementsModule language="zh" initialMode={initialMode} />
+      <AnnouncementsModule language="zh" routeMode={storyRouteMode} onNavigate={navigate} />
     </div>
   )
 }
@@ -248,8 +268,12 @@ export const CreateAnnouncement: Story = {
     if (previewStyle.borderLeftWidth !== '1px') {
       throw new Error('Expected split mode preview to use a light divider.')
     }
-    if (splitHeight < 760) {
-      throw new Error('Expected split mode editor to provide a large writing workspace.')
+    if (splitHeight < 280 || splitHeight > 620) {
+      throw new Error('Expected split mode editor height to adapt to the viewport instead of forcing a page-bottom action area.')
+    }
+    const editorActions = canvasElement.querySelector<HTMLElement>('.announcements-editor-header .announcements-editor-actions')
+    if (editorActions == null) {
+      throw new Error('Expected editor save actions to stay in the editor header.')
     }
     if (canvasElement.querySelector('.announcements-preview') != null) {
       throw new Error('Expected create editor to avoid editor-side user preview.')
@@ -262,8 +286,9 @@ export const CreateAnnouncement: Story = {
     wysiwygTab?.click()
     await new Promise((resolve) => window.setTimeout(resolve, 420))
     const wysiwygEditor = canvasElement.querySelector<HTMLElement>('.markdown-editor-shell:not(.markdown-editor-shell--readonly)')
-    if (wysiwygEditor == null || wysiwygEditor.getBoundingClientRect().height < 760) {
-      throw new Error('Expected WYSIWYG mode to keep the enlarged editor workspace.')
+    const wysiwygHeight = wysiwygEditor?.getBoundingClientRect().height ?? 0
+    if (wysiwygEditor == null || wysiwygHeight < 280 || wysiwygHeight > 620) {
+      throw new Error('Expected WYSIWYG mode to keep an adaptive editor workspace.')
     }
     if (canvasElement.querySelector('.milkdown-toolbar') == null) {
       throw new Error('Expected WYSIWYG mode to expose the floating formatting toolbar.')
@@ -284,10 +309,40 @@ export const CreateAnnouncementMobile: Story = {
     if (canvasElement.querySelector('.announcements-editor-actions') == null) {
       throw new Error('Expected mobile create view to render editor actions.')
     }
+    const actionStyle = window.getComputedStyle(canvasElement.querySelector<HTMLElement>('.announcements-editor-actions')!)
+    if (actionStyle.position === 'sticky') {
+      throw new Error('Expected mobile create actions to avoid sticking to the page bottom.')
+    }
     if (canvasElement.querySelector('.announcements-preview') != null) {
       throw new Error('Expected mobile create view to avoid editor-side preview.')
     }
   },
+}
+
+export const EditAnnouncementRoute: Story = {
+  render: () => <AnnouncementsModuleStory routeMode={{ kind: 'edit', id: 'ann-ticker-01' }} />,
+  play: async ({ canvasElement }) => {
+    await new Promise((resolve) => window.setTimeout(resolve, 180))
+    const editor = canvasElement.querySelector('.announcements-editor')
+    if (editor == null) {
+      throw new Error('Expected edit route to render the announcement editor directly.')
+    }
+    const titleInput = canvasElement.querySelector<HTMLInputElement>('#announcement-title')
+    if (titleInput?.value !== '额度计数已刷新') {
+      throw new Error('Expected edit route to load the selected announcement draft.')
+    }
+    const backButton = Array.from(canvasElement.querySelectorAll<HTMLButtonElement>('button'))
+      .find((button) => button.textContent?.includes('返回列表'))
+    backButton?.click()
+    await new Promise((resolve) => window.setTimeout(resolve, 120))
+    if (canvasElement.querySelector('.announcements-table') == null) {
+      throw new Error('Expected returning from the edit route to show the announcements list.')
+    }
+  },
+}
+
+export const EditAnnouncementRouteStatic: Story = {
+  render: () => <AnnouncementsModuleStory routeMode={{ kind: 'edit', id: 'ann-ticker-01' }} />,
 }
 
 export const PreviewFromList: Story = {

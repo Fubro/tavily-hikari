@@ -1,4 +1,4 @@
-import { Suspense, lazy, useCallback, useEffect, useMemo, useState } from 'react'
+import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 
 import {
@@ -24,11 +24,19 @@ import UserConsoleAnnouncements from '../user-console/Announcements'
 import { EN as USER_CONSOLE_EN, ZH as USER_CONSOLE_ZH } from '../user-console/text'
 import { Icon } from '../lib/icons'
 import type { Language } from '../i18n'
+import { announcementCreatePath, announcementEditPath, announcementListPath } from './routes'
+
+export type AnnouncementRouteMode =
+  | { kind: 'list' }
+  | { kind: 'create' }
+  | { kind: 'edit'; id: string }
 
 interface AnnouncementsModuleProps {
   language: Language
   refreshToken?: number
   initialMode?: 'list' | 'create'
+  routeMode?: AnnouncementRouteMode
+  onNavigate?: (path: string) => void
   headerActionSlotId?: string
   showListCreateAction?: boolean
 }
@@ -118,6 +126,7 @@ function copy(language: Language) {
         actionBusy: '处理中…',
         validation: '标题和正文不能为空。',
         validationTitle: '标题不能为空。',
+        notFound: '公告不存在或已被删除。',
         saved: '公告已保存。',
         savedAndPublished: '公告已保存并发布。',
         published: '公告已发布。',
@@ -183,6 +192,7 @@ function copy(language: Language) {
         actionBusy: 'Working…',
         validation: 'Title and body are required.',
         validationTitle: 'Title is required.',
+        notFound: 'Announcement was not found or has been deleted.',
         saved: 'Announcement saved.',
         savedAndPublished: 'Announcement saved and published.',
         published: 'Announcement published.',
@@ -380,10 +390,27 @@ function AnnouncementEditorPanel({
           <h3>{mode.kind === 'edit' ? strings.formTitleEdit : strings.formTitleNew}</h3>
           <p>{editorDescription(mode, strings)}</p>
         </div>
-        <Button type="button" variant="outline" size="sm" onClick={onBack} disabled={saving}>
-          <Icon icon="mdi:arrow-left" width={16} height={16} aria-hidden="true" />
-          <span>{strings.backToList}</span>
-        </Button>
+        <div className="announcements-editor-actions">
+          <Button type="button" variant="outline" size="sm" onClick={onBack} disabled={saving}>
+            <Icon icon="mdi:arrow-left" width={16} height={16} aria-hidden="true" />
+            <span>{strings.backToList}</span>
+          </Button>
+          <Button type="submit" variant="secondary" size="sm" disabled={saving}>
+            {submittingAction === 'draft'
+              ? strings.saving
+              : mode.kind === 'edit' ? strings.saveChanges : strings.saveDraft}
+          </Button>
+          <Button
+            type="button"
+            size="sm"
+            onClick={() => onSubmit('publish')}
+            disabled={saving}
+          >
+            {submittingAction === 'publish'
+              ? strings.publishing
+              : isPublishedEdit ? strings.saveAndPublishVersion : strings.saveAndPublish}
+          </Button>
+        </div>
       </div>
       <label className="announcements-field">
         <span>{strings.titleLabel}</span>
@@ -442,25 +469,6 @@ function AnnouncementEditorPanel({
           saving={saving}
           onChangeDraft={onChangeDraft}
         />
-      </div>
-      <div className="announcements-editor-actions">
-        <Button type="button" variant="outline" onClick={onBack} disabled={saving}>
-          {strings.cancel}
-        </Button>
-        <Button type="submit" variant="secondary" disabled={saving}>
-          {submittingAction === 'draft'
-            ? strings.saving
-            : mode.kind === 'edit' ? strings.saveChanges : strings.saveDraft}
-        </Button>
-        <Button
-          type="button"
-          onClick={() => onSubmit('publish')}
-          disabled={saving}
-        >
-          {submittingAction === 'publish'
-            ? strings.publishing
-            : isPublishedEdit ? strings.saveAndPublishVersion : strings.saveAndPublish}
-        </Button>
       </div>
     </form>
   )
@@ -745,22 +753,49 @@ export default function AnnouncementsModule({
   language,
   refreshToken = 0,
   initialMode = 'list',
+  routeMode,
+  onNavigate,
   headerActionSlotId,
   showListCreateAction = true,
 }: AnnouncementsModuleProps): JSX.Element {
   const strings = useMemo(() => copy(language), [language])
+  const [uncontrolledRouteMode, setUncontrolledRouteMode] = useState<AnnouncementRouteMode>(
+    () => initialMode === 'create' ? { kind: 'create' } : { kind: 'list' },
+  )
+  const currentRouteMode = routeMode ?? uncontrolledRouteMode
   const [items, setItems] = useState<Announcement[]>([])
   const [loading, setLoading] = useState(true)
   const [, setRefreshing] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [message, setMessage] = useState<string | null>(null)
   const [draft, setDraft] = useState<AnnouncementDraft>(EMPTY_DRAFT)
-  const [editorMode, setEditorMode] = useState<AnnouncementEditorMode | null>(
-    () => initialMode === 'create' ? { kind: 'create' } : null,
-  )
+  const loadedEditorKeyRef = useRef<string | null>(null)
   const [submittingAction, setSubmittingAction] = useState<AnnouncementSubmitAction | null>(null)
   const [busyId, setBusyId] = useState<string | null>(null)
   const [previewItem, setPreviewItem] = useState<Announcement | null>(null)
+  const editorItem = currentRouteMode.kind === 'edit'
+    ? items.find((item) => item.id === currentRouteMode.id) ?? null
+    : null
+  const editorMode: AnnouncementEditorMode | null = currentRouteMode.kind === 'create'
+    ? { kind: 'create' }
+    : currentRouteMode.kind === 'edit' && editorItem
+      ? { kind: 'edit', id: editorItem.id, status: editorItem.status }
+      : null
+  const isEditorRoute = currentRouteMode.kind !== 'list'
+
+  const navigateAnnouncements = useCallback((nextMode: AnnouncementRouteMode) => {
+    if (onNavigate) {
+      if (nextMode.kind === 'create') {
+        onNavigate(announcementCreatePath())
+      } else if (nextMode.kind === 'edit') {
+        onNavigate(announcementEditPath(nextMode.id))
+      } else {
+        onNavigate(announcementListPath())
+      }
+      return
+    }
+    setUncontrolledRouteMode(nextMode)
+  }, [onNavigate])
 
   const load = useCallback(async (signal?: AbortSignal, mode: 'initial' | 'refresh' = 'refresh') => {
     if (mode === 'initial') {
@@ -789,25 +824,52 @@ export default function AnnouncementsModule({
     return () => controller.abort()
   }, [load, refreshToken])
 
+  useEffect(() => {
+    if (currentRouteMode.kind === 'list') {
+      loadedEditorKeyRef.current = null
+      setDraft(EMPTY_DRAFT)
+      return
+    }
+    if (currentRouteMode.kind === 'create') {
+      if (loadedEditorKeyRef.current !== 'create') {
+        loadedEditorKeyRef.current = 'create'
+        setDraft(EMPTY_DRAFT)
+      }
+      return
+    }
+
+    const editorKey = `edit:${currentRouteMode.id}`
+    if (loadedEditorKeyRef.current === editorKey) return
+    if (editorItem) {
+      loadedEditorKeyRef.current = editorKey
+      setDraft(toDraft(editorItem))
+      return
+    }
+    if (!loading) {
+      setError(strings.notFound)
+    }
+  }, [currentRouteMode, editorItem, loading, strings.notFound])
+
   const startCreate = useCallback(() => {
-    setEditorMode({ kind: 'create' })
-    setDraft(EMPTY_DRAFT)
+    navigateAnnouncements({ kind: 'create' })
     setPreviewItem(null)
     setMessage(null)
     setError(null)
-  }, [])
+  }, [navigateAnnouncements])
 
   const startEdit = (item: Announcement) => {
-    setEditorMode({ kind: 'edit', id: item.id, status: item.status })
+    loadedEditorKeyRef.current = `edit:${item.id}`
     setDraft(toDraft(item))
+    navigateAnnouncements({ kind: 'edit', id: item.id })
     setPreviewItem(null)
     setMessage(null)
     setError(null)
   }
 
   const closeEditor = () => {
-    setEditorMode(null)
+    navigateAnnouncements({ kind: 'list' })
     setDraft(EMPTY_DRAFT)
+    loadedEditorKeyRef.current = null
   }
 
   const submit = async (action: AnnouncementSubmitAction) => {
@@ -865,7 +927,7 @@ export default function AnnouncementsModule({
   const headerActionHost = headerActionSlotId && typeof document !== 'undefined'
     ? document.getElementById(headerActionSlotId)
     : null
-  const headerAction = headerActionHost && !editorMode
+  const headerAction = headerActionHost && !isEditorRoute
     ? createPortal(
       <Button type="button" size="sm" onClick={startCreate}>
         <Icon icon="mdi:plus" width={16} height={16} aria-hidden="true" />
@@ -881,16 +943,25 @@ export default function AnnouncementsModule({
       {message ? <div className="announcements-message">{message}</div> : null}
       {error && !loading ? <div className="announcements-error">{error}</div> : null}
 
-      {editorMode ? (
-        <AnnouncementEditorPanel
-          mode={editorMode}
-          draft={draft}
-          submittingAction={submittingAction}
-          strings={strings}
-          onBack={closeEditor}
-          onChangeDraft={setDraft}
-          onSubmit={(action) => void submit(action)}
-        />
+      {isEditorRoute ? (
+        editorMode ? (
+          <AnnouncementEditorPanel
+            mode={editorMode}
+            draft={draft}
+            submittingAction={submittingAction}
+            strings={strings}
+            onBack={closeEditor}
+            onChangeDraft={setDraft}
+            onSubmit={(action) => void submit(action)}
+          />
+        ) : (
+          <AdminLoadingRegion
+            loadState={loading ? 'initial_loading' : 'error'}
+            loadingLabel={strings.loading}
+            errorLabel={strings.notFound}
+            minHeight={240}
+          />
+        )
       ) : (
         <>
           <AnnouncementUserPreview

@@ -1,7 +1,7 @@
 .announcements-module {
   display: grid;
   gap: 18px;
-  --announcements-body-editor-min-height: 760px;
+  --announcements-body-editor-min-height: clamp(280px, 42vh, 520px);
 }
 
 .announcements-editor,
@@ -22,6 +22,9 @@
 
 .announcements-editor-actions {
   display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
   gap: 10px 12px;
 }
 
@@ -476,7 +479,7 @@
 
 @media (max-width: 720px) {
   .announcements-module {
-    --announcements-body-editor-min-height: 520px;
+    --announcements-body-editor-min-height: clamp(220px, 44vh, 360px);
   }
 
   .announcements-editor-header,
@@ -514,16 +517,8 @@
   }
 
   .announcements-editor-actions {
-    position: sticky;
-    bottom: 10px;
-    z-index: 90;
     display: grid;
     grid-template-columns: 1fr;
-    padding: 10px;
-    border: 1px solid hsl(var(--border) / 0.7);
-    border-radius: 20px;
-    background: hsl(var(--card));
-    box-shadow: var(--shadow-clay-card);
   }
 
   .announcements-editor-actions button {

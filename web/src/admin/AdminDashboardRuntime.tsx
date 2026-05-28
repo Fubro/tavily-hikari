@@ -3916,7 +3916,7 @@ function AdminDashboard(): JSX.Element {
         if (route.name === 'module' && route.module === 'alerts') {
           setAlertsRefreshToken((current) => current + 1)
         }
-        if (route.name === 'module' && route.module === 'announcements') {
+        if ((route.name === 'module' && route.module === 'announcements') || route.name === 'announcement-editor') {
           setAnnouncementsRefreshToken((current) => current + 1)
         }
         void Promise.all(tasks).finally(() => controller.abort())
@@ -6811,6 +6811,8 @@ function AdminDashboard(): JSX.Element {
               || route.name === 'user-tags'
               || route.name === 'user-tag-editor'
             ? 'users'
+            : route.name === 'announcement-editor'
+              ? 'announcements'
             : route.name === 'not-found'
               ? 'dashboard'
               : 'tokens'
@@ -6819,14 +6821,16 @@ function AdminDashboard(): JSX.Element {
       ? route.module
       : route.name === 'key'
         ? 'keys'
-        : route.name === 'user'
-            || route.name === 'user-usage'
-            || route.name === 'user-tags'
-            || route.name === 'user-tag-editor'
-          ? 'users'
-          : route.name === 'not-found'
-            ? 'dashboard'
-            : 'tokens'
+          : route.name === 'user'
+              || route.name === 'user-usage'
+              || route.name === 'user-tags'
+              || route.name === 'user-tag-editor'
+            ? 'users'
+            : route.name === 'announcement-editor'
+              ? 'announcements'
+            : route.name === 'not-found'
+              ? 'dashboard'
+              : 'tokens'
   const usersStrings = adminStrings.users
   const registrationStatusText = registrationSettingsLoading && !registrationSettingsLoaded
     ? usersStrings.registration.description
@@ -11305,6 +11309,12 @@ function AdminDashboard(): JSX.Element {
           <LazyAnnouncementsModule
             language={language}
             refreshToken={announcementsRefreshToken}
+            routeMode={route.name === 'announcement-editor'
+              ? route.mode === 'create'
+                ? { kind: 'create' }
+                : { kind: 'edit', id: route.id }
+              : { kind: 'list' }}
+            onNavigate={navigateToPath}
             headerActionSlotId={ANNOUNCEMENTS_HEADER_ACTION_SLOT_ID}
             showListCreateAction={false}
           />

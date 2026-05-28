@@ -153,7 +153,7 @@
   state: admin announcement list only
   evidence_note: 管理端公告列表页只展示列表、状态和发布/归档/编辑操作，并用紧凑 Markdown 预览公告正文。
   image:
-  ![Admin announcements list](./assets/admin-announcements-markdown.png)
+  ![Admin announcements list](./assets/admin-announcements-list-route.png)
 
 - source_type: storybook_canvas
   story_id_or_title: `Admin/Pages/Announcements`
@@ -165,9 +165,16 @@
 - source_type: storybook_canvas
   story_id_or_title: `Admin/AnnouncementsModule/Create Announcement`
   state: admin announcement create view
-  evidence_note: 新增公告在独立创建视图中完成，页面不同时展示公告列表表格。
+  evidence_note: 新增公告在独立路由视图中完成，页面不同时展示公告列表表格；保存操作位于编辑器标题区，正文编辑区随视口自适应，避免把提交按钮推到页面底部。
   image:
-  ![Admin announcements create](./assets/admin-announcements-create-split.png)
+  ![Admin announcements create route](./assets/admin-announcements-create-route.png)
+
+- source_type: storybook_canvas
+  story_id_or_title: `Admin/AnnouncementsModule/Edit Announcement Route Static`
+  state: admin announcement edit route
+  evidence_note: 编辑公告可直接作为独立路由渲染，加载目标公告草稿并在标题区提供返回列表、保存修改、保存并发布操作。
+  image:
+  ![Admin announcements edit route](./assets/admin-announcements-edit-route.png)
 
 - source_type: storybook_canvas
   story_id_or_title: `Admin/AnnouncementsModule/Create Announcement`
@@ -179,7 +186,7 @@
 - source_type: storybook_canvas
   story_id_or_title: `Admin/AnnouncementsModule/Create Announcement`
   state: admin announcement editor Markdown, split, and WYSIWYG modes
-  evidence_note: 正文编辑器提供 Markdown、左右对比、所见即所得三种模式；编辑区使用至少四倍高度的大工作区，左右对比使用同一个整体编辑面并仅用轻分隔区分编辑与预览，所见即所得模式提供悬浮格式工具与块操作入口。
+  evidence_note: 正文编辑器提供 Markdown、左右对比、所见即所得三种模式；编辑区高度随视口自适应，左右对比使用同一个整体编辑面并仅用轻分隔区分编辑与预览，所见即所得模式提供悬浮格式工具与块操作入口。
   image:
   ![Admin announcement editor modes](./assets/admin-announcements-editor-modes.png)
 
@@ -196,13 +203,6 @@
   evidence_note: 真实管理页中，所见即所得正文编辑器选中靠左文本时显示悬浮格式工具条；工具条使用 absolute/flex 布局并被限制在编辑器横向边界内。
   image:
   ![Admin announcement toolbar visible](./assets/admin-announcements-toolbar-visible.png)
-
-- source_type: local_preview
-  story_id_or_title: `http://127.0.0.1:58910/admin/announcements`
-  state: create form bottom action spacing
-  evidence_note: 真实管理页中，新建公告表单底部的取消、保存草稿、保存并发布按钮保持右对齐，并以 12px 横向间隔分组。
-  image:
-  ![Admin announcement action spacing](./assets/admin-announcements-actions-gap.png)
 
 - source_type: storybook_canvas
   story_id_or_title: `Admin/AnnouncementsModule/Default`
