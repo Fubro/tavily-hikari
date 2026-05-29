@@ -158,7 +158,7 @@ impl KeyStore {
                  ELSE 2
                END,
                COALESCE(published_at, updated_at, created_at) DESC,
-               id DESC
+               rowid DESC
             "#,
         )
         .try_map(announcement_from_row)
@@ -456,7 +456,7 @@ impl KeyStore {
                 SELECT id, title, body, display_kind, status, created_at, updated_at, published_at, archived_at
                   FROM announcements
                  WHERE status = ? AND display_kind = ?
-                 ORDER BY COALESCE(published_at, updated_at, created_at) DESC, id DESC
+                 ORDER BY COALESCE(published_at, updated_at, created_at) DESC, rowid DESC
                  LIMIT 1
                 "#,
             )
@@ -484,7 +484,7 @@ impl KeyStore {
                  WHEN status = 'archived' THEN COALESCE(archived_at, published_at, updated_at, created_at)
                  ELSE COALESCE(published_at, updated_at, created_at)
                END DESC,
-               id DESC
+               rowid DESC
             "#,
         )
         .bind(ANNOUNCEMENT_STATUS_PUBLISHED)

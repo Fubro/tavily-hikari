@@ -2632,6 +2632,44 @@ async fn published_announcement_update_archives_previous_version() {
 }
 
 #[tokio::test]
+async fn active_announcements_use_insert_order_for_same_second_ties() {
+    let db_path = temp_db_path("announcement-active-same-second-order");
+    let db_str = db_path.to_string_lossy().to_string();
+    let store = KeyStore::new(&db_str).await.expect("keystore created");
+    let same_second = 1_764_300_000_i64;
+
+    sqlx::query(
+        r#"
+        INSERT INTO announcements (
+            id, title, body, display_kind, status,
+            created_at, updated_at, published_at, archived_at
+        ) VALUES
+            ('zzzzzzzz', 'Older modal', 'Older body', 'modal', 'published', ?, ?, ?, NULL),
+            ('22222222', 'Newer modal', 'Newer body', 'modal', 'published', ?, ?, ?, NULL)
+        "#,
+    )
+    .bind(same_second)
+    .bind(same_second)
+    .bind(same_second)
+    .bind(same_second)
+    .bind(same_second)
+    .bind(same_second)
+    .execute(&store.pool)
+    .await
+    .expect("insert same-second announcements");
+
+    let active = store
+        .list_user_active_announcements()
+        .await
+        .expect("list active announcements");
+
+    assert_eq!(active.len(), 1);
+    assert_eq!(active[0].id, "22222222");
+
+    let _ = std::fs::remove_file(db_path);
+}
+
+#[tokio::test]
 async fn ticker_announcements_may_omit_body_but_modal_announcements_may_not() {
     let db_path = temp_db_path("announcement-ticker-empty-body");
     let db_str = db_path.to_string_lossy().to_string();
