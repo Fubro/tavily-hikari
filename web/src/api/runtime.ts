@@ -272,6 +272,7 @@ export interface PublicTokenLog {
   query: string | null
   http_status: number | null
   mcp_status: number | null
+  business_credits?: number | null
   result_status: string
   error_message: string | null
   created_at: number
@@ -285,6 +286,7 @@ interface ServerPublicTokenLog {
   query: string | null
   httpStatus: number | null
   mcpStatus: number | null
+  businessCredits?: number | null
   resultStatus: string
   errorMessage: string | null
   createdAt: number
@@ -1889,6 +1891,7 @@ export async function fetchUserTokenLogs(id: string, limit = 20, signal?: AbortS
     query: it.query,
     http_status: it.httpStatus,
     mcp_status: it.mcpStatus,
+    business_credits: it.businessCredits,
     result_status: it.resultStatus,
     error_message: it.errorMessage,
     created_at: it.createdAt,
@@ -1906,6 +1909,7 @@ export function parseUserTokenEventSnapshot(raw: string): UserTokenEventSnapshot
       query: it.query,
       http_status: it.httpStatus,
       mcp_status: it.mcpStatus,
+      business_credits: it.businessCredits,
       result_status: it.resultStatus,
       error_message: it.errorMessage,
       created_at: it.createdAt,

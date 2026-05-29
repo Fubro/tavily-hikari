@@ -24,6 +24,7 @@ import {
   fetchKeyLogDetails,
   fetchKeyLogsList,
   fetchPublicMetrics,
+  fetchPublicLogs,
   fetchRequestLogs,
   fetchRequestLogsCatalog,
   fetchRequestLogDetails,
@@ -38,8 +39,10 @@ import {
   fetchUserDashboard,
   postUserLogout,
   fetchUserTokenDetail,
+  fetchUserTokenLogs,
   fetchUserTokens,
   millisecondsUntilNextBrowserDayBoundary,
+  parseUserTokenEventSnapshot,
   publishAnnouncement,
   updateForwardProxySettingsWithProgress,
   updateAdminRegistrationSettings,
@@ -189,6 +192,41 @@ describe('admin user tag api helpers', () => {
     expect((fetchMock.mock.calls[4] as [string])[0]).toBe(
       '/api/user/tokens/a1b2?today_start=2026-04-03T00%3A00%3A00%2B08%3A00&today_end=2026-04-04T00%3A00%3A00%2B08%3A00',
     )
+  })
+
+  it('keeps charged credits on user token logs and snapshots only', async () => {
+    const payload = [{
+      id: 1,
+      method: 'POST',
+      path: '/mcp',
+      query: null,
+      httpStatus: 200,
+      mcpStatus: 200,
+      businessCredits: 7,
+      resultStatus: 'success',
+      errorMessage: null,
+      createdAt: 1_776_000_000,
+    }]
+    const fetchMock = mock(() => {
+      return Promise.resolve(new Response(JSON.stringify(payload), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }))
+    })
+    globalThis.fetch = fetchMock as typeof fetch
+
+    const userLogs = await fetchUserTokenLogs('a1b2')
+    const publicLogs = await fetchPublicLogs('th-a1b2-secret')
+    const snapshot = parseUserTokenEventSnapshot(JSON.stringify({
+      token: { id: 'a1b2', enabled: true },
+      logs: payload,
+    }))
+
+    expect((fetchMock.mock.calls[0] as [string])[0]).toBe('/api/user/tokens/a1b2/logs?limit=20')
+    expect((fetchMock.mock.calls[1] as [string])[0]).toBe('/api/public/logs?token=th-a1b2-secret&limit=20')
+    expect(userLogs[0]?.business_credits).toBe(7)
+    expect(snapshot.logs[0]?.business_credits).toBe(7)
+    expect(publicLogs[0]?.business_credits).toBeUndefined()
   })
 
   it('treats user logout 204 and 401 as successful sign-out responses', async () => {
