@@ -1,11 +1,7 @@
 import type { TranslationShape } from '../types'
 
 export const EN: TranslationShape = {
-    common: {
-      languageLabel: 'Language',
-      englishLabel: 'English',
-      chineseLabel: '中文',
-    },
+    common: { languageLabel: 'Language', englishLabel: 'English', chineseLabel: '中文' },
     public: {
       updateBanner: {
         title: 'New update available',

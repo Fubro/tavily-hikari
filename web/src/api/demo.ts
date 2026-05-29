@@ -4,7 +4,6 @@ import {
   demoUserAnnouncementHistory,
   handleAnnouncementsRoute,
 } from './demoAnnouncements'
-
 type JsonValue = null | boolean | number | string | JsonValue[] | { [key: string]: JsonValue }
 type DemoListener = EventListenerOrEventListenerObject
 interface DemoRechargeOrder {

@@ -1,11 +1,7 @@
 import type { TranslationShape } from '../types'
 
 export const ZH: TranslationShape = {
-    common: {
-      languageLabel: '语言',
-      englishLabel: 'English',
-      chineseLabel: '中文',
-    },
+    common: { languageLabel: '语言', englishLabel: 'English', chineseLabel: '中文' },
     public: {
       updateBanner: {
         title: '有新版本上线',
