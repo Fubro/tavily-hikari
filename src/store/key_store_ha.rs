@@ -78,6 +78,14 @@ impl KeyStore {
         Ok(())
     }
 
+    pub(crate) async fn get_persisted_ha_node_role(&self) -> Result<Option<HaNodeRole>, ProxyError> {
+        let raw: Option<String> =
+            sqlx::query_scalar("SELECT role FROM ha_node_state WHERE id = 'local'")
+                .fetch_optional(&self.pool)
+                .await?;
+        Ok(raw.as_deref().and_then(parse_ha_node_role))
+    }
+
     pub(crate) async fn persist_ha_sync_watermark(
         &self,
         name: &str,
@@ -219,8 +227,202 @@ impl KeyStore {
         .await?;
         Ok(())
     }
+
+    pub(crate) async fn import_ha_recovery_events(
+        &self,
+        request_logs: &[serde_json::Value],
+        auth_token_logs: &[serde_json::Value],
+    ) -> Result<i64, ProxyError> {
+        let mut imported = 0_i64;
+        for row in request_logs {
+            imported += insert_json_row(
+                &self.pool,
+                "request_logs",
+                &[
+                    "api_key_id",
+                    "auth_token_id",
+                    "request_user_id",
+                    "method",
+                    "path",
+                    "query",
+                    "status_code",
+                    "tavily_status_code",
+                    "error_message",
+                    "result_status",
+                    "request_kind_key",
+                    "request_kind_label",
+                    "request_kind_detail",
+                    "business_credits",
+                    "failure_kind",
+                    "key_effect_code",
+                    "key_effect_summary",
+                    "binding_effect_code",
+                    "binding_effect_summary",
+                    "selection_effect_code",
+                    "selection_effect_summary",
+                    "gateway_mode",
+                    "experiment_variant",
+                    "proxy_session_id",
+                    "routing_subject_hash",
+                    "upstream_operation",
+                    "fallback_reason",
+                    "request_body",
+                    "response_body",
+                    "forwarded_headers",
+                    "dropped_headers",
+                    "remote_addr",
+                    "client_ip",
+                    "client_ip_source",
+                    "client_ip_trusted",
+                    "ip_headers",
+                    "visibility",
+                    "created_at",
+                ],
+                row,
+            )
+            .await?;
+        }
+        for row in auth_token_logs {
+            imported += insert_json_row(
+                &self.pool,
+                "auth_token_logs",
+                &[
+                    "token_id",
+                    "method",
+                    "path",
+                    "query",
+                    "http_status",
+                    "mcp_status",
+                    "request_kind_key",
+                    "request_kind_label",
+                    "request_kind_detail",
+                    "result_status",
+                    "error_message",
+                    "failure_kind",
+                    "key_effect_code",
+                    "key_effect_summary",
+                    "binding_effect_code",
+                    "binding_effect_summary",
+                    "selection_effect_code",
+                    "selection_effect_summary",
+                    "gateway_mode",
+                    "experiment_variant",
+                    "proxy_session_id",
+                    "routing_subject_hash",
+                    "upstream_operation",
+                    "fallback_reason",
+                    "counts_business_quota",
+                    "business_credits",
+                    "billing_subject",
+                    "billing_state",
+                    "request_user_id",
+                    "api_key_id",
+                    "request_log_id",
+                    "created_at",
+                ],
+                row,
+            )
+            .await?;
+        }
+        Ok(imported)
+    }
 }
 
 fn quote_sqlite_identifier(value: &str) -> String {
     format!("\"{}\"", value.replace('"', "\"\""))
+}
+
+async fn insert_json_row(
+    pool: &sqlx::SqlitePool,
+    table: &str,
+    allowed_columns: &[&str],
+    row: &serde_json::Value,
+) -> Result<i64, ProxyError> {
+    let Some(object) = row.as_object() else {
+        return Err(ProxyError::Other(
+            "HA recovery row must be a JSON object".to_string(),
+        ));
+    };
+    let mut columns = Vec::new();
+    let mut values = Vec::new();
+    for column in allowed_columns {
+        let camel = snake_to_camel(column);
+        if let Some(value) = object.get(*column).or_else(|| object.get(camel.as_str())) {
+            columns.push(*column);
+            values.push(value.clone());
+        }
+    }
+    if columns.is_empty() {
+        return Err(ProxyError::Other(
+            "HA recovery row has no allowed columns".to_string(),
+        ));
+    }
+
+    let column_sql = columns
+        .iter()
+        .map(|column| quote_sqlite_identifier(column))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let placeholders = std::iter::repeat_n("?", columns.len())
+        .collect::<Vec<_>>()
+        .join(", ");
+    let sql = format!(
+        "INSERT INTO {} ({column_sql}) VALUES ({placeholders})",
+        quote_sqlite_identifier(table)
+    );
+    let mut query = sqlx::query(&sql);
+    for value in &values {
+        query = bind_json_value(query, value);
+    }
+    query.execute(pool).await?;
+    Ok(1)
+}
+
+fn bind_json_value<'q>(
+    query: sqlx::query::Query<'q, sqlx::Sqlite, sqlx::sqlite::SqliteArguments<'q>>,
+    value: &'q serde_json::Value,
+) -> sqlx::query::Query<'q, sqlx::Sqlite, sqlx::sqlite::SqliteArguments<'q>> {
+    match value {
+        serde_json::Value::Null => query.bind(Option::<String>::None),
+        serde_json::Value::Bool(value) => query.bind(i64::from(*value)),
+        serde_json::Value::Number(value) => {
+            if let Some(value) = value.as_i64() {
+                query.bind(value)
+            } else if let Some(value) = value.as_u64().and_then(|value| i64::try_from(value).ok()) {
+                query.bind(value)
+            } else if let Some(value) = value.as_f64() {
+                query.bind(value)
+            } else {
+                query.bind(value.to_string())
+            }
+        }
+        serde_json::Value::String(value) => query.bind(value.as_str()),
+        serde_json::Value::Array(_) | serde_json::Value::Object(_) => query.bind(value.to_string()),
+    }
+}
+
+fn snake_to_camel(value: &str) -> String {
+    let mut out = String::new();
+    let mut upper_next = false;
+    for ch in value.chars() {
+        if ch == '_' {
+            upper_next = true;
+        } else if upper_next {
+            out.extend(ch.to_uppercase());
+            upper_next = false;
+        } else {
+            out.push(ch);
+        }
+    }
+    out
+}
+
+fn parse_ha_node_role(value: &str) -> Option<HaNodeRole> {
+    match value {
+        "full_master" => Some(HaNodeRole::FullMaster),
+        "provisional_master" => Some(HaNodeRole::ProvisionalMaster),
+        "standby" => Some(HaNodeRole::Standby),
+        "recovery" => Some(HaNodeRole::Recovery),
+        _ => None,
+    }
 }

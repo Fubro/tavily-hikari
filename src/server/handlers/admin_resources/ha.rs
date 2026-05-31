@@ -10,6 +10,8 @@ struct HaRecoveryImportRequest {
     batch_id: Option<String>,
     source_node_id: Option<String>,
     message: Option<String>,
+    request_logs: Option<Vec<Value>>,
+    auth_token_logs: Option<Vec<Value>>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -173,9 +175,9 @@ async fn post_admin_ha_promote(
     let before = state.ha.status().await;
     let result = state
         .ha
-        .promote_self_to_provisional(payload.force.unwrap_or(false))
+        .promote_self_to_provisional_with_audit(payload.force.unwrap_or(false))
         .await;
-    let status = result.map_err(|err| (StatusCode::CONFLICT, err))?;
+    let (status, audit_entries) = result.map_err(|err| (StatusCode::CONFLICT, err))?;
     let operation = tavily_hikari::HaFailoverOperationRecord {
         operation_id: format!("promote-{}-{}", status.node_id, Utc::now().timestamp()),
         operation_kind: "promote".to_string(),
@@ -200,6 +202,24 @@ async fn post_admin_ha_promote(
         )
         .await
         .map_err(|err| (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()))?;
+    for (idx, entry) in audit_entries.iter().enumerate() {
+        state
+            .proxy
+            .insert_ha_edgeone_audit_log(
+                &format!(
+                    "{}-edgeone-{}-{idx}",
+                    operation.operation_id,
+                    nanoid::nanoid!(8)
+                ),
+                &entry.action,
+                entry.request_json.as_deref(),
+                entry.response_json.as_deref(),
+                &entry.status,
+                entry.message.as_deref(),
+            )
+            .await
+            .map_err(|err| (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()))?;
+    }
     Ok(Json(status))
 }
 
@@ -241,13 +261,38 @@ async fn post_admin_ha_recovery_import(
     let message = payload
         .message
         .unwrap_or_else(|| format!("recovery batch {batch} imported from {source}"));
-    let checksum = tavily_hikari::sha256_hex_bytes(message.as_bytes());
+    let request_logs = payload.request_logs.unwrap_or_default();
+    let auth_token_logs = payload.auth_token_logs.unwrap_or_default();
+    let requested_event_count = request_logs
+        .len()
+        .saturating_add(auth_token_logs.len())
+        .max(usize::from(request_logs.is_empty() && auth_token_logs.is_empty()));
+    let checksum_payload = serde_json::json!({
+        "message": &message,
+        "requestLogs": &request_logs,
+        "authTokenLogs": &auth_token_logs,
+    });
+    let checksum = tavily_hikari::sha256_hex_bytes(checksum_payload.to_string().as_bytes());
     let imported = state
         .proxy
-        .claim_ha_recovery_batch(&batch, &source, 1, &checksum)
+        .claim_ha_recovery_batch(
+            &batch,
+            &source,
+            i64::try_from(requested_event_count).unwrap_or(i64::MAX),
+            &checksum,
+        )
         .await
         .map_err(|err| (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()))?;
+    let mut imported_event_count = 0_i64;
     if imported {
+        imported_event_count = state
+            .proxy
+            .import_ha_recovery_events(&request_logs, &auth_token_logs)
+            .await
+            .map_err(|err| (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()))?;
+        if imported_event_count == 0 {
+            imported_event_count = 1;
+        }
         state
             .proxy
             .rebuild_ha_recovery_rollups()
@@ -255,11 +300,11 @@ async fn post_admin_ha_recovery_import(
             .map_err(|err| (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()))?;
         state
             .proxy
-            .complete_ha_recovery_batch(&batch, "imported", 1)
+            .complete_ha_recovery_batch(&batch, "imported", imported_event_count)
             .await
             .map_err(|err| (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()))?;
     }
-    let status = state.ha.enter_recovery(message.clone()).await;
+    let status = state.ha.status().await;
     state
         .proxy
         .persist_ha_node_state(
@@ -274,7 +319,7 @@ async fn post_admin_ha_recovery_import(
         batch_id: batch,
         source_node_id: source,
         imported,
-        event_count: 1,
+        event_count: imported_event_count.max(i64::try_from(requested_event_count).unwrap_or(0)),
         checksum,
         message,
         status,

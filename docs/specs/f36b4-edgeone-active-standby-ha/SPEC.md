@@ -74,6 +74,10 @@ Tavily Hikari 的高可用方案采用单活主备热备，而不是一主多从
 
 ![HA provisional admin banner](ha-status-banner-provisional-admin.png)
 
+![HA full master admin banner](./assets/ha-status-banner-full-master-admin.png)
+
+![HA recovery admin banner](./assets/ha-status-banner-recovery-admin.png)
+
 ## Acceptance
 
 - `standby/recovery` 禁止外部业务写入。
@@ -82,3 +86,6 @@ Tavily Hikari 的高可用方案采用单活主备热备，而不是一主多从
 - EdgeOne 当前源站与本节点 origin 一致时，节点可识别自己为 active。
 - EdgeOne API 失败、源站不匹配、并发 operation 不产生双 active。
 - 旧主 recovery batch 重复导入幂等。
+- 双节点 mock EdgeOne 验收必须覆盖 `pre -> failover -> recovery`：单入口业务流量、standby
+  fencing、热备同步、standby promote、provisional gating、finalize 后 full write、旧主 recovery
+  mergeable-only 导入和重复导入幂等。

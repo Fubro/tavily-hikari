@@ -13,6 +13,50 @@ struct AppState {
     api_key_ip_geo_origin: String,
 }
 
+async fn ensure_ha_allows_basic_business(
+    state: &Arc<AppState>,
+    path: &str,
+) -> Result<(), Response<Body>> {
+    let status = state.ha.status().await;
+    if status.allows_basic_business {
+        return Ok(());
+    }
+
+    let payload = json!({
+        "error": "ha_role_not_serving",
+        "message": format!(
+            "HA role {} does not serve external business traffic",
+            status.role.as_str()
+        ),
+        "role": status.role,
+        "path": path,
+    });
+    let response = Response::builder()
+        .status(StatusCode::SERVICE_UNAVAILABLE)
+        .header(CONTENT_TYPE, "application/json; charset=utf-8")
+        .body(Body::from(payload.to_string()))
+        .unwrap_or_else(|_| Response::builder().status(503).body(Body::empty()).unwrap());
+    Err(response)
+}
+
+async fn ensure_ha_allows_basic_business_status(
+    state: &Arc<AppState>,
+    path: &str,
+) -> Result<(), (StatusCode, String)> {
+    let status = state.ha.status().await;
+    if status.allows_basic_business {
+        return Ok(());
+    }
+
+    Err((
+        StatusCode::SERVICE_UNAVAILABLE,
+        format!(
+            "HA role {} does not serve external business traffic at {path}",
+            status.role.as_str()
+        ),
+    ))
+}
+
 #[derive(Clone, Debug)]
 pub struct ForwardAuthConfig {
     user_header: Option<HeaderName>,

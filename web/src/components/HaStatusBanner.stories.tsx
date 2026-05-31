@@ -46,6 +46,32 @@ export const StandbyAdmin: Story = {
   },
 }
 
+export const FullMasterAdmin: Story = {
+  args: {
+    status: {
+      ...baseStatus,
+      role: 'full_master',
+      degraded: false,
+      allowsFullWrites: true,
+      edgeoneExpectedOrigin: null,
+      message: 'node is serving as active master',
+    },
+  },
+}
+
+export const RecoveryAdmin: Story = {
+  args: {
+    status: {
+      ...baseStatus,
+      role: 'recovery',
+      allowsBasicBusiness: false,
+      edgeoneOrigin: '203.0.113.10:58087',
+      recoveryStatus: 'importing old-master-batch-1',
+      message: 'old master is replaying mergeable request logs',
+    },
+  },
+}
+
 export const UserDegraded: Story = {
   args: {
     audience: 'user',

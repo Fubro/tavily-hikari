@@ -1,0 +1,109 @@
+services:
+  edgeone-mock:
+    image: python:3.12-slim
+    working_dir: /work
+    command: ["python", "/work/scripts/edgeone_mock.py"]
+    environment:
+      EDGEONE_INITIAL_ORIGIN: node-a:8787
+    volumes:
+      - ./scripts:/work/scripts:ro
+      - edgeone-state:/state
+
+  edgeone-ingress:
+    image: python:3.12-slim
+    working_dir: /work
+    command: ["python", "/work/scripts/edgeone_ingress.py"]
+    environment:
+      EDGEONE_MOCK_URL: http://edgeone-mock:9000
+      INGRESS_PORT: 8080
+    volumes:
+      - ./scripts:/work/scripts:ro
+    depends_on:
+      - edgeone-mock
+      - node-a
+      - node-b
+
+  upstream-mock:
+    image: python:3.12-slim
+    working_dir: /work
+    command: ["python", "/work/scripts/upstream_mock.py"]
+    volumes:
+      - ./scripts:/work/scripts:ro
+
+  node-a:
+    build:
+      context: ../..
+      dockerfile: tests/ha/Dockerfile.app
+    environment:
+      TAVILY_API_KEYS: tvly-node-a-seed
+      TAVILY_UPSTREAM: http://upstream-mock:9001
+      TAVILY_USAGE_BASE: http://upstream-mock:9001
+      PROXY_DB_PATH: /srv/app/data/node-a.db
+      PROXY_PORT: 8787
+      DEV_OPEN_ADMIN: "true"
+      ADMIN_AUTH_FORWARD_ENABLED: "false"
+      HA_MODE: active_standby
+      NODE_ID: node-a
+      NODE_PUBLIC_ORIGIN: node-a:8787
+      EDGEONE_ZONE_ID: zone-test
+      EDGEONE_DOMAIN: hikari.example.test
+      EDGEONE_EXPECTED_ORIGIN: node-a:8787
+      EDGEONE_SECRET_ID: secret-id
+      EDGEONE_SECRET_KEY: secret-key
+      EDGEONE_API_ENDPOINT: http://edgeone-mock:9000
+      HA_SYNC_PEER_URL: http://node-b:8787
+      HA_INTERNAL_TOKEN: ha-internal-token
+      HA_SYNC_INTERVAL_SECS: 5
+    volumes:
+      - node-a-data:/srv/app/data
+    depends_on:
+      - edgeone-mock
+      - upstream-mock
+
+  node-b:
+    build:
+      context: ../..
+      dockerfile: tests/ha/Dockerfile.app
+    environment:
+      TAVILY_API_KEYS: tvly-node-b-seed
+      TAVILY_UPSTREAM: http://upstream-mock:9001
+      TAVILY_USAGE_BASE: http://upstream-mock:9001
+      PROXY_DB_PATH: /srv/app/data/node-b.db
+      PROXY_PORT: 8787
+      DEV_OPEN_ADMIN: "true"
+      ADMIN_AUTH_FORWARD_ENABLED: "false"
+      HA_MODE: active_standby
+      NODE_ID: node-b
+      NODE_PUBLIC_ORIGIN: node-b:8787
+      EDGEONE_ZONE_ID: zone-test
+      EDGEONE_DOMAIN: hikari.example.test
+      EDGEONE_EXPECTED_ORIGIN: node-a:8787
+      EDGEONE_SECRET_ID: secret-id
+      EDGEONE_SECRET_KEY: secret-key
+      EDGEONE_API_ENDPOINT: http://edgeone-mock:9000
+      HA_INTERNAL_TOKEN: ha-internal-token
+      HA_SYNC_INTERVAL_SECS: 5
+    volumes:
+      - node-b-data:/srv/app/data
+    depends_on:
+      - edgeone-mock
+      - upstream-mock
+
+  ha-test-runner:
+    image: python:3.12-slim
+    working_dir: /work
+    command: ["sleep", "infinity"]
+    environment:
+      INGRESS_URL: http://edgeone-ingress:8080
+      EDGEONE_MOCK_URL: http://edgeone-mock:9000
+      NODE_A_URL: http://node-a:8787
+      NODE_B_URL: http://node-b:8787
+    volumes:
+      - ./scripts:/work/scripts:ro
+    depends_on:
+      - edgeone-ingress
+
+volumes:
+  edgeone-state:
+  node-a-data:
+  node-b-data:

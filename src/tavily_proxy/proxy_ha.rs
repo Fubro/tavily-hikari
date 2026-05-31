@@ -25,6 +25,10 @@ impl TavilyProxy {
             .await
     }
 
+    pub async fn get_persisted_ha_node_role(&self) -> Result<Option<HaNodeRole>, ProxyError> {
+        self.key_store.get_persisted_ha_node_role().await
+    }
+
     pub async fn persist_ha_sync_watermark(
         &self,
         name: &str,
@@ -88,6 +92,16 @@ impl TavilyProxy {
     ) -> Result<(), ProxyError> {
         self.key_store
             .complete_ha_recovery_batch(batch_id, status, event_count)
+            .await
+    }
+
+    pub async fn import_ha_recovery_events(
+        &self,
+        request_logs: &[serde_json::Value],
+        auth_token_logs: &[serde_json::Value],
+    ) -> Result<i64, ProxyError> {
+        self.key_store
+            .import_ha_recovery_events(request_logs, auth_token_logs)
             .await
     }
 

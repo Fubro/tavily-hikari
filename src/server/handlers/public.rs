@@ -361,6 +361,8 @@ async fn tavily_http_usage(
     headers: HeaderMap,
     Query(q): Query<TavilyUsageQuery>,
 ) -> Result<Json<TavilyUsageView>, (StatusCode, String)> {
+    ensure_ha_allows_basic_business_status(&state, "/api/tavily/usage").await?;
+
     let daily_window = parse_public_today_window_query(&PublicTodayWindowQuery {
         today_start: q.today_start.clone(),
         today_end: q.today_end.clone(),

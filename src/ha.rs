@@ -174,6 +174,15 @@ pub struct HaFailoverOperationRecord {
     pub message: Option<String>,
 }
 
+#[derive(Clone, Debug)]
+pub struct EdgeOneAuditEntry {
+    pub action: String,
+    pub request_json: Option<String>,
+    pub response_json: Option<String>,
+    pub status: String,
+    pub message: Option<String>,
+}
+
 #[derive(Debug)]
 struct HaRuntimeState {
     role: HaNodeRole,
@@ -238,6 +247,63 @@ impl HaRuntime {
                 Err(err)
             }
         }
+    }
+
+    pub fn edgeone_authority_enabled(&self) -> bool {
+        self.config.mode != HaMode::Single && self.config.active_standby_ready()
+    }
+
+    pub async fn refresh_authoritative_role(&self) -> Result<HaStatusView, String> {
+        if !self.edgeone_authority_enabled() {
+            return Ok(self.status().await);
+        }
+
+        let origin = match self.edgeone.describe_current_origin().await {
+            Ok(origin) => origin,
+            Err(err) => {
+                let mut state = self.state.write().await;
+                state.message = Some(format!("EdgeOne authority refresh failed: {err}"));
+                return Err(err);
+            }
+        };
+        let self_is_origin = self.is_self_origin(origin.as_deref());
+        let now = Utc::now().timestamp();
+        let mut state = self.state.write().await;
+        state.edgeone_origin = origin.clone();
+        state.last_edgeone_check_at = Some(now);
+        match (self_is_origin, state.role) {
+            (true, HaNodeRole::Standby | HaNodeRole::Recovery) => {
+                state.role = HaNodeRole::ProvisionalMaster;
+                state.recovery_status = None;
+                state.message =
+                    Some("EdgeOne origin now points to this node; finalize required".to_string());
+            }
+            (true, HaNodeRole::FullMaster) => {
+                state.recovery_status = None;
+                state.message = None;
+            }
+            (true, HaNodeRole::ProvisionalMaster) => {}
+            (false, HaNodeRole::FullMaster | HaNodeRole::ProvisionalMaster) => {
+                state.role = HaNodeRole::Recovery;
+                let detail = origin
+                    .as_deref()
+                    .map(|origin| {
+                        format!("EdgeOne origin moved to {origin}; recovery import required")
+                    })
+                    .unwrap_or_else(|| {
+                        "EdgeOne origin no longer points to this node; recovery import required"
+                            .to_string()
+                    });
+                state.recovery_status = Some(detail.clone());
+                state.message = Some(detail);
+            }
+            (false, HaNodeRole::Standby) => {
+                state.message = None;
+            }
+            (false, HaNodeRole::Recovery) => {}
+        }
+        drop(state);
+        Ok(self.status().await)
     }
 
     pub async fn status(&self) -> HaStatusView {
@@ -323,16 +389,30 @@ impl HaRuntime {
     }
 
     pub async fn promote_self_to_provisional(&self, force: bool) -> Result<HaStatusView, String> {
+        self.promote_self_to_provisional_with_audit(force)
+            .await
+            .map(|(status, _audit)| status)
+    }
+
+    pub async fn promote_self_to_provisional_with_audit(
+        &self,
+        force: bool,
+    ) -> Result<(HaStatusView, Vec<EdgeOneAuditEntry>), String> {
         if self.config.mode == HaMode::Single {
-            return Ok(self.status().await);
+            return Ok((self.status().await, Vec::new()));
         }
+        let mut audit = Vec::new();
         let target_origin = self
             .config
             .node_public_origin
             .as_deref()
             .ok_or_else(|| "NODE_PUBLIC_ORIGIN is required for HA promote".to_string())?;
+        if !force && self.role().await != HaNodeRole::Standby {
+            return Err("promote requires standby role unless force is set".to_string());
+        }
         if !force {
-            let current = self.edgeone.describe_current_origin().await?;
+            let (current, entry) = self.edgeone.describe_current_origin_with_audit().await?;
+            audit.push(entry);
             if self.is_self_origin(current.as_deref()) {
                 let mut state = self.state.write().await;
                 state.edgeone_origin = current;
@@ -346,14 +426,15 @@ impl HaRuntime {
                 ));
             }
         }
-        self.edgeone.modify_origin(target_origin).await?;
+        let entry = self.edgeone.modify_origin_with_audit(target_origin).await?;
+        audit.push(entry);
         let mut state = self.state.write().await;
         state.role = HaNodeRole::ProvisionalMaster;
         state.edgeone_origin = Some(target_origin.to_string());
         state.last_edgeone_check_at = Some(Utc::now().timestamp());
         state.message = Some("promoted by EdgeOne origin switch; finalize required".to_string());
         drop(state);
-        Ok(self.status().await)
+        Ok((self.status().await, audit))
     }
 
     pub async fn finalize_failover(&self) -> Result<HaStatusView, String> {
@@ -402,8 +483,25 @@ impl EdgeOneClient {
     }
 
     async fn describe_current_origin(&self) -> Result<Option<String>, String> {
+        self.describe_current_origin_with_audit()
+            .await
+            .map(|(origin, _audit)| origin)
+    }
+
+    async fn describe_current_origin_with_audit(
+        &self,
+    ) -> Result<(Option<String>, EdgeOneAuditEntry), String> {
         if !self.config.active_standby_ready() {
-            return Ok(None);
+            return Ok((
+                None,
+                EdgeOneAuditEntry {
+                    action: "DescribeAccelerationDomains".to_string(),
+                    request_json: None,
+                    response_json: None,
+                    status: "skipped".to_string(),
+                    message: Some("EdgeOne HA configuration is incomplete".to_string()),
+                },
+            ));
         }
         let zone_id = self.config.edgeone_zone_id.as_deref().unwrap_or_default();
         let domain = self.config.edgeone_domain.as_deref().unwrap_or_default();
@@ -413,12 +511,17 @@ impl EdgeOneClient {
                 { "Name": "domain-name", "Values": [domain] }
             ]
         });
-        let value = self.call("DescribeAccelerationDomains", payload).await?;
+        let (value, audit) = self
+            .call_with_audit("DescribeAccelerationDomains", payload)
+            .await?;
         let origin_detail = value.pointer("/Response/AccelerationDomains/0/OriginDetail");
-        Ok(origin_detail.and_then(origin_detail_to_authority))
+        Ok((origin_detail.and_then(origin_detail_to_authority), audit))
     }
 
-    async fn modify_origin(&self, target_origin: &str) -> Result<(), String> {
+    async fn modify_origin_with_audit(
+        &self,
+        target_origin: &str,
+    ) -> Result<EdgeOneAuditEntry, String> {
         if !self.config.active_standby_ready() {
             return Err("EdgeOne credentials and domain configuration are required".to_string());
         }
@@ -434,11 +537,17 @@ impl EdgeOneClient {
                 "BackupOrigin": ""
             }
         });
-        self.call("ModifyAccelerationDomain", payload).await?;
-        Ok(())
+        let (_value, audit) = self
+            .call_with_audit("ModifyAccelerationDomain", payload)
+            .await?;
+        Ok(audit)
     }
 
-    async fn call(&self, action: &str, payload: Value) -> Result<Value, String> {
+    async fn call_with_audit(
+        &self,
+        action: &str,
+        payload: Value,
+    ) -> Result<(Value, EdgeOneAuditEntry), String> {
         let endpoint = self.config.edgeone_api_endpoint.trim();
         let host = endpoint
             .strip_prefix("https://")
@@ -498,7 +607,14 @@ impl EdgeOneClient {
         if let Some(error) = value.pointer("/Response/Error") {
             return Err(format!("EdgeOne {action} error: {error}"));
         }
-        Ok(value)
+        let audit = EdgeOneAuditEntry {
+            action: action.to_string(),
+            request_json: Some(serde_json::to_string(&payload).map_err(|err| err.to_string())?),
+            response_json: Some(text),
+            status: "success".to_string(),
+            message: None,
+        };
+        Ok((value, audit))
     }
 }
 

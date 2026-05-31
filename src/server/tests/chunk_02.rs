@@ -1428,6 +1428,21 @@ async fn spawn_proxy_server_with_dev(
     usage_base: String,
     dev_open_admin: bool,
 ) -> SocketAddr {
+    spawn_proxy_server_with_dev_and_ha(
+        proxy,
+        usage_base,
+        dev_open_admin,
+        tavily_hikari::HaRuntime::new(tavily_hikari::HaConfig::default()),
+    )
+    .await
+}
+
+async fn spawn_proxy_server_with_dev_and_ha(
+    proxy: TavilyProxy,
+    usage_base: String,
+    dev_open_admin: bool,
+    ha: tavily_hikari::HaRuntime,
+) -> SocketAddr {
     let state = Arc::new(AppState {
         proxy,
         static_dir: None,
@@ -1436,7 +1451,7 @@ async fn spawn_proxy_server_with_dev(
         builtin_admin: BuiltinAdminAuth::new(false, None, None),
         linuxdo_oauth: LinuxDoOAuthOptions::disabled(),
         linuxdo_credit: LinuxDoCreditOptions::disabled(),
-            ha: tavily_hikari::HaRuntime::new(tavily_hikari::HaConfig::default()),
+        ha,
         dev_open_admin,
         usage_base,
         api_key_ip_geo_origin: "https://api.country.is".to_string(),
@@ -1456,6 +1471,7 @@ async fn spawn_proxy_server_with_dev(
             get(tavily_http_research_result),
         )
         .route("/api/tavily/usage", get(tavily_http_usage))
+        .route("/api/tokens", post(create_token))
         .with_state(state);
 
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -1656,6 +1672,7 @@ async fn spawn_ha_admin_server(
             "/api/admin/ha/snapshot",
             get(get_admin_ha_snapshot).put(put_admin_ha_snapshot),
         )
+        .route("/api/admin/ha/promote", post(post_admin_ha_promote))
         .route("/api/admin/ha/recovery/import", post(post_admin_ha_recovery_import))
         .with_state(state);
 

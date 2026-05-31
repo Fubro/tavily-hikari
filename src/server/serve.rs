@@ -24,8 +24,35 @@ pub async fn serve(
         builtin_auth_password_hash,
     );
     let ha = tavily_hikari::HaRuntime::new(ha_config);
+    let previous_ha_role = proxy.get_persisted_ha_node_role().await.unwrap_or_else(|err| {
+        eprintln!("HA persisted role lookup warning: {err}");
+        None
+    });
     if let Err(err) = ha.refresh_startup_role().await {
         eprintln!("HA startup role check warning: {err}");
+    }
+    if matches!(
+        previous_ha_role,
+        Some(tavily_hikari::HaNodeRole::FullMaster | tavily_hikari::HaNodeRole::ProvisionalMaster)
+    ) && ha.role().await == tavily_hikari::HaNodeRole::Standby
+    {
+        ha.enter_recovery(
+            "previous active node restarted after EdgeOne origin moved; recovery import required"
+                .to_string(),
+        )
+        .await;
+    }
+    let startup_ha_status = ha.status().await;
+    if let Err(err) = proxy
+        .persist_ha_node_state(
+            &startup_ha_status.node_id,
+            startup_ha_status.role,
+            startup_ha_status.edgeone_origin.as_deref(),
+            startup_ha_status.message.as_deref(),
+        )
+        .await
+    {
+        eprintln!("HA startup node state persist warning: {err}");
     }
     let state = Arc::new(AppState {
         proxy,
@@ -411,6 +438,7 @@ pub async fn serve(
     spawn_linuxdo_user_tag_binding_refresh_scheduler(state.clone());
     let _forward_proxy_geo_refresh_scheduler = spawn_forward_proxy_geo_refresh_scheduler(state.clone());
     spawn_forward_proxy_maintenance_scheduler(state.clone());
+    spawn_ha_edgeone_authority_task(state.clone());
 
     axum::serve(
         listener,
@@ -496,6 +524,36 @@ fn spawn_ha_snapshot_sync_task(state: Arc<AppState>) {
                 }
                 Err(err) => {
                     eprintln!("HA snapshot sync push failed: {err}");
+                }
+            }
+        }
+    });
+}
+
+fn spawn_ha_edgeone_authority_task(state: Arc<AppState>) {
+    if !state.ha.edgeone_authority_enabled() {
+        return;
+    }
+    tokio::spawn(async move {
+        loop {
+            tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+            match state.ha.refresh_authoritative_role().await {
+                Ok(status) => {
+                    if let Err(err) = state
+                        .proxy
+                        .persist_ha_node_state(
+                            &status.node_id,
+                            status.role,
+                            status.edgeone_origin.as_deref(),
+                            status.message.as_deref(),
+                        )
+                        .await
+                    {
+                        eprintln!("HA authority state persist failed: {err}");
+                    }
+                }
+                Err(err) => {
+                    eprintln!("HA authority refresh failed: {err}");
                 }
             }
         }
