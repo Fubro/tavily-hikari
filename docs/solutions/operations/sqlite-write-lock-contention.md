@@ -54,6 +54,9 @@ brief contention visible as HTTP 500s or failed background bookkeeping.
 - Restore safely attributable persisted subscription-backed proxy nodes from `forward_proxy_runtime`
   before attempting remote subscription refresh. If that restored graph exists, use it for startup
   readiness and leave remote subscription calibration to the maintenance scheduler.
+- Keep startup backfills cheap and no-op aware. Large production SQLite files make repeated per-user
+  repair loops expensive even when every row is already correct; use an indexed precheck in the
+  readiness path and move periodic refresh work to a background scheduler.
 - Prefer bounded retries and narrower write windows before increasing SQLite pool size.
 
 ## Guardrails / Reuse Notes
