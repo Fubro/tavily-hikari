@@ -881,6 +881,7 @@ async fn create_user_token(
     if !is_admin_request(state.as_ref(), &headers) {
         return Err((StatusCode::FORBIDDEN, "forbidden".to_string()));
     }
+    require_full_master_write(state.as_ref()).await?;
 
     match state.proxy.create_user_bound_access_token(&id, None).await {
         Ok(secret) => Ok((
@@ -907,6 +908,7 @@ async fn delete_user_token(
     if !is_admin_request(state.as_ref(), &headers) {
         return Err((StatusCode::FORBIDDEN, "forbidden".to_string()));
     }
+    require_full_master_write(state.as_ref()).await?;
 
     match state
         .proxy
@@ -934,6 +936,7 @@ async fn update_user_quota(
     if !is_admin_request(state.as_ref(), &headers) {
         return Err((StatusCode::FORBIDDEN, "forbidden".to_string()));
     }
+    require_full_master_write(state.as_ref()).await?;
     let _legacy_hourly_any_limit = payload.hourly_any_limit;
     if payload.hourly_limit < 0
         || payload.daily_limit < 0
@@ -1219,6 +1222,9 @@ async fn create_token(
     if !is_admin_request(state.as_ref(), &headers) {
         return Err(StatusCode::FORBIDDEN);
     }
+    if require_full_master_write(state.as_ref()).await.is_err() {
+        return Err(StatusCode::SERVICE_UNAVAILABLE);
+    }
     state
         .proxy
         .create_access_token(payload.note.as_deref())
@@ -1245,6 +1251,9 @@ async fn delete_token(
     if !is_admin_request(state.as_ref(), &headers) {
         return Err(StatusCode::FORBIDDEN);
     }
+    if require_full_master_write(state.as_ref()).await.is_err() {
+        return Err(StatusCode::SERVICE_UNAVAILABLE);
+    }
     state
         .proxy
         .delete_access_token(&id)
@@ -1270,6 +1279,9 @@ async fn update_token_status(
     if !is_admin_request(state.as_ref(), &headers) {
         return Err(StatusCode::FORBIDDEN);
     }
+    if require_full_master_write(state.as_ref()).await.is_err() {
+        return Err(StatusCode::SERVICE_UNAVAILABLE);
+    }
     state
         .proxy
         .set_access_token_enabled(&id, payload.enabled)
@@ -1288,6 +1300,9 @@ async fn update_tokens_status_batch(
 ) -> Result<Json<BatchTokenMutationResponse>, StatusCode> {
     if !is_admin_request(state.as_ref(), &headers) {
         return Err(StatusCode::FORBIDDEN);
+    }
+    if require_full_master_write(state.as_ref()).await.is_err() {
+        return Err(StatusCode::SERVICE_UNAVAILABLE);
     }
     let ids = normalize_token_ids(payload.ids);
     if ids.is_empty() {
@@ -1314,6 +1329,9 @@ async fn delete_tokens_batch(
 ) -> Result<Json<BatchTokenMutationResponse>, StatusCode> {
     if !is_admin_request(state.as_ref(), &headers) {
         return Err(StatusCode::FORBIDDEN);
+    }
+    if require_full_master_write(state.as_ref()).await.is_err() {
+        return Err(StatusCode::SERVICE_UNAVAILABLE);
     }
     let ids = normalize_token_ids(payload.ids);
     if ids.is_empty() {
@@ -1346,6 +1364,9 @@ async fn update_token_note(
 ) -> Result<StatusCode, StatusCode> {
     if !is_admin_request(state.as_ref(), &headers) {
         return Err(StatusCode::FORBIDDEN);
+    }
+    if require_full_master_write(state.as_ref()).await.is_err() {
+        return Err(StatusCode::SERVICE_UNAVAILABLE);
     }
     state
         .proxy
@@ -1387,6 +1408,9 @@ async fn rotate_token_secret(
     if !is_admin_request(state.as_ref(), &headers) {
         return Err(StatusCode::FORBIDDEN);
     }
+    if require_full_master_write(state.as_ref()).await.is_err() {
+        return Err(StatusCode::SERVICE_UNAVAILABLE);
+    }
     state
         .proxy
         .rotate_access_token_secret(&id)
@@ -1422,6 +1446,9 @@ async fn create_tokens_batch(
 ) -> Result<Json<BatchCreateTokenResponse>, StatusCode> {
     if !is_admin_request(state.as_ref(), &headers) {
         return Err(StatusCode::FORBIDDEN);
+    }
+    if require_full_master_write(state.as_ref()).await.is_err() {
+        return Err(StatusCode::SERVICE_UNAVAILABLE);
     }
     let group = payload.group.trim();
     if group.is_empty() {

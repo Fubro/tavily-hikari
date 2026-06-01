@@ -8,6 +8,7 @@ pub async fn serve(
     dev_open_admin: bool,
     usage_base: String,
     api_key_ip_geo_origin: String,
+    ha_config: tavily_hikari::HaConfig,
     linuxdo_oauth: LinuxDoOAuthOptions,
     linuxdo_credit: LinuxDoCreditOptions,
 ) -> Result<(), Box<dyn std::error::Error>> {
@@ -22,6 +23,23 @@ pub async fn serve(
         builtin_auth_password,
         builtin_auth_password_hash,
     );
+    let ha = tavily_hikari::HaRuntime::new(ha_config);
+    let previous_ha_role = proxy.get_persisted_ha_node_role().await.unwrap_or_else(|err| {
+        eprintln!("HA persisted role lookup warning: {err}");
+        None
+    });
+    let startup_ha_status = reconcile_ha_startup_role(&ha, previous_ha_role).await;
+    if let Err(err) = proxy
+        .persist_ha_node_state(
+            &startup_ha_status.node_id,
+            startup_ha_status.role,
+            startup_ha_status.edgeone_origin.as_deref(),
+            startup_ha_status.message.as_deref(),
+        )
+        .await
+    {
+        eprintln!("HA startup node state persist warning: {err}");
+    }
     let state = Arc::new(AppState {
         proxy,
         static_dir: static_dir.clone(),
@@ -30,10 +48,12 @@ pub async fn serve(
         builtin_admin,
         linuxdo_oauth,
         linuxdo_credit,
+        ha,
         dev_open_admin,
         usage_base: usage_base.clone(),
         api_key_ip_geo_origin,
     });
+    spawn_ha_snapshot_sync_task(state.clone());
 
     println!(
         "Admin auth modes: forward_enabled={} builtin_enabled={} dev_open_admin={}",
@@ -83,6 +103,15 @@ pub async fn serve(
         state.linuxdo_credit.is_enabled_and_configured(),
         state.linuxdo_credit.submit_url
     );
+    let ha_status = state.ha.status().await;
+    println!(
+        "HA: mode={:?} node={} role={:?} origin={:?} edgeone_domain={:?}",
+        ha_status.mode,
+        ha_status.node_id,
+        ha_status.role,
+        ha_status.edgeone_origin,
+        ha_status.edgeone_domain
+    );
 
     let mut router = Router::new()
         .route("/health", get(health_check))
@@ -93,6 +122,7 @@ pub async fn serve(
         .route("/api/public/events", get(sse_public))
         .route("/api/public/logs", get(get_public_logs))
         .route("/api/token/metrics", get(get_token_metrics_public))
+        .route("/api/ha/status", get(get_public_ha_status))
         .route("/api/events", get(sse_dashboard))
         .route("/api/version", get(get_versions))
         .route("/api/profile", get(get_profile))
@@ -133,6 +163,21 @@ pub async fn serve(
         )
         .route("/api/admin/login", post(post_admin_login))
         .route("/api/admin/logout", post(post_admin_logout))
+        .route("/api/admin/ha/status", get(get_admin_ha_status))
+        .route(
+            "/api/admin/ha/snapshot",
+            get(get_admin_ha_snapshot)
+                .put(put_admin_ha_snapshot)
+                .layer(axum::extract::DefaultBodyLimit::max(
+                    HA_SNAPSHOT_BODY_LIMIT_BYTES,
+                )),
+        )
+        .route("/api/admin/ha/promote", post(post_admin_ha_promote))
+        .route("/api/admin/ha/finalize", post(post_admin_ha_finalize))
+        .route(
+            "/api/admin/ha/recovery/import",
+            post(post_admin_ha_recovery_import),
+        )
         .route("/api/tavily/search", post(tavily_http_search))
         .route("/api/tavily/extract", post(tavily_http_extract))
         .route("/api/tavily/crawl", post(tavily_http_crawl))
@@ -383,6 +428,7 @@ pub async fn serve(
     spawn_linuxdo_user_tag_binding_refresh_scheduler(state.clone());
     let _forward_proxy_geo_refresh_scheduler = spawn_forward_proxy_geo_refresh_scheduler(state.clone());
     spawn_forward_proxy_maintenance_scheduler(state.clone());
+    spawn_ha_edgeone_authority_task(state.clone());
 
     axum::serve(
         listener,
@@ -394,6 +440,149 @@ pub async fn serve(
     .await?;
     println!("Server shut down gracefully.");
     Ok(())
+}
+
+const HA_SNAPSHOT_BODY_LIMIT_BYTES: usize = 1024 * 1024 * 1024;
+
+async fn reconcile_ha_startup_role(
+    ha: &tavily_hikari::HaRuntime,
+    previous_ha_role: Option<tavily_hikari::HaNodeRole>,
+) -> tavily_hikari::HaStatusView {
+    let startup_role_checked = match ha.refresh_startup_role().await {
+        Ok(()) => true,
+        Err(err) => {
+            eprintln!("HA startup role check warning: {err}");
+            false
+        }
+    };
+    let mut status = ha.status().await;
+    if startup_role_checked
+        && status.edgeone_api_configured
+        && matches!(
+            previous_ha_role,
+            Some(
+                tavily_hikari::HaNodeRole::FullMaster
+                    | tavily_hikari::HaNodeRole::ProvisionalMaster
+            )
+        )
+        && status.role == tavily_hikari::HaNodeRole::Standby
+    {
+        status = ha
+            .enter_recovery(
+                "previous active node restarted after EdgeOne origin moved; recovery import required"
+                    .to_string(),
+            )
+            .await;
+    }
+    status
+}
+
+fn spawn_ha_snapshot_sync_task(state: Arc<AppState>) {
+    let Some(peer_url) = state.ha.sync_peer_url() else {
+        return;
+    };
+    let Some(internal_token) = state.ha.internal_token() else {
+        eprintln!(
+            "HA snapshot sync disabled: HA_INTERNAL_TOKEN is required when HA_SYNC_PEER_URL is set"
+        );
+        return;
+    };
+    let interval = std::time::Duration::from_secs(state.ha.sync_interval_secs());
+    tokio::spawn(async move {
+        let client = reqwest::Client::new();
+        loop {
+            tokio::time::sleep(interval).await;
+            if !state.ha.role().await.allows_basic_business() {
+                continue;
+            }
+            let Some(db_path) = state.ha.database_path() else {
+                eprintln!("HA snapshot sync skipped: database path is not configured");
+                continue;
+            };
+            if let Err(err) = state.proxy.ha_wal_checkpoint().await {
+                eprintln!("HA snapshot sync checkpoint failed: {err}");
+                continue;
+            }
+            let bytes = match tokio::fs::read(&db_path).await {
+                Ok(bytes) => bytes,
+                Err(err) => {
+                    eprintln!("HA snapshot sync read failed: {err}");
+                    continue;
+                }
+            };
+            let status = state.ha.status().await;
+            let generated_at = Utc::now().timestamp();
+            let target = format!(
+                "{}/api/admin/ha/snapshot?sourceNodeId={}&generatedAt={}",
+                peer_url,
+                urlencoding::encode(&status.node_id),
+                generated_at
+            );
+            match client
+                .put(target)
+                .header("x-ha-internal-token", &internal_token)
+                .body(bytes)
+                .send()
+                .await
+            {
+                Ok(response) if response.status().is_success() => {
+                    let detail = format!("snapshot pushed to {peer_url}");
+                    if let Err(err) = state
+                        .proxy
+                        .persist_ha_sync_watermark(
+                            "snapshot_push",
+                            Some(&status.node_id),
+                            None,
+                            generated_at,
+                            Some(&detail),
+                        )
+                        .await
+                    {
+                        eprintln!("HA snapshot sync watermark failed: {err}");
+                    }
+                }
+                Ok(response) => {
+                    eprintln!(
+                        "HA snapshot sync push failed with status {}",
+                        response.status()
+                    );
+                }
+                Err(err) => {
+                    eprintln!("HA snapshot sync push failed: {err}");
+                }
+            }
+        }
+    });
+}
+
+fn spawn_ha_edgeone_authority_task(state: Arc<AppState>) {
+    if !state.ha.edgeone_authority_enabled() {
+        return;
+    }
+    tokio::spawn(async move {
+        loop {
+            tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+            match state.ha.refresh_authoritative_role().await {
+                Ok(status) => {
+                    if let Err(err) = state
+                        .proxy
+                        .persist_ha_node_state(
+                            &status.node_id,
+                            status.role,
+                            status.edgeone_origin.as_deref(),
+                            status.message.as_deref(),
+                        )
+                        .await
+                    {
+                        eprintln!("HA authority state persist failed: {err}");
+                    }
+                }
+                Err(err) => {
+                    eprintln!("HA authority refresh failed: {err}");
+                }
+            }
+        }
+    });
 }
 
 async fn wait_for_ctrl_c() -> &'static str {

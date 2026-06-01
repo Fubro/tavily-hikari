@@ -11,6 +11,10 @@ async fn proxy_handler(
         .get::<ConnectInfo<SocketAddr>>()
         .map(|connect_info| connect_info.0);
 
+    if let Err(response) = ensure_ha_allows_basic_business(&state, &path).await {
+        return Ok(response);
+    }
+
     if method == Method::GET && accepts_event_stream(&parts.headers) {
         let response = Response::builder()
             .status(StatusCode::METHOD_NOT_ALLOWED)

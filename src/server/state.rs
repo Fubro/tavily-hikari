@@ -7,9 +7,54 @@ struct AppState {
     builtin_admin: BuiltinAdminAuth,
     linuxdo_oauth: LinuxDoOAuthOptions,
     linuxdo_credit: LinuxDoCreditOptions,
+    ha: tavily_hikari::HaRuntime,
     dev_open_admin: bool,
     usage_base: String,
     api_key_ip_geo_origin: String,
+}
+
+async fn ensure_ha_allows_basic_business(
+    state: &Arc<AppState>,
+    path: &str,
+) -> Result<(), Response<Body>> {
+    let status = state.ha.status().await;
+    if status.allows_basic_business {
+        return Ok(());
+    }
+
+    let payload = json!({
+        "error": "ha_role_not_serving",
+        "message": format!(
+            "HA role {} does not serve external business traffic",
+            status.role.as_str()
+        ),
+        "role": status.role,
+        "path": path,
+    });
+    let response = Response::builder()
+        .status(StatusCode::SERVICE_UNAVAILABLE)
+        .header(CONTENT_TYPE, "application/json; charset=utf-8")
+        .body(Body::from(payload.to_string()))
+        .unwrap_or_else(|_| Response::builder().status(503).body(Body::empty()).unwrap());
+    Err(response)
+}
+
+async fn ensure_ha_allows_basic_business_status(
+    state: &Arc<AppState>,
+    path: &str,
+) -> Result<(), (StatusCode, String)> {
+    let status = state.ha.status().await;
+    if status.allows_basic_business {
+        return Ok(());
+    }
+
+    Err((
+        StatusCode::SERVICE_UNAVAILABLE,
+        format!(
+            "HA role {} does not serve external business traffic at {path}",
+            status.role.as_str()
+        ),
+    ))
 }
 
 #[derive(Clone, Debug)]
@@ -419,6 +464,13 @@ fn is_admin_request(state: &AppState, headers: &HeaderMap) -> bool {
         return true;
     }
     false
+}
+
+async fn require_full_master_write(state: &AppState) -> Result<(), (StatusCode, String)> {
+    if let Some(reason) = state.ha.block_full_write_reason().await {
+        return Err((StatusCode::SERVICE_UNAVAILABLE, reason));
+    }
+    Ok(())
 }
 
 async fn resolve_user_session(

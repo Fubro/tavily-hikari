@@ -1428,6 +1428,21 @@ async fn spawn_proxy_server_with_dev(
     usage_base: String,
     dev_open_admin: bool,
 ) -> SocketAddr {
+    spawn_proxy_server_with_dev_and_ha(
+        proxy,
+        usage_base,
+        dev_open_admin,
+        tavily_hikari::HaRuntime::new(tavily_hikari::HaConfig::default()),
+    )
+    .await
+}
+
+async fn spawn_proxy_server_with_dev_and_ha(
+    proxy: TavilyProxy,
+    usage_base: String,
+    dev_open_admin: bool,
+    ha: tavily_hikari::HaRuntime,
+) -> SocketAddr {
     let state = Arc::new(AppState {
         proxy,
         static_dir: None,
@@ -1436,6 +1451,7 @@ async fn spawn_proxy_server_with_dev(
         builtin_admin: BuiltinAdminAuth::new(false, None, None),
         linuxdo_oauth: LinuxDoOAuthOptions::disabled(),
         linuxdo_credit: LinuxDoCreditOptions::disabled(),
+        ha,
         dev_open_admin,
         usage_base,
         api_key_ip_geo_origin: "https://api.country.is".to_string(),
@@ -1455,6 +1471,7 @@ async fn spawn_proxy_server_with_dev(
             get(tavily_http_research_result),
         )
         .route("/api/tavily/usage", get(tavily_http_usage))
+        .route("/api/tokens", post(create_token))
         .with_state(state);
 
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -1480,6 +1497,7 @@ async fn spawn_keys_admin_server(
         builtin_admin: BuiltinAdminAuth::new(false, None, None),
         linuxdo_oauth: LinuxDoOAuthOptions::disabled(),
         linuxdo_credit: LinuxDoCreditOptions::disabled(),
+            ha: tavily_hikari::HaRuntime::new(tavily_hikari::HaConfig::default()),
         dev_open_admin,
         usage_base: "http://127.0.0.1:58088".to_string(),
         api_key_ip_geo_origin: "https://api.country.is".to_string(),
@@ -1529,6 +1547,7 @@ async fn spawn_keys_admin_server_with_usage_base(
         builtin_admin: BuiltinAdminAuth::new(false, None, None),
         linuxdo_oauth: LinuxDoOAuthOptions::disabled(),
         linuxdo_credit: LinuxDoCreditOptions::disabled(),
+            ha: tavily_hikari::HaRuntime::new(tavily_hikari::HaConfig::default()),
         dev_open_admin,
         usage_base,
         api_key_ip_geo_origin: "https://api.country.is".to_string(),
@@ -1566,6 +1585,7 @@ async fn spawn_keys_admin_server_with_geo_origin(
         builtin_admin: BuiltinAdminAuth::new(false, None, None),
         linuxdo_oauth: LinuxDoOAuthOptions::disabled(),
         linuxdo_credit: LinuxDoCreditOptions::disabled(),
+            ha: tavily_hikari::HaRuntime::new(tavily_hikari::HaConfig::default()),
         dev_open_admin,
         usage_base: "http://127.0.0.1:58088".to_string(),
         api_key_ip_geo_origin: geo_origin,
@@ -1603,6 +1623,7 @@ async fn spawn_keys_admin_server_with_usage_and_geo(
         builtin_admin: BuiltinAdminAuth::new(false, None, None),
         linuxdo_oauth: LinuxDoOAuthOptions::disabled(),
         linuxdo_credit: LinuxDoCreditOptions::disabled(),
+            ha: tavily_hikari::HaRuntime::new(tavily_hikari::HaConfig::default()),
         dev_open_admin,
         usage_base,
         api_key_ip_geo_origin: geo_origin,
@@ -1614,6 +1635,49 @@ async fn spawn_keys_admin_server_with_usage_and_geo(
         .route("/api/keys/validate", post(post_validate_api_keys))
         .route("/api/keys/:id/sync-usage", post(post_sync_key_usage))
         .route("/api/admin/login", post(post_admin_login))
+        .with_state(state);
+
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        axum::serve(listener, app.into_make_service())
+            .await
+            .unwrap();
+    });
+    addr
+}
+
+async fn spawn_ha_admin_server(
+    proxy: TavilyProxy,
+    ha: tavily_hikari::HaRuntime,
+    dev_open_admin: bool,
+) -> SocketAddr {
+    let state = Arc::new(AppState {
+        proxy,
+        static_dir: None,
+        forward_auth: ForwardAuthConfig::new(None, None, None, None),
+        forward_auth_enabled: false,
+        builtin_admin: BuiltinAdminAuth::new(false, None, None),
+        linuxdo_oauth: LinuxDoOAuthOptions::disabled(),
+        linuxdo_credit: LinuxDoCreditOptions::disabled(),
+        ha,
+        dev_open_admin,
+        usage_base: "http://127.0.0.1:58088".to_string(),
+        api_key_ip_geo_origin: "https://api.country.is".to_string(),
+    });
+
+    let app = Router::new()
+        .route("/api/admin/ha/status", get(get_admin_ha_status))
+        .route(
+            "/api/admin/ha/snapshot",
+            get(get_admin_ha_snapshot)
+                .put(put_admin_ha_snapshot)
+                .layer(axum::extract::DefaultBodyLimit::max(
+                    HA_SNAPSHOT_BODY_LIMIT_BYTES,
+                )),
+        )
+        .route("/api/admin/ha/promote", post(post_admin_ha_promote))
+        .route("/api/admin/ha/recovery/import", post(post_admin_ha_recovery_import))
         .with_state(state);
 
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -1846,6 +1910,7 @@ async fn spawn_builtin_keys_admin_server(proxy: TavilyProxy, password: &str) -> 
         builtin_admin: BuiltinAdminAuth::new(true, None, Some(password_hash)),
         linuxdo_oauth: LinuxDoOAuthOptions::disabled(),
         linuxdo_credit: LinuxDoCreditOptions::disabled(),
+            ha: tavily_hikari::HaRuntime::new(tavily_hikari::HaConfig::default()),
         dev_open_admin: false,
         usage_base: "http://127.0.0.1:58088".to_string(),
         api_key_ip_geo_origin: "https://api.country.is".to_string(),
@@ -1934,6 +1999,7 @@ async fn spawn_user_oauth_server_with_options(
         builtin_admin: BuiltinAdminAuth::new(false, None, None),
         linuxdo_oauth,
         linuxdo_credit: LinuxDoCreditOptions::disabled(),
+            ha: tavily_hikari::HaRuntime::new(tavily_hikari::HaConfig::default()),
         dev_open_admin: false,
         usage_base: "http://127.0.0.1:58088".to_string(),
         api_key_ip_geo_origin: "https://api.country.is".to_string(),
@@ -1992,6 +2058,7 @@ async fn spawn_user_oauth_recharge_server(
         builtin_admin: BuiltinAdminAuth::new(false, None, None),
         linuxdo_oauth: linuxdo_oauth_options_for_test(),
         linuxdo_credit,
+        ha: tavily_hikari::HaRuntime::new(tavily_hikari::HaConfig::default()),
         dev_open_admin,
         usage_base: "http://127.0.0.1:58088".to_string(),
         api_key_ip_geo_origin: "https://api.country.is".to_string(),
@@ -2046,6 +2113,7 @@ async fn spawn_admin_users_server(proxy: TavilyProxy, dev_open_admin: bool) -> S
         builtin_admin: BuiltinAdminAuth::new(false, None, None),
         linuxdo_oauth: LinuxDoOAuthOptions::disabled(),
         linuxdo_credit: LinuxDoCreditOptions::disabled(),
+            ha: tavily_hikari::HaRuntime::new(tavily_hikari::HaConfig::default()),
         dev_open_admin,
         usage_base: "http://127.0.0.1:58088".to_string(),
         api_key_ip_geo_origin: "https://api.country.is".to_string(),
@@ -2093,6 +2161,7 @@ async fn spawn_admin_tokens_server(proxy: TavilyProxy, dev_open_admin: bool) -> 
         builtin_admin: BuiltinAdminAuth::new(false, None, None),
         linuxdo_oauth: LinuxDoOAuthOptions::disabled(),
         linuxdo_credit: LinuxDoCreditOptions::disabled(),
+            ha: tavily_hikari::HaRuntime::new(tavily_hikari::HaConfig::default()),
         dev_open_admin,
         usage_base: "http://127.0.0.1:58088".to_string(),
         api_key_ip_geo_origin: "https://api.country.is".to_string(),
@@ -2152,6 +2221,7 @@ async fn spawn_admin_forward_proxy_server_with_geo_origin(
         builtin_admin: BuiltinAdminAuth::new(false, None, None),
         linuxdo_oauth: LinuxDoOAuthOptions::disabled(),
         linuxdo_credit: LinuxDoCreditOptions::disabled(),
+            ha: tavily_hikari::HaRuntime::new(tavily_hikari::HaConfig::default()),
         dev_open_admin,
         usage_base,
         api_key_ip_geo_origin,
