@@ -28,6 +28,12 @@ struct HaEventsAckRequest {
     acked_seq: i64,
 }
 
+#[derive(Debug)]
+struct HaEventResponseItem {
+    seq: i64,
+    value: Value,
+}
+
 const HA_BASELINE_MAX_COMPRESSED_BYTES: usize = 64 * 1024 * 1024;
 const HA_EVENTS_MAX_COMPRESSED_BYTES: usize = 4 * 1024 * 1024;
 
@@ -152,7 +158,76 @@ async fn get_admin_ha_events(
                 (StatusCode::INTERNAL_SERVER_ERROR, message)
             }
         })?;
-    let mut ndjson = String::new();
+    let event_items = events
+        .iter()
+        .map(|event| HaEventResponseItem {
+            seq: event.seq,
+            value: json!({
+                "schemaVersion": 1,
+                "kind": "event",
+                "event": event
+            }),
+        })
+        .collect::<Vec<_>>();
+    let encoded = encode_ha_events_limited(after, limit, &event_items, HA_EVENTS_MAX_COMPRESSED_BYTES)?;
+    Response::builder()
+        .status(StatusCode::OK)
+        .header(CONTENT_TYPE, "application/x-ndjson")
+        .header("content-encoding", "zstd")
+        .header("x-ha-schema-version", "1")
+        .header("x-ha-last-seq", encoded.last_seq.to_string())
+        .header("x-ha-event-count", encoded.event_count.to_string())
+        .body(Body::from(encoded.compressed))
+        .map_err(|err| (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()))
+}
+
+struct EncodedHaEvents {
+    compressed: Vec<u8>,
+    last_seq: i64,
+    event_count: usize,
+}
+
+fn encode_ha_events_limited(
+    after: i64,
+    limit: i64,
+    events: &[HaEventResponseItem],
+    max_compressed_bytes: usize,
+) -> Result<EncodedHaEvents, (StatusCode, String)> {
+    let mut event_count = events.len();
+    loop {
+        let selected = &events[..event_count];
+        let mut ndjson = String::new();
+        let mut last_seq = after;
+        append_ha_events_ndjson(&mut ndjson, after, limit, selected, &mut last_seq)?;
+        let compressed = zstd::stream::encode_all(ndjson.as_bytes(), 3)
+            .map_err(|err| (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()))?;
+        if compressed.len() <= max_compressed_bytes {
+            return Ok(EncodedHaEvents {
+                compressed,
+                last_seq,
+                event_count,
+            });
+        }
+        if event_count <= 1 {
+            return Err((
+                StatusCode::PAYLOAD_TOO_LARGE,
+                format!(
+                    "HA events payload exceeds compressed limit: {} > {max_compressed_bytes}",
+                    compressed.len()
+                ),
+            ));
+        }
+        event_count = event_count.div_ceil(2);
+    }
+}
+
+fn append_ha_events_ndjson(
+    ndjson: &mut String,
+    after: i64,
+    limit: i64,
+    events: &[HaEventResponseItem],
+    last_seq: &mut i64,
+) -> Result<(), (StatusCode, String)> {
     ndjson.push_str(
         &serde_json::to_string(&json!({
             "schemaVersion": 1,
@@ -163,16 +238,11 @@ async fn get_admin_ha_events(
         .map_err(|err| (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()))?,
     );
     ndjson.push('\n');
-    let mut last_seq = after;
-    for event in &events {
-        last_seq = event.seq;
+    for event in events {
+        *last_seq = event.seq;
         ndjson.push_str(
-            &serde_json::to_string(&json!({
-                "schemaVersion": 1,
-                "kind": "event",
-                "event": event
-            }))
-            .map_err(|err| (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()))?,
+            &serde_json::to_string(&event.value)
+                .map_err(|err| (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()))?,
         );
         ndjson.push('\n');
     }
@@ -180,22 +250,13 @@ async fn get_admin_ha_events(
         &serde_json::to_string(&json!({
             "schemaVersion": 1,
             "kind": "events_end",
-            "lastSeq": last_seq,
+            "lastSeq": *last_seq,
             "eventCount": events.len()
         }))
         .map_err(|err| (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()))?,
     );
     ndjson.push('\n');
-    let compressed = encode_zstd_limited(&ndjson, HA_EVENTS_MAX_COMPRESSED_BYTES)?;
-    Response::builder()
-        .status(StatusCode::OK)
-        .header(CONTENT_TYPE, "application/x-ndjson")
-        .header("content-encoding", "zstd")
-        .header("x-ha-schema-version", "1")
-        .header("x-ha-last-seq", last_seq.to_string())
-        .header("x-ha-event-count", events.len().to_string())
-        .body(Body::from(compressed))
-        .map_err(|err| (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()))
+    Ok(())
 }
 
 async fn post_admin_ha_events_ack(

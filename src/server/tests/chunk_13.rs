@@ -681,6 +681,41 @@ async fn ha_events_endpoint_returns_zstd_ndjson() {
     let _ = std::fs::remove_file(db_path);
 }
 
+#[test]
+fn ha_events_encoder_chunks_oversized_batches() {
+    let events = (1..=4)
+        .map(|seq| HaEventResponseItem {
+            seq,
+            value: serde_json::json!({
+                "schemaVersion": 1,
+                "kind": "event",
+                "event": {
+                    "seq": seq,
+                    "kind": "state",
+                    "resource": "meta",
+                    "resourceId": format!("request_rate_limit_v1-{seq}"),
+                    "op": "upsert",
+                    "payload": {
+                        "key": "request_rate_limit_v1",
+                        "value": format!("{}-{}", seq, nanoid!(512))
+                    },
+                    "createdAt": seq,
+                    "checksum": null
+                }
+            }),
+        })
+        .collect::<Vec<_>>();
+    let single = encode_ha_events_limited(0, 4, &events[..1], usize::MAX)
+        .expect("encode single event");
+    let full = encode_ha_events_limited(0, 4, &events, usize::MAX).expect("encode full batch");
+    assert!(full.compressed.len() > single.compressed.len());
+
+    let chunked = encode_ha_events_limited(0, 4, &events, single.compressed.len())
+        .expect("chunk oversized batch");
+    assert_eq!(chunked.event_count, 1);
+    assert_eq!(chunked.last_seq, 1);
+}
+
 #[tokio::test]
 async fn ha_events_storage_forces_rebaseline_when_retained_outbox_is_empty() {
     let db_path = temp_db_path("ha-events-empty-retention");

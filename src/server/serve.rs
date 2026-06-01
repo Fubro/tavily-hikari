@@ -576,7 +576,15 @@ async fn run_ha_standby_sync_once(
         .header("x-ha-internal-token", internal_token)
         .send()
         .await?;
-    if response.status() == reqwest::StatusCode::GONE {
+    if matches!(
+        response.status(),
+        reqwest::StatusCode::GONE | reqwest::StatusCode::PAYLOAD_TOO_LARGE
+    ) {
+        let reset_detail = if response.status() == reqwest::StatusCode::PAYLOAD_TOO_LARGE {
+            "events batch too large; baseline required"
+        } else {
+            "retention window missed; baseline required"
+        };
         state
             .proxy
             .persist_ha_sync_watermark(
@@ -584,7 +592,7 @@ async fn run_ha_standby_sync_once(
                 Some(source_url),
                 Some(&local_node_id),
                 0,
-                Some("retention window missed; baseline required"),
+                Some(reset_detail),
             )
             .await?;
         state
@@ -594,7 +602,7 @@ async fn run_ha_standby_sync_once(
                 Some(source_url),
                 Some(&local_node_id),
                 0,
-                Some("retention window missed; baseline required"),
+                Some(reset_detail),
             )
             .await?;
         return Ok(());
