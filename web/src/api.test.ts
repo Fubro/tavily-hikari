@@ -935,6 +935,7 @@ describe('admin user tag api helpers', () => {
               {
                 id: 37696,
                 jobType: 'quota_sync',
+                triggerSource: 'manual',
                 keyId: '7QZ5',
                 keyGroup: 'ops',
                 status: 'error',
@@ -952,6 +953,7 @@ describe('admin user tag api helpers', () => {
               quota: 1,
               usage: 1,
               logs: 1,
+              db: 1,
               geo: 0,
               linuxdo: 1,
             },
@@ -971,12 +973,14 @@ describe('admin user tag api helpers', () => {
       quota: 1,
       usage: 1,
       logs: 1,
+      db: 1,
       geo: 0,
       linuxdo: 1,
     })
     expect(jobs.items[0]).toEqual({
       id: 37696,
       job_type: 'quota_sync',
+      trigger_source: 'manual',
       key_id: '7QZ5',
       key_group: 'ops',
       status: 'error',
@@ -1001,6 +1005,7 @@ describe('admin user tag api helpers', () => {
               quota: 0,
               usage: 0,
               logs: 0,
+              db: 0,
               geo: 0,
               linuxdo: 0,
             },

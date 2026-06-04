@@ -57,6 +57,12 @@ brief contention visible as HTTP 500s or failed background bookkeeping.
 - Keep retention cleanup bounded. Large `request_logs` backlogs should be deleted in small batches
   with a runtime/batch budget and a catch-up delay, rather than one daily job holding or repeatedly
   contesting the writer until the whole backlog is gone.
+- Keep scheduled-job trigger provenance separate from logical job type. Use a dedicated
+  `trigger_source` column for scheduler/manual/auto runs so filters, duplicate detection, and
+  history remain stable as operators gain manual trigger buttons.
+- Treat SQLite file shrinkage as a separate maintenance concern. Row deletes and body nulling create
+  free pages; size convergence requires freelist telemetry plus a controlled compaction job after
+  retention cleanup has made space reclaimable.
 - Provide a one-shot operational CLI for retention cleanup so production-derived database samples
   can be tested deterministically. Do not rely only on the daily scheduler when validating cleanup
   behavior.
@@ -79,6 +85,8 @@ brief contention visible as HTTP 500s or failed background bookkeeping.
 - For WAL growth, inspect active readers and checkpoint behavior before running live maintenance.
 - Deleting rows does not shrink the SQLite file by itself. Treat VACUUM or database replacement as
   a separate maintenance-window decision after retention cleanup has completed.
+- Automatic compaction should be threshold-gated and cooldown-limited. Triggering it on every GC
+  pass can turn a cleanup backlog into a new writer-pressure loop.
 - If a retention table has aggregate-maintenance triggers, validate large-copy cleanup with the
   triggers in mind. For `request_logs`, GC deletes expired rollup buckets separately and suppresses
   the per-row rollup delete trigger inside each batch transaction to avoid spending minutes per

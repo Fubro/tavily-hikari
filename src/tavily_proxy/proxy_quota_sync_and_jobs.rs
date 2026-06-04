@@ -416,6 +416,42 @@ impl TavilyProxy {
             .await
     }
 
+    pub async fn scheduled_job_start_with_source(
+        &self,
+        job_type: &str,
+        trigger_source: &str,
+        key_id: Option<&str>,
+        attempt: i64,
+    ) -> Result<i64, ProxyError> {
+        self.key_store
+            .scheduled_job_start_with_source(job_type, trigger_source, key_id, attempt)
+            .await
+    }
+
+    pub async fn scheduled_job_claim(
+        &self,
+        job_type: &str,
+        trigger_source: &str,
+        key_id: Option<&str>,
+        attempt: i64,
+    ) -> Result<Option<i64>, ProxyError> {
+        self.key_store
+            .scheduled_job_claim(job_type, trigger_source, key_id, attempt)
+            .await
+    }
+
+    pub async fn abandon_running_scheduled_jobs(&self) -> Result<u64, ProxyError> {
+        self.key_store.abandon_running_scheduled_jobs().await
+    }
+
+    pub async fn sqlite_db_stats(&self) -> Result<SqliteDbStats, ProxyError> {
+        self.key_store.sqlite_db_stats().await
+    }
+
+    pub async fn compact_sqlite_database(&self) -> Result<SqliteDbStats, ProxyError> {
+        self.key_store.compact_sqlite_database().await
+    }
+
     pub async fn scheduled_job_finish(
         &self,
         job_id: i64,

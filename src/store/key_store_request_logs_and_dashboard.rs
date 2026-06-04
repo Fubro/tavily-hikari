@@ -1733,6 +1733,7 @@ impl KeyStore {
             r#"SELECT
                     j.id,
                     j.job_type,
+                    j.trigger_source,
                     j.key_id,
                     k.group_name AS key_group,
                     j.status,
@@ -1754,6 +1755,7 @@ impl KeyStore {
                 Ok(JobLog {
                     id: row.try_get("id")?,
                     job_type: row.try_get("job_type")?,
+                    trigger_source: row.try_get("trigger_source")?,
                     key_id: row.try_get::<Option<String>, _>("key_id")?,
                     key_group: row.try_get::<Option<String>, _>("key_group")?,
                     status: row.try_get("status")?,
@@ -1810,6 +1812,7 @@ impl KeyStore {
             SELECT
                 j.id,
                 j.job_type,
+                j.trigger_source,
                 j.key_id,
                 k.group_name AS key_group,
                 j.status,
@@ -1838,6 +1841,7 @@ impl KeyStore {
                 Ok(JobLog {
                     id: row.try_get("id")?,
                     job_type: row.try_get("job_type")?,
+                    trigger_source: row.try_get("trigger_source")?,
                     key_id: row.try_get::<Option<String>, _>("key_id")?,
                     key_group: row.try_get::<Option<String>, _>("key_group")?,
                     status: row.try_get("status")?,
@@ -1861,8 +1865,11 @@ impl KeyStore {
             "logs" => format!(
                 "{column} = 'auth_token_logs_gc' OR {column} = 'request_logs_gc' OR {column} = 'log_cleanup'"
             ),
+            "db" => format!("{column} = 'db_compaction'"),
             "geo" => format!("{column} = 'forward_proxy_geo_refresh'"),
-            "linuxdo" => format!("{column} = 'linuxdo_user_status_sync'"),
+            "linuxdo" => format!(
+                "{column} = 'linuxdo_user_status_sync' OR {column} = 'linuxdo_user_tag_binding_refresh'"
+            ),
             _ => return String::new(),
         };
         format!("WHERE {condition}")
@@ -1876,8 +1883,9 @@ impl KeyStore {
                 COALESCE(SUM(CASE WHEN job_type = 'quota_sync' OR job_type = 'quota_sync/manual' OR job_type = 'quota_sync/hot' THEN 1 ELSE 0 END), 0) AS quota_count,
                 COALESCE(SUM(CASE WHEN job_type = 'token_usage_rollup' OR job_type = 'usage_aggregation' THEN 1 ELSE 0 END), 0) AS usage_count,
                 COALESCE(SUM(CASE WHEN job_type = 'auth_token_logs_gc' OR job_type = 'request_logs_gc' OR job_type = 'log_cleanup' THEN 1 ELSE 0 END), 0) AS logs_count,
+                COALESCE(SUM(CASE WHEN job_type = 'db_compaction' THEN 1 ELSE 0 END), 0) AS db_count,
                 COALESCE(SUM(CASE WHEN job_type = 'forward_proxy_geo_refresh' THEN 1 ELSE 0 END), 0) AS geo_count,
-                COALESCE(SUM(CASE WHEN job_type = 'linuxdo_user_status_sync' THEN 1 ELSE 0 END), 0) AS linuxdo_count
+                COALESCE(SUM(CASE WHEN job_type = 'linuxdo_user_status_sync' OR job_type = 'linuxdo_user_tag_binding_refresh' THEN 1 ELSE 0 END), 0) AS linuxdo_count
             FROM scheduled_jobs
             "#,
         )
@@ -1889,6 +1897,7 @@ impl KeyStore {
             quota: row.try_get("quota_count")?,
             usage: row.try_get("usage_count")?,
             logs: row.try_get("logs_count")?,
+            db: row.try_get("db_count")?,
             geo: row.try_get("geo_count")?,
             linuxdo: row.try_get("linuxdo_count")?,
         })

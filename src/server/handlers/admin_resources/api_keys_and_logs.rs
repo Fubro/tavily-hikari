@@ -500,7 +500,7 @@ async fn post_api_key_bulk_actions(
             let mut results = Vec::with_capacity(total as usize);
 
             for (index, key_id) in normalized_ids.into_iter().enumerate() {
-                let result = match run_manual_key_quota_sync(state.as_ref(), &key_id).await {
+                let result = match run_manual_key_quota_sync(state.clone(), &key_id).await {
                     Ok(()) => BulkApiKeyActionResult {
                         key_id,
                         status: "success".to_string(),
@@ -645,7 +645,7 @@ async fn post_api_key_bulk_actions(
                     detail: Some(err.to_string()),
                 },
             },
-            BulkApiKeyActionKind::SyncUsage => match run_manual_key_quota_sync(state.as_ref(), &key_id).await {
+            BulkApiKeyActionKind::SyncUsage => match run_manual_key_quota_sync(state.clone(), &key_id).await {
                 Ok(()) => BulkApiKeyActionResult {
                     key_id,
                     status: "success".to_string(),

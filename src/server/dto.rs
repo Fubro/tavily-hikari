@@ -283,6 +283,7 @@ impl From<RequestLogBodiesRecord> for RequestLogBodiesView {
 struct JobLogView {
     id: i64,
     job_type: String,
+    trigger_source: String,
     key_id: Option<String>,
     key_group: Option<String>,
     status: String,

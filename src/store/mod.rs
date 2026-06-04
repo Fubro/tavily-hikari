@@ -1400,6 +1400,7 @@ pub(crate) struct UserDebugInfoSharedCacheEntry {
 
 #[derive(Debug)]
 pub(crate) struct KeyStore {
+    pub(crate) database_path: String,
     pub(crate) pool: SqlitePool,
     pub(crate) token_binding_cache: RwLock<HashMap<String, TokenBindingCacheEntry>>,
     pub(crate) account_quota_resolution_cache:

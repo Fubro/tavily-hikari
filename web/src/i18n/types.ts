@@ -1236,6 +1236,7 @@ export interface AdminTranslationsShape {
       quota: string
       usage: string
       logs: string
+      db: string
       geo: string
       linuxdo: string
     }
@@ -1243,11 +1244,15 @@ export interface AdminTranslationsShape {
       loading: string
       none: string
     }
+    actions: {
+      trigger: string
+    }
     table: {
       id: string
       type: string
       key: string
       status: string
+      source: string
       attempt: string
       started: string
       message: string
@@ -1256,6 +1261,7 @@ export interface AdminTranslationsShape {
       show: string
       hide: string
     }
+    sources?: Record<string, string>
     types?: Record<string, string>
   }
   logs: {

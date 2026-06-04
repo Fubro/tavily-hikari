@@ -7,13 +7,14 @@ export interface AdminJobFilterOption {
   count: number
 }
 
-const JOB_GROUP_VALUES = ['all', 'quota', 'usage', 'logs', 'geo', 'linuxdo'] as const
+const JOB_GROUP_VALUES = ['all', 'quota', 'usage', 'logs', 'db', 'geo', 'linuxdo'] as const
 
 const QUOTA_JOB_TYPES = new Set(['quota_sync', 'quota_sync/manual', 'quota_sync/hot'])
 const USAGE_JOB_TYPES = new Set(['token_usage_rollup', 'usage_aggregation'])
 const LOG_JOB_TYPES = new Set(['auth_token_logs_gc', 'request_logs_gc', 'log_cleanup'])
+const DB_JOB_TYPES = new Set(['db_compaction'])
 const GEO_JOB_TYPES = new Set(['forward_proxy_geo_refresh'])
-const LINUXDO_JOB_TYPES = new Set(['linuxdo_user_status_sync'])
+const LINUXDO_JOB_TYPES = new Set(['linuxdo_user_status_sync', 'linuxdo_user_tag_binding_refresh'])
 
 export function emptyAdminJobGroupCounts(): JobGroupCounts {
   return {
@@ -21,6 +22,7 @@ export function emptyAdminJobGroupCounts(): JobGroupCounts {
     quota: 0,
     usage: 0,
     logs: 0,
+    db: 0,
     geo: 0,
     linuxdo: 0,
   }
@@ -35,6 +37,8 @@ export function jobMatchesGroup(jobType: string, group: JobGroup): boolean {
       return USAGE_JOB_TYPES.has(normalized)
     case 'logs':
       return LOG_JOB_TYPES.has(normalized)
+    case 'db':
+      return DB_JOB_TYPES.has(normalized)
     case 'geo':
       return GEO_JOB_TYPES.has(normalized)
     case 'linuxdo':
@@ -53,6 +57,8 @@ export function jobFilterLabel(group: JobGroup, strings: AdminTranslations['jobs
       return strings.filters.usage
     case 'logs':
       return strings.filters.logs
+    case 'db':
+      return strings.filters.db
     case 'geo':
       return strings.filters.geo
     case 'linuxdo':

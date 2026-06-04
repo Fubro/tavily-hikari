@@ -97,6 +97,26 @@ describe('AdminPages Storybook proofs', () => {
     expect(markup).not.toContain('10 页')
   })
 
+  it('renders the jobs story with manual trigger controls and source labels', () => {
+    const renderStory = adminPageStories.Jobs.render as (() => JSX.Element) | undefined
+    expect(renderStory).toBeDefined()
+
+    const markup = renderToStaticMarkup(
+      createElement(
+        LanguageProvider,
+        { initialLanguage: 'en' },
+        createElement(ThemeProvider, null, createElement(TooltipProvider, null, createElement(renderStory!))),
+      ),
+    )
+
+    expect(markup).toContain('Run')
+    expect(markup).toContain('DB compaction is already running; manual trigger was not queued.')
+    expect(markup).toContain('DB compaction')
+    expect(markup).toContain('Auto')
+    expect(markup).toContain('Manual')
+    expect(markup).toContain('Scheduled')
+  })
+
   it('keeps the tokens story title and creation toolbar on the shell chrome', () => {
     const renderStory = adminPageStories.Tokens.render as (() => JSX.Element) | undefined
     expect(renderStory).toBeDefined()

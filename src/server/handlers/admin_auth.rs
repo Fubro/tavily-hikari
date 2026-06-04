@@ -23,8 +23,44 @@ struct JobGroupCountsView {
     quota: i64,
     usage: i64,
     logs: i64,
+    db: i64,
     geo: i64,
     linuxdo: i64,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct TriggerJobRequest {
+    job_type: String,
+    key_id: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct TriggerJobResponse {
+    job_id: i64,
+    job_type: String,
+    trigger_source: String,
+}
+
+fn manual_trigger_requires_key(job_type: &str) -> bool {
+    matches!(job_type, "quota_sync")
+}
+
+fn manual_trigger_supported(job_type: &str) -> bool {
+    matches!(
+        job_type,
+        "quota_sync"
+            | "token_usage_rollup"
+            | "auth_token_logs_gc"
+            | "request_logs_gc"
+            | "mcp_sessions_gc"
+            | "mcp_session_init_backoffs_gc"
+            | "linuxdo_user_status_sync"
+            | "linuxdo_user_tag_binding_refresh"
+            | "forward_proxy_geo_refresh"
+            | "db_compaction"
+    )
 }
 
 async fn list_jobs(
@@ -49,6 +85,7 @@ async fn list_jobs(
                 .map(|j| JobLogView {
                     id: j.id,
                     job_type: j.job_type,
+                    trigger_source: j.trigger_source,
                     key_id: j.key_id,
                     key_group: j.key_group,
                     status: j.status,
@@ -68,12 +105,90 @@ async fn list_jobs(
                     quota: group_counts.quota,
                     usage: group_counts.usage,
                     logs: group_counts.logs,
+                    db: group_counts.db,
                     geo: group_counts.geo,
                     linuxdo: group_counts.linuxdo,
                 },
             })
         })
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)
+}
+
+async fn post_trigger_job(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Json(payload): Json<TriggerJobRequest>,
+) -> Result<Response<Body>, StatusCode> {
+    if !is_admin_request(state.as_ref(), &headers) {
+        return Err(StatusCode::FORBIDDEN);
+    }
+    if require_full_master_write(state.as_ref()).await.is_err() {
+        return Err(StatusCode::SERVICE_UNAVAILABLE);
+    }
+
+    let job_type = payload.job_type.trim().to_string();
+    if !manual_trigger_supported(&job_type) {
+        return Ok((
+            StatusCode::BAD_REQUEST,
+            Json(json!({
+                "error": "unsupported_job_type",
+                "detail": format!("manual trigger is not supported for {job_type}")
+            })),
+        )
+            .into_response());
+    }
+    let key_id = payload
+        .key_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string);
+    if manual_trigger_requires_key(&job_type) && key_id.is_none() {
+        return Ok((
+            StatusCode::BAD_REQUEST,
+            Json(json!({
+                "error": "key_id_required",
+                "detail": "keyId is required for quota_sync"
+            })),
+        )
+            .into_response());
+    }
+
+    match state
+        .proxy
+        .scheduled_job_claim(&job_type, TRIGGER_SOURCE_MANUAL, key_id.as_deref(), 1)
+        .await
+    {
+        Ok(Some(job_id)) => {
+            let run_state = state.clone();
+            let run_job_type = job_type.clone();
+            let run_key_id = key_id.clone();
+            tokio::spawn(async move {
+                run_manual_claimed_job(run_state, run_job_type, run_key_id, job_id).await;
+            });
+            Ok((
+                StatusCode::ACCEPTED,
+                Json(TriggerJobResponse {
+                    job_id,
+                    job_type,
+                    trigger_source: TRIGGER_SOURCE_MANUAL.to_string(),
+                }),
+            )
+                .into_response())
+        }
+        Ok(None) => Ok((
+            StatusCode::CONFLICT,
+            Json(json!({
+                "error": "job_already_running",
+                "detail": format!("{job_type} is already running")
+            })),
+        )
+            .into_response()),
+        Err(err) => {
+            eprintln!("manual job trigger error: {err}");
+            Err(StatusCode::INTERNAL_SERVER_ERROR)
+        }
+    }
 }
 
 // ---- Key detail & manual quota sync ----
@@ -106,7 +221,7 @@ async fn post_sync_key_usage(
     if !is_admin_request(state.as_ref(), &headers) {
         return Err(StatusCode::FORBIDDEN);
     }
-    match run_manual_key_quota_sync(state.as_ref(), &id).await {
+    match run_manual_key_quota_sync(state.clone(), &id).await {
         Ok(()) => Ok(StatusCode::NO_CONTENT.into_response()),
         Err(err) => Ok((
             err.status_code,
@@ -137,12 +252,12 @@ impl ManualQuotaSyncError {
 }
 
 async fn run_manual_key_quota_sync(
-    state: &AppState,
+    state: Arc<AppState>,
     key_id: &str,
 ) -> Result<(), ManualQuotaSyncError> {
-    let job_id = state
+    let job_id = match state
         .proxy
-        .scheduled_job_start("quota_sync/manual", Some(key_id), 1)
+        .scheduled_job_claim("quota_sync", TRIGGER_SOURCE_MANUAL, Some(key_id), 1)
         .await
         .map_err(|err| {
             ManualQuotaSyncError::new(
@@ -150,7 +265,17 @@ async fn run_manual_key_quota_sync(
                 "sync_failed",
                 err.to_string(),
             )
-        })?;
+        })?
+    {
+        Some(job_id) => job_id,
+        None => {
+            Err(ManualQuotaSyncError::new(
+                StatusCode::CONFLICT,
+                "job_already_running",
+                "quota_sync is already running for this key".to_string(),
+            ))?
+        }
+    };
 
     match state
         .proxy
@@ -192,11 +317,7 @@ async fn run_manual_key_quota_sync(
                 .proxy
                 .scheduled_job_finish(job_id, "error", Some(&detail))
                 .await;
-            Err(ManualQuotaSyncError::new(
-                http_status,
-                "usage_http",
-                detail,
-            ))
+            Err(ManualQuotaSyncError::new(http_status, "usage_http", detail))
         }
         Err(err) => {
             let reason = err.to_string();

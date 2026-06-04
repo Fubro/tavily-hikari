@@ -1368,6 +1368,26 @@ export function fetchApiKeySecret(id: string, signal?: AbortSignal): Promise<Api
   return requestJson(`/api/keys/${encoded}/secret`, { signal })
 }
 
+export interface TriggerJobResponse {
+  job_id: number
+  job_type: string
+  trigger_source: string
+}
+
+interface ServerTriggerJobResponse {
+  jobId: number
+  jobType: string
+  triggerSource: string
+}
+
+function normalizeTriggerJobResponse(data: ServerTriggerJobResponse): TriggerJobResponse {
+  return {
+    job_id: data.jobId,
+    job_type: data.jobType,
+    trigger_source: data.triggerSource,
+  }
+}
+
 export async function syncApiKeyUsage(id: string): Promise<void> {
   const encoded = encodeURIComponent(id)
   const res = await fetch(`/api/keys/${encoded}/sync-usage`, { method: 'POST' })
@@ -1382,6 +1402,14 @@ export async function syncApiKeyUsage(id: string): Promise<void> {
     const statusPart = ` (HTTP ${res.status})`
     throw new Error((message ? `${message}` : 'Failed to sync key usage') + statusPart)
   }
+}
+
+export function triggerJob(jobType: string, keyId?: string | null): Promise<TriggerJobResponse> {
+  return requestJson<ServerTriggerJobResponse>('/api/jobs/trigger', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ jobType, keyId }),
+  }).then(normalizeTriggerJobResponse)
 }
 
 export async function applyApiKeyBulkAction(
@@ -1507,6 +1535,7 @@ export async function syncApiKeyBulkUsageWithProgress(
 export interface JobLogView {
   id: number
   job_type: string
+  trigger_source: 'scheduler' | 'manual' | 'auto' | string
   key_id: string | null
   key_group: string | null
   status: string
@@ -1519,6 +1548,7 @@ export interface JobLogView {
 interface ServerJobLogView {
   id: number
   jobType: string
+  triggerSource?: string
   keyId: string | null
   keyGroup: string | null
   status: string
@@ -1528,13 +1558,14 @@ interface ServerJobLogView {
   finishedAt: number | null
 }
 
-export type JobGroup = 'all' | 'quota' | 'usage' | 'logs' | 'geo' | 'linuxdo'
+export type JobGroup = 'all' | 'quota' | 'usage' | 'logs' | 'db' | 'geo' | 'linuxdo'
 
 export interface JobGroupCounts {
   all: number
   quota: number
   usage: number
   logs: number
+  db: number
   geo: number
   linuxdo: number
 }
@@ -1544,6 +1575,7 @@ interface ServerJobGroupCounts {
   quota: number
   usage: number
   logs: number
+  db?: number
   geo: number
   linuxdo: number
 }
@@ -2670,12 +2702,14 @@ export function fetchJobs(
       quota: data.groupCounts.quota,
       usage: data.groupCounts.usage,
       logs: data.groupCounts.logs,
+      db: data.groupCounts.db ?? 0,
       geo: data.groupCounts.geo,
       linuxdo: data.groupCounts.linuxdo,
     },
     items: data.items.map((item) => ({
       id: item.id,
       job_type: item.jobType,
+      trigger_source: item.triggerSource ?? 'scheduler',
       key_id: item.keyId,
       key_group: item.keyGroup,
       status: item.status,

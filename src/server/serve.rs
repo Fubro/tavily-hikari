@@ -53,6 +53,13 @@ pub async fn serve(
         usage_base: usage_base.clone(),
         api_key_ip_geo_origin,
     });
+    match state.proxy.abandon_running_scheduled_jobs().await {
+        Ok(count) if count > 0 => {
+            eprintln!("scheduled-jobs: abandoned {count} stale running jobs from previous process")
+        }
+        Ok(_) => {}
+        Err(err) => eprintln!("scheduled-jobs: stale running cleanup warning: {err}"),
+    }
     spawn_ha_standby_sync_task(state.clone());
     println!(
         "Admin auth modes: forward_enabled={} builtin_enabled={} dev_open_admin={}",
@@ -249,6 +256,7 @@ pub async fn serve(
         .route("/api/keys/:id", delete(delete_api_key))
         .route("/api/keys/:id/status", patch(update_api_key_status))
         .route("/api/jobs", get(list_jobs))
+        .route("/api/jobs/trigger", post(post_trigger_job))
         .route("/api/logs", get(list_logs))
         .route("/api/logs/list", get(list_logs_cursor))
         .route("/api/logs/catalog", get(get_logs_catalog))
@@ -415,11 +423,13 @@ pub async fn serve(
     spawn_linuxdo_user_tag_binding_refresh_scheduler(state.clone());
     let _forward_proxy_geo_refresh_scheduler = spawn_forward_proxy_geo_refresh_scheduler(state.clone());
     spawn_forward_proxy_maintenance_scheduler(state.clone());
+    spawn_db_compaction_scheduler(state.clone());
     spawn_ha_edgeone_authority_task(state.clone());
 
     axum::serve(
         listener,
         router
+            .layer(axum::middleware::from_fn(db_maintenance_http_gate))
             .with_state(state)
             .into_make_service_with_connect_info::<SocketAddr>(),
     )

@@ -1814,6 +1814,7 @@ impl From<JobLog> for JobLogView {
         Self {
             id: value.id,
             job_type: value.job_type,
+            trigger_source: value.trigger_source,
             key_id: value.key_id,
             key_group: value.key_group,
             status: value.status,

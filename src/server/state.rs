@@ -13,6 +13,24 @@ struct AppState {
     api_key_ip_geo_origin: String,
 }
 
+static DB_MAINTENANCE_GATE: OnceLock<RwLock<()>> = OnceLock::new();
+
+fn db_maintenance_gate() -> &'static RwLock<()> {
+    DB_MAINTENANCE_GATE.get_or_init(|| RwLock::new(()))
+}
+
+async fn db_maintenance_http_gate(
+    req: Request<Body>,
+    next: axum::middleware::Next,
+) -> Response<Body> {
+    if req.uri().path() == "/health" {
+        return next.run(req).await;
+    }
+
+    let _guard = db_maintenance_gate().read().await;
+    next.run(req).await
+}
+
 async fn ensure_ha_allows_basic_business(
     state: &Arc<AppState>,
     path: &str,

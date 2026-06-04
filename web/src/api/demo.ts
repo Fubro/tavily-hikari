@@ -424,6 +424,7 @@ function createDemoJobs() {
   return range(12).map((index) => ({
     id: 3000 + index,
     jobType: index % 3 === 0 ? 'quota_sync' : index % 3 === 1 ? 'usage_rollup' : 'geo_lookup',
+    triggerSource: index % 4 === 0 ? 'manual' : index % 4 === 1 ? 'auto' : 'scheduler',
     keyId: index % 2 === 0 ? DEMO_KEY_ID : DEMO_BACKUP_KEY_ID,
     keyGroup: index % 2 === 0 ? 'primary' : 'backup',
     status: index % 5 === 0 ? 'failed' : 'success',
@@ -767,6 +768,7 @@ function serverJobToView(job: ReturnType<typeof createDemoJobs>[number]) {
   return {
     id: job.id,
     job_type: job.jobType,
+    trigger_source: job.triggerSource,
     key_id: job.keyId,
     key_group: job.keyGroup,
     status: job.status,
@@ -1119,7 +1121,7 @@ async function handleDemoRoute(url: URL, method: string, init?: RequestInit): Pr
   if (path === '/api/logs/catalog') return jsonResponse(requestLogsCatalog())
   if (path === '/api/logs') return jsonResponse(requestLogsPage(url))
   if (/^\/api\/logs\/\d+\/details$/.test(path)) return jsonResponse(demoLogDetailForPath(path))
-  if (path === '/api/jobs') return jsonResponse({ ...buildListPage(demoState.jobs, url, 10), groupCounts: { all: demoState.jobs.length, quota: 4, usage: 4, logs: 2, geo: 2, linuxdo: 0 } })
+  if (path === '/api/jobs') return jsonResponse({ ...buildListPage(demoState.jobs, url, 10), groupCounts: { all: demoState.jobs.length, quota: 4, usage: 4, logs: 2, db: 0, geo: 2, linuxdo: 0 } })
 
   if (path === '/api/announcements') return handleAnnouncementsRoute({ announcements: demoState.announcements, path, method, init, nowSeconds, readJsonBody, jsonResponse })
   if (path.startsWith('/api/announcements/')) return handleAnnouncementsRoute({ announcements: demoState.announcements, path, method, init, nowSeconds, readJsonBody, jsonResponse })

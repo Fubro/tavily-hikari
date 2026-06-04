@@ -1331,6 +1331,7 @@ export const EN: TranslationShape = {
           quota: 'Sync quota',
           usage: 'Usage rollups',
           logs: 'Clean access logs',
+          db: 'Compact database',
           geo: 'Node IP/GEO refresh',
           linuxdo: 'LinuxDo user sync',
         },
@@ -1338,11 +1339,15 @@ export const EN: TranslationShape = {
           loading: 'Loading jobs…',
           none: 'No jobs yet.',
         },
+        actions: {
+          trigger: 'Run',
+        },
         table: {
           id: 'ID',
           type: 'Type',
           key: 'Key',
           status: 'Status',
+          source: 'Source',
           attempt: 'Attempt',
           started: 'Started',
           message: 'Message',
@@ -1350,6 +1355,11 @@ export const EN: TranslationShape = {
         toggles: {
           show: 'Show job details',
           hide: 'Hide job details',
+        },
+        sources: {
+          scheduler: 'Scheduled',
+          manual: 'Manual',
+          auto: 'Auto',
         },
         types: {
           quota_sync: 'Sync quota',
@@ -1360,8 +1370,10 @@ export const EN: TranslationShape = {
           auth_token_logs_gc: 'Log cleanup',
           request_logs_gc: 'Log cleanup',
           log_cleanup: 'Log cleanup',
+          db_compaction: 'DB compaction',
           forward_proxy_geo_refresh: 'Node IP/GEO refresh',
           linuxdo_user_status_sync: 'LinuxDo user sync',
+          linuxdo_user_tag_binding_refresh: 'LinuxDo tag refresh',
         },
       },
       statuses: {

@@ -1390,6 +1390,7 @@ pub struct SuccessBreakdown {
 pub struct JobLog {
     pub id: i64,
     pub job_type: String,
+    pub trigger_source: String,
     pub key_id: Option<String>,
     pub key_group: Option<String>,
     pub status: String,
@@ -1405,8 +1406,20 @@ pub struct JobGroupCounts {
     pub quota: i64,
     pub usage: i64,
     pub logs: i64,
+    pub db: i64,
     pub geo: i64,
     pub linuxdo: i64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct SqliteDbStats {
+    pub database_bytes: u64,
+    pub wal_bytes: u64,
+    pub page_size: i64,
+    pub page_count: i64,
+    pub freelist_count: i64,
+    pub reclaimable_bytes: u64,
+    pub reclaimable_ratio: f64,
 }
 
 pub(crate) fn random_string(alphabet: &[u8], len: usize) -> String {

@@ -920,8 +920,21 @@ function buildStoryRequestLogsList(
 
 const MOCK_JOBS: JobLogView[] = [
   {
+    id: 613,
+    job_type: 'db_compaction',
+    trigger_source: 'auto',
+    key_id: null,
+    key_group: null,
+    status: 'success',
+    attempt: 1,
+    message: 'database_bytes_before=16106127360 database_bytes_after=4294967296 reclaimable_bytes_before=10737418240 reclaimable_bytes_after=0',
+    started_at: now - 8,
+    finished_at: now - 2,
+  },
+  {
     id: 612,
     job_type: 'linuxdo_user_status_sync',
+    trigger_source: 'scheduler',
     key_id: null,
     key_group: null,
     status: 'error',
@@ -933,6 +946,7 @@ const MOCK_JOBS: JobLogView[] = [
   {
     id: 611,
     job_type: 'forward_proxy_geo_refresh',
+    trigger_source: 'manual',
     key_id: null,
     key_group: null,
     status: 'success',
@@ -944,6 +958,7 @@ const MOCK_JOBS: JobLogView[] = [
   {
     id: 610,
     job_type: 'quota_sync',
+    trigger_source: 'manual',
     key_id: 'MZli',
     key_group: 'ops',
     status: 'success',
@@ -955,6 +970,7 @@ const MOCK_JOBS: JobLogView[] = [
   {
     id: 609,
     job_type: 'token_usage_rollup',
+    trigger_source: 'scheduler',
     key_id: 'U2vK',
     key_group: null,
     status: 'running',
@@ -966,6 +982,7 @@ const MOCK_JOBS: JobLogView[] = [
   {
     id: 608,
     job_type: 'quota_sync',
+    trigger_source: 'scheduler',
     key_id: 'asR8',
     key_group: 'batch',
     status: 'error',
@@ -977,6 +994,7 @@ const MOCK_JOBS: JobLogView[] = [
   {
     id: 607,
     job_type: 'auth_token_logs_gc',
+    trigger_source: 'scheduler',
     key_id: null,
     key_group: null,
     status: 'success',
@@ -4533,6 +4551,8 @@ function JobsPageCanvas(): JSX.Element {
   const keyStrings = admin.keys
   const [jobFilter, setJobFilter] = useState<JobGroup>('all')
   const [expandedJobs, setExpandedJobs] = useState<Set<number>>(() => new Set([608]))
+  const [jobTriggering, setJobTriggering] = useState<string | null>(null)
+  const [jobTriggerNotice, setJobTriggerNotice] = useState('DB compaction is already running; manual trigger was not queued.')
   const jobGroupCounts = useMemo(() => countAdminJobGroups(MOCK_JOBS), [])
   const jobFilterOptions = useMemo(
     () => buildAdminJobFilterOptions(jobsStrings, jobGroupCounts),
@@ -4543,6 +4563,22 @@ function JobsPageCanvas(): JSX.Element {
     () => MOCK_JOBS.filter((job) => jobMatchesGroup(job.job_type, jobFilter)),
     [jobFilter],
   )
+  const manualJobActions = [
+    'token_usage_rollup',
+    'request_logs_gc',
+    'forward_proxy_geo_refresh',
+    'db_compaction',
+  ]
+
+  const runStoryJob = (jobType: string) => {
+    setJobTriggering(jobType)
+    setJobTriggerNotice(
+      jobType === 'db_compaction'
+        ? 'DB compaction is already running; manual trigger was not queued.'
+        : `${jobsStrings.types?.[jobType] ?? jobType} queued as a manual job.`,
+    )
+    window.setTimeout(() => setJobTriggering(null), 900)
+  }
 
   const toggleJob = (id: number) => {
     setExpandedJobs((prev) => {
@@ -4565,6 +4601,32 @@ function JobsPageCanvas(): JSX.Element {
             <p className="panel-description">{jobsStrings.description}</p>
           </div>
           <div className="panel-actions">
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button type="button" variant="outline" size="sm" disabled={jobTriggering != null}>
+                  <Icon icon="mdi:play-circle-outline" width={16} height={16} aria-hidden="true" />
+                  <span style={{ whiteSpace: 'nowrap' }}>
+                    {jobTriggering ? jobsStrings.types?.[jobTriggering] ?? jobTriggering : jobsStrings.actions.trigger}
+                  </span>
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-80">
+                <DropdownMenuLabel>{jobsStrings.title}</DropdownMenuLabel>
+                {manualJobActions.map((jobType) => (
+                  <DropdownMenuItem
+                    key={jobType}
+                    disabled={jobTriggering != null}
+                    onSelect={(event) => {
+                      event.preventDefault()
+                      runStoryJob(jobType)
+                    }}
+                  >
+                    <Icon icon="mdi:play-outline" width={16} height={16} aria-hidden="true" />
+                    <span>{jobsStrings.types?.[jobType] ?? jobType}</span>
+                  </DropdownMenuItem>
+                ))}
+              </DropdownMenuContent>
+            </DropdownMenu>
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button
@@ -4597,6 +4659,9 @@ function JobsPageCanvas(): JSX.Element {
             </DropdownMenu>
           </div>
         </div>
+        <div className="empty-state alert" role="status" style={{ marginBottom: 16 }}>
+          {jobTriggerNotice}
+        </div>
 
         <div className="table-wrapper jobs-table-wrapper jobs-module-table-wrapper">
           <table className="jobs-table jobs-module-table">
@@ -4606,6 +4671,7 @@ function JobsPageCanvas(): JSX.Element {
                 <th>{jobsStrings.table.type}</th>
                 <th>{jobsStrings.table.key}</th>
                 <th>{jobsStrings.table.status}</th>
+                <th>{jobsStrings.table.source}</th>
                 <th>{jobsStrings.table.attempt}</th>
                 <th>{jobsStrings.table.started}</th>
                 <th>{jobsStrings.table.message}</th>
@@ -4634,6 +4700,7 @@ function JobsPageCanvas(): JSX.Element {
                       <td>
                         <StatusBadge tone={keyStatusTone(job.status)}>{admin.statuses[job.status] ?? job.status}</StatusBadge>
                       </td>
+                      <td>{jobsStrings.sources?.[job.trigger_source] ?? job.trigger_source}</td>
                       <td>{job.attempt}</td>
                       <td>{formatTimestamp(job.started_at)}</td>
                       <td className="jobs-message-cell">
@@ -4661,7 +4728,7 @@ function JobsPageCanvas(): JSX.Element {
                     </tr>
                     {expanded && hasMessage && (
                       <tr className="log-details-row">
-                        <td colSpan={7} id={`storybook-job-details-${job.id}`}>
+                        <td colSpan={8} id={`storybook-job-details-${job.id}`}>
                           <div className="log-details-panel">
                             <div className="log-details-summary">
                               <div>
@@ -4687,6 +4754,12 @@ function JobsPageCanvas(): JSX.Element {
                                 <div className="log-details-label">{jobsStrings.table.status}</div>
                                 <div className="log-details-value">{admin.statuses[job.status] ?? job.status}</div>
                               </div>
+                              <div>
+                                <div className="log-details-label">{jobsStrings.table.source}</div>
+                                <div className="log-details-value">
+                                  {jobsStrings.sources?.[job.trigger_source] ?? job.trigger_source}
+                                </div>
+                              </div>
                             </div>
                             <div className="log-details-body">
                               <section className="log-details-section">
@@ -4703,7 +4776,7 @@ function JobsPageCanvas(): JSX.Element {
               })}
               {visibleJobs.length === 0 ? (
                 <tr>
-                  <td colSpan={7}>
+                  <td colSpan={8}>
                     <div className="empty-state alert">{jobsStrings.empty.none}</div>
                   </td>
                 </tr>

@@ -1374,21 +1374,35 @@ async fn list_recent_jobs_paginated_includes_key_group() {
         .await
         .expect("finish linuxdo job");
 
+    let linuxdo_tag_refresh_job_id = proxy
+        .scheduled_job_start("linuxdo_user_tag_binding_refresh", None, 1)
+        .await
+        .expect("start linuxdo tag refresh job");
+    proxy
+        .scheduled_job_finish(
+            linuxdo_tag_refresh_job_id,
+            "success",
+            Some("refreshed=4"),
+        )
+        .await
+        .expect("finish linuxdo tag refresh job");
+
     let (items, total, group_counts) = proxy
         .list_recent_jobs_paginated("all", 1, 10)
         .await
         .expect("list jobs");
 
-    assert_eq!(total, 6);
+    assert_eq!(total, 7);
     assert_eq!(
         group_counts,
         JobGroupCounts {
-            all: 6,
+            all: 7,
             quota: 2,
             usage: 1,
             logs: 1,
+            db: 0,
             geo: 1,
-            linuxdo: 1,
+            linuxdo: 2,
         }
     );
 
@@ -1439,11 +1453,20 @@ async fn list_recent_jobs_paginated_includes_key_group() {
         .list_recent_jobs_paginated("linuxdo", 1, 10)
         .await
         .expect("list linuxdo jobs");
-    assert_eq!(linuxdo_total, 1);
-    assert_eq!(linuxdo_items.len(), 1);
-    assert_eq!(linuxdo_items[0].job_type, "linuxdo_user_status_sync");
-    assert_eq!(linuxdo_items[0].key_id, None);
-    assert_eq!(linuxdo_counts.linuxdo, 1);
+    assert_eq!(linuxdo_total, 2);
+    assert_eq!(linuxdo_items.len(), 2);
+    assert!(
+        linuxdo_items
+            .iter()
+            .any(|item| item.job_type == "linuxdo_user_status_sync" && item.key_id.is_none())
+    );
+    assert!(
+        linuxdo_items
+            .iter()
+            .any(|item| item.job_type == "linuxdo_user_tag_binding_refresh"
+                && item.key_id.is_none())
+    );
+    assert_eq!(linuxdo_counts.linuxdo, 2);
 
     let _ = std::fs::remove_file(db_path);
 }

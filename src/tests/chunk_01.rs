@@ -2296,6 +2296,7 @@ async fn request_kind_database_migration_retries_after_transient_write_lock() {
         .await
         .expect("busy-test pool");
     let store = KeyStore {
+        database_path: db_path.to_string_lossy().into_owned(),
         pool,
         token_binding_cache: RwLock::new(std::collections::HashMap::new()),
         account_quota_resolution_cache: RwLock::new(std::collections::HashMap::new()),

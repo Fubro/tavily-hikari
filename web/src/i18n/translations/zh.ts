@@ -1330,6 +1330,7 @@ export const ZH: TranslationShape = {
           quota: '同步额度',
           usage: '用量聚合',
           logs: '清理日志',
+          db: '压缩数据库',
           geo: '节点 IP/GEO 刷新',
           linuxdo: 'LinuxDo 用户同步',
         },
@@ -1337,11 +1338,15 @@ export const ZH: TranslationShape = {
           loading: '正在加载任务…',
           none: '暂无任务记录。',
         },
+        actions: {
+          trigger: '运行',
+        },
         table: {
           id: 'ID',
           type: '类型',
           key: 'Key',
           status: '状态',
+          source: '来源',
           attempt: '重试次数',
           started: '开始时间',
           message: '消息',
@@ -1349,6 +1354,11 @@ export const ZH: TranslationShape = {
         toggles: {
           show: '展开任务详情',
           hide: '收起任务详情',
+        },
+        sources: {
+          scheduler: '定时',
+          manual: '手动',
+          auto: '自动',
         },
         types: {
           quota_sync: '同步额度',
@@ -1359,8 +1369,10 @@ export const ZH: TranslationShape = {
           auth_token_logs_gc: '日志清理',
           request_logs_gc: '日志清理',
           log_cleanup: '日志清理',
+          db_compaction: '数据库压缩',
           forward_proxy_geo_refresh: '节点 IP/GEO 刷新',
           linuxdo_user_status_sync: 'LinuxDo 用户同步',
+          linuxdo_user_tag_binding_refresh: 'LinuxDo 标签刷新',
         },
       },
       statuses: {

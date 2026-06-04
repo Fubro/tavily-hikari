@@ -20,3 +20,10 @@
   timing showed SQLite initialization dominated by per-user binding sync on an already consistent
   database. Startup still performs a cheap mismatch repair check; periodic refresh now runs in the
   background scheduler.
+
+## 2026-06-04
+
+- Extended the hardening scope from transient write retries to operator-controlled scheduled jobs
+  and DB size convergence. Manual and automatic maintenance now share job bookkeeping semantics, and
+  SQLite file shrinkage is treated as an explicit compaction concern rather than an implicit side
+  effect of deleting old rows.

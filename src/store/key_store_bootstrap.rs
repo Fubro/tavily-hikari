@@ -1,6 +1,7 @@
 impl KeyStore {
     pub(crate) async fn new(database_path: &str) -> Result<Self, ProxyError> {
         let store = Self {
+            database_path: database_path.to_string(),
             pool: open_sqlite_pool(database_path, true, false).await?,
             token_binding_cache: RwLock::new(HashMap::new()),
             account_quota_resolution_cache: RwLock::new(HashMap::new()),
@@ -20,6 +21,7 @@ impl KeyStore {
         database_path: &str,
     ) -> Result<Self, ProxyError> {
         let store = Self {
+            database_path: database_path.to_string(),
             pool: open_sqlite_pool(database_path, true, false).await?,
             token_binding_cache: RwLock::new(HashMap::new()),
             account_quota_resolution_cache: RwLock::new(HashMap::new()),
@@ -1306,6 +1308,7 @@ impl KeyStore {
             CREATE TABLE IF NOT EXISTS scheduled_jobs (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 job_type TEXT NOT NULL,
+                trigger_source TEXT NOT NULL DEFAULT 'scheduler',
                 key_id TEXT,
                 status TEXT NOT NULL,
                 attempt INTEGER NOT NULL DEFAULT 1,
@@ -1318,6 +1321,17 @@ impl KeyStore {
         )
         .execute(&self.pool)
         .await?;
+
+        if !self
+            .table_column_exists("scheduled_jobs", "trigger_source")
+            .await?
+        {
+            sqlx::query(
+                "ALTER TABLE scheduled_jobs ADD COLUMN trigger_source TEXT NOT NULL DEFAULT 'scheduler'",
+            )
+            .execute(&self.pool)
+            .await?;
+        }
 
         self.ensure_meta_schema().await?;
 

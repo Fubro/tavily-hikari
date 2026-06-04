@@ -66,10 +66,20 @@ source when a usable persisted runtime already exists.
   their configured subscription ownership is unambiguous. When at least one restored subscription
   endpoint exists, startup must not block on remote refresh before xray sync/runtime persistence;
   without safely restorable endpoints, startup continues to wait for subscription readiness.
+- Scheduled job records must preserve the logical job type and record the trigger source separately
+  as `scheduler`, `manual`, or `auto`. Manual runs must not be encoded by appending suffixes to
+  `job_type`.
+- Manual scheduled-job triggers must use the same execution path as scheduler runs, reject duplicate
+  active runs of the same logical job, and mark stale `running` rows from prior process lifetimes as
+  abandoned before accepting new work.
 - `request_logs_gc` must not hold the SQLite write slot for an unbounded full-retention cleanup
   pass. It must delete old `request_logs` and `request_log_catalog_rollups` in bounded batches,
-  yield between batches, report partial progress, and continue catch-up after a delay when more
-  rows remain.
+  yield between batches, report partial progress, and continue catch-up after a throttled delay when
+  more rows remain.
+- SQLite file size must converge after retention cleanup. The service must expose DB size/freelist
+  telemetry, automatically trigger compaction when reclaimable space crosses the configured
+  threshold, and provide a manual compaction trigger. Health checks must remain available while DB
+  maintenance is active.
 - A one-shot request-log GC CLI must reuse the same bounded cleanup path so production database
   samples can be validated deterministically without waiting for the daily scheduler.
 - Request-log GC must avoid high-resource catch-up strategies such as rebuilding the whole
@@ -92,6 +102,10 @@ source when a usable persisted runtime already exists.
 - With a large backlog of old request logs, one scheduler pass records bounded progress instead of
   running indefinitely; later catch-up passes eventually remove all rows older than the retention
   threshold.
+- Manual trigger API calls return a job id, job rows expose `trigger_source`, and duplicate active
+  manual triggers return a conflict instead of starting overlapping work.
+- After request-log retention cleanup creates enough freelist pages, DB compaction runs under the
+  maintenance gate and reduces the main SQLite file size or reports why compaction was skipped.
 - `request_logs_gc_once --run-until-complete --json` removes old request logs and catalog rollups
   from a production-derived validation sample and reports `completed=true` when no old rows remain,
   while keeping WAL growth and CPU time bounded.

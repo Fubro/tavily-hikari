@@ -33,6 +33,12 @@
   updates covered by the trigger set.
 - The daily `request_logs_gc` scheduler records partial progress in `scheduled_jobs` and waits
   before continuing catch-up instead of keeping one long-running cleanup job open.
+- Scheduled jobs now distinguish `trigger_source` from `job_type`, use an atomic claim path to avoid
+  duplicate active work, and expose manual trigger entrypoints for maintenance/admin jobs.
+- Request-log GC catch-up now uses smaller scheduler windows and slower retry cadence so a large
+  body-cleanup backlog does not repeatedly consume the SQLite writer slot.
+- DB maintenance now records size/freelist telemetry and can compact the SQLite file through a
+  dedicated job, with automatic threshold-based triggering and manual admin triggering.
 - Added `request_logs_gc_once` as a one-shot operational binary. It supports JSON output and
   `--run-until-complete` for deterministic low-resource validation against production-derived
   database samples.
@@ -61,4 +67,7 @@
 - Later production inspection found a `20G` database where startup spent roughly `78s` inside
   SQLite initialization; the repeated LinuxDo tag binding refresh over all OAuth accounts was a
   primary avoidable startup cost, so periodic refresh now runs outside the readiness path.
+- A later request-log body-retention backlog produced a much larger main DB file even after row
+  retention was no longer the primary issue. Deleting or nulling payloads alone leaves free pages in
+  SQLite, so file-size convergence is handled as a separate compaction job after retention work.
 - The implementation does not perform production data mutation and does not alter pool size.

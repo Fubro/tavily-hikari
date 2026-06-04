@@ -66,6 +66,137 @@ async fn scheduled_job_start_retries_transient_sqlite_write_lock() {
 }
 
 #[tokio::test]
+async fn scheduled_job_claim_records_trigger_source_and_rejects_duplicate_running_job() {
+    let db_path = temp_db_path("scheduled-job-claim-trigger-source");
+    let db_str = db_path.to_string_lossy().to_string();
+    let proxy = TavilyProxy::with_endpoint(Vec::<String>::new(), DEFAULT_UPSTREAM, &db_str)
+        .await
+        .expect("proxy created");
+
+    let job_id = proxy
+        .scheduled_job_claim("request_logs_gc", "manual", None, 1)
+        .await
+        .expect("claim manual job")
+        .expect("manual job claimed");
+    let duplicate = proxy
+        .scheduled_job_claim("request_logs_gc", "manual", None, 1)
+        .await
+        .expect("duplicate claim checked");
+    assert!(duplicate.is_none());
+
+    let trigger_source: String =
+        sqlx::query_scalar("SELECT trigger_source FROM scheduled_jobs WHERE id = ?")
+            .bind(job_id)
+            .fetch_one(&proxy.key_store.pool)
+            .await
+            .expect("read trigger source");
+    assert_eq!(trigger_source, "manual");
+
+    proxy
+        .scheduled_job_finish(job_id, "success", Some("done"))
+        .await
+        .expect("finish job");
+    let after_finish = proxy
+        .scheduled_job_claim("request_logs_gc", "manual", None, 1)
+        .await
+        .expect("claim after finish")
+        .expect("job claimed after finish");
+    assert!(after_finish > job_id);
+
+    let _ = std::fs::remove_file(&db_path);
+    let _ = std::fs::remove_file(db_path.with_extension("db-shm"));
+    let _ = std::fs::remove_file(db_path.with_extension("db-wal"));
+}
+
+#[tokio::test]
+async fn scheduled_job_claim_serializes_concurrent_duplicate_triggers() {
+    let db_path = temp_db_path("scheduled-job-claim-concurrent");
+    let db_str = db_path.to_string_lossy().to_string();
+    let proxy = TavilyProxy::with_endpoint(Vec::<String>::new(), DEFAULT_UPSTREAM, &db_str)
+        .await
+        .expect("proxy created");
+
+    let results = futures_util::future::join_all((0..8).map(|_| {
+        proxy.scheduled_job_claim("db_compaction", "manual", None, 1)
+    }))
+    .await;
+    let claimed: Vec<i64> = results
+        .into_iter()
+        .map(|result| result.expect("claim should not error"))
+        .flatten()
+        .collect();
+    assert_eq!(claimed.len(), 1);
+
+    let running_count: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM scheduled_jobs WHERE job_type = 'db_compaction' AND status = 'running'")
+            .fetch_one(&proxy.key_store.pool)
+            .await
+            .expect("count running jobs");
+    assert_eq!(running_count, 1);
+
+    let _ = std::fs::remove_file(&db_path);
+    let _ = std::fs::remove_file(db_path.with_extension("db-shm"));
+    let _ = std::fs::remove_file(db_path.with_extension("db-wal"));
+}
+
+#[tokio::test]
+async fn abandoned_running_scheduled_jobs_unblocks_future_claims() {
+    let db_path = temp_db_path("scheduled-job-abandon-running");
+    let db_str = db_path.to_string_lossy().to_string();
+    let proxy = TavilyProxy::with_endpoint(Vec::<String>::new(), DEFAULT_UPSTREAM, &db_str)
+        .await
+        .expect("proxy created");
+
+    let stale_job_id = proxy
+        .scheduled_job_claim("db_compaction", "auto", None, 1)
+        .await
+        .expect("claim stale job")
+        .expect("stale job claimed");
+    let abandoned = proxy
+        .abandon_running_scheduled_jobs()
+        .await
+        .expect("abandon stale jobs");
+    assert_eq!(abandoned, 1);
+
+    let status: String = sqlx::query_scalar("SELECT status FROM scheduled_jobs WHERE id = ?")
+        .bind(stale_job_id)
+        .fetch_one(&proxy.key_store.pool)
+        .await
+        .expect("read abandoned status");
+    assert_eq!(status, "abandoned");
+
+    let next_job_id = proxy
+        .scheduled_job_claim("db_compaction", "manual", None, 1)
+        .await
+        .expect("claim after abandoned")
+        .expect("new job claimed");
+    assert!(next_job_id > stale_job_id);
+
+    let _ = std::fs::remove_file(&db_path);
+    let _ = std::fs::remove_file(db_path.with_extension("db-shm"));
+    let _ = std::fs::remove_file(db_path.with_extension("db-wal"));
+}
+
+#[tokio::test]
+async fn sqlite_db_stats_reports_reclaimable_shape() {
+    let db_path = temp_db_path("sqlite-db-stats-shape");
+    let db_str = db_path.to_string_lossy().to_string();
+    let proxy = TavilyProxy::with_endpoint(Vec::<String>::new(), DEFAULT_UPSTREAM, &db_str)
+        .await
+        .expect("proxy created");
+
+    let stats = proxy.sqlite_db_stats().await.expect("db stats");
+    assert!(stats.page_size > 0);
+    assert!(stats.page_count > 0);
+    assert!(stats.database_bytes > 0);
+    assert!(stats.reclaimable_ratio >= 0.0);
+
+    let _ = std::fs::remove_file(&db_path);
+    let _ = std::fs::remove_file(db_path.with_extension("db-shm"));
+    let _ = std::fs::remove_file(db_path.with_extension("db-wal"));
+}
+
+#[tokio::test]
 async fn startup_linuxdo_tag_backfill_does_not_rewrite_correct_binding() {
     let _guard = env_lock().lock_owned().await;
     let db_path = temp_db_path("linuxdo-system-tags-backfill-marker");

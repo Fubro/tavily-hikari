@@ -171,6 +171,7 @@ rule-providers:
             .expect("ensure schema");
 
         let key_store = crate::store::KeyStore {
+            database_path: db_path.to_string_lossy().into_owned(),
             pool: pool.clone(),
             token_binding_cache: tokio::sync::RwLock::new(std::collections::HashMap::new()),
             account_quota_resolution_cache: tokio::sync::RwLock::new(

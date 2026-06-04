@@ -4,7 +4,7 @@ use std::{
     io::Read,
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
     path::{Path as FsPath, PathBuf},
-    sync::Arc,
+    sync::{Arc, OnceLock},
 };
 
 use argon2::{
@@ -67,8 +67,8 @@ use tavily_hikari::{
     ForwardProxyStatsResponse, ForwardProxyWeightHourlyBucketResponse, JobLog, LogFacetOption,
     OAuthAccountProfile, PendingBillingSettleOutcome, ProxyError, ProxyRequest, ProxyResponse,
     ProxySummary, RequestLogBodiesRecord, RequestLogRecord, RequestLogsCatalog, RequestLogsCursor,
-    RequestLogsCursorDirection, RequestLogsCursorPage, StickyCreditsWindow, TavilyProxy,
-    TokenHourlyBucket, TokenHourlyRequestVerdict, TokenLogRecord, TokenLogsCursorPage,
+    RequestLogsCursorDirection, RequestLogsCursorPage, RequestLogsGcOptions, StickyCreditsWindow,
+    TavilyProxy, TokenHourlyBucket, TokenHourlyRequestVerdict, TokenLogRecord, TokenLogsCursorPage,
     TokenQuotaVerdict, TokenRequestKindOption, TokenSummary, TokenUsageBucket,
     TrustedClientIpSettings, UNBOUND_TOKEN_MONTHLY_BROKEN_LIMIT_DEFAULT,
     USER_MONTHLY_BROKEN_LIMIT_DEFAULT, UserTokenLookup, analyze_mcp_attempt,
@@ -85,6 +85,7 @@ use tavily_hikari::{
 use tokio::signal;
 #[cfg(unix)]
 use tokio::signal::unix::{SignalKind, signal as unix_signal};
+use tokio::sync::RwLock;
 include!("state.rs");
 include!("schedulers.rs");
 include!("spa.rs");
