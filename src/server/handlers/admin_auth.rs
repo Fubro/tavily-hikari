@@ -341,13 +341,23 @@ async fn run_manual_key_quota_sync(
     state: Arc<AppState>,
     key_id: &str,
 ) -> Result<(), ManualQuotaSyncError> {
-    let claim = claim_scheduled_job_with_gate(
-        state.as_ref(),
-        "quota_sync",
-        Some(key_id),
-        TRIGGER_SOURCE_MANUAL,
+    let claim = tokio::time::timeout(
+        Duration::from_secs(5),
+        claim_scheduled_job_with_gate(
+            state.as_ref(),
+            "quota_sync",
+            Some(key_id),
+            TRIGGER_SOURCE_MANUAL,
+        ),
     )
     .await
+    .map_err(|_| {
+        ManualQuotaSyncError::new(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "db_job_execution_busy",
+            "another DB-backed maintenance job is active".to_string(),
+        )
+    })?
     .map_err(|err| {
             ManualQuotaSyncError::new(
                 StatusCode::INTERNAL_SERVER_ERROR,
