@@ -196,13 +196,30 @@ async fn post_trigger_job(
         Err(err) => return Ok(manual_trigger_key_id_error_response(&job_type, err)),
     };
 
-    let claim = claim_scheduled_job_without_gate(
-        state.as_ref(),
-        &job_type,
-        key_id.as_deref(),
-        TRIGGER_SOURCE_MANUAL,
+    let claim = tokio::time::timeout(
+        Duration::from_secs(5),
+        claim_scheduled_job_with_gate(
+            state.as_ref(),
+            &job_type,
+            key_id.as_deref(),
+            TRIGGER_SOURCE_MANUAL,
+        ),
     )
     .await;
+
+    let claim = match claim {
+        Ok(claim) => claim,
+        Err(_) => {
+            return Ok((
+                StatusCode::SERVICE_UNAVAILABLE,
+                Json(json!({
+                    "error": "db_job_execution_busy",
+                    "detail": "another DB-backed maintenance job is active"
+                })),
+            )
+                .into_response());
+        }
+    };
 
     match claim {
         Ok(Some(claimed_job)) => {
