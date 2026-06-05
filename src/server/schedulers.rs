@@ -53,7 +53,7 @@ const TRIGGER_SOURCE_AUTO: &str = "auto";
 
 struct ClaimedScheduledJob {
     job_id: i64,
-    _job_execution_gate: OwnedMutexGuard<()>,
+    _job_execution_gate: Option<OwnedMutexGuard<()>>,
 }
 
 async fn claim_scheduled_job_with_gate(
@@ -71,7 +71,28 @@ async fn claim_scheduled_job_with_gate(
     {
         Ok(Some(job_id)) => Ok(Some(ClaimedScheduledJob {
             job_id,
-            _job_execution_gate: job_execution_gate,
+            _job_execution_gate: Some(job_execution_gate),
+        })),
+        Ok(None) => Ok(None),
+        Err(err) => Err(err),
+    }
+}
+
+async fn claim_scheduled_job_without_gate(
+    state: &AppState,
+    job_type: &str,
+    key_id: Option<&str>,
+    trigger_source: &str,
+) -> Result<Option<ClaimedScheduledJob>, ProxyError> {
+    let _maintenance = acquire_db_maintenance_read_gate().await;
+    match state
+        .proxy
+        .scheduled_job_claim(job_type, trigger_source, key_id, 1)
+        .await
+    {
+        Ok(Some(job_id)) => Ok(Some(ClaimedScheduledJob {
+            job_id,
+            _job_execution_gate: None,
         })),
         Ok(None) => Ok(None),
         Err(err) => Err(err),
@@ -952,10 +973,14 @@ async fn run_manual_claimed_job(
     state: Arc<AppState>,
     job_type: String,
     key_id: Option<String>,
-    claimed_job: ClaimedScheduledJob,
+    mut claimed_job: ClaimedScheduledJob,
 ) -> bool {
     if job_type == "request_logs_gc" {
         return run_request_logs_gc_catchup_claimed_job(state, claimed_job).await;
+    }
+
+    if claimed_job._job_execution_gate.is_none() {
+        claimed_job._job_execution_gate = Some(acquire_db_job_execution_gate().await);
     }
 
     let ClaimedScheduledJob {

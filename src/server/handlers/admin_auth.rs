@@ -196,7 +196,7 @@ async fn post_trigger_job(
         Err(err) => return Ok(manual_trigger_key_id_error_response(&job_type, err)),
     };
 
-    let claim = claim_scheduled_job_with_gate(
+    let claim = claim_scheduled_job_without_gate(
         state.as_ref(),
         &job_type,
         key_id.as_deref(),
