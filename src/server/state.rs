@@ -14,9 +14,14 @@ struct AppState {
 }
 
 static DB_MAINTENANCE_GATE: OnceLock<RwLock<()>> = OnceLock::new();
+static DB_JOB_EXECUTION_GATE: OnceLock<Arc<Mutex<()>>> = OnceLock::new();
 
 fn db_maintenance_gate() -> &'static RwLock<()> {
     DB_MAINTENANCE_GATE.get_or_init(|| RwLock::new(()))
+}
+
+fn db_job_execution_gate() -> &'static Arc<Mutex<()>> {
+    DB_JOB_EXECUTION_GATE.get_or_init(|| Arc::new(Mutex::new(())))
 }
 
 async fn acquire_db_maintenance_read_gate() -> tokio::sync::RwLockReadGuard<'static, ()> {
@@ -25,6 +30,10 @@ async fn acquire_db_maintenance_read_gate() -> tokio::sync::RwLockReadGuard<'sta
 
 async fn acquire_db_maintenance_write_gate() -> tokio::sync::RwLockWriteGuard<'static, ()> {
     db_maintenance_gate().write().await
+}
+
+pub(crate) async fn acquire_db_job_execution_gate() -> tokio::sync::OwnedMutexGuard<()> {
+    db_job_execution_gate().clone().lock_owned().await
 }
 
 async fn db_maintenance_http_gate(

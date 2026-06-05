@@ -51,20 +51,42 @@ const TRIGGER_SOURCE_SCHEDULER: &str = "scheduler";
 const TRIGGER_SOURCE_MANUAL: &str = "manual";
 const TRIGGER_SOURCE_AUTO: &str = "auto";
 
-async fn claim_scheduled_job(
+struct ClaimedScheduledJob {
+    job_id: i64,
+    _job_execution_gate: OwnedMutexGuard<()>,
+}
+
+async fn claim_scheduled_job_with_gate(
     state: &AppState,
     job_type: &str,
     key_id: Option<&str>,
     trigger_source: &str,
-    log_prefix: &str,
-) -> Option<i64> {
+) -> Result<Option<ClaimedScheduledJob>, ProxyError> {
+    let job_execution_gate = acquire_db_job_execution_gate().await;
     let _maintenance = acquire_db_maintenance_read_gate().await;
     match state
         .proxy
         .scheduled_job_claim(job_type, trigger_source, key_id, 1)
         .await
     {
-        Ok(Some(id)) => Some(id),
+        Ok(Some(job_id)) => Ok(Some(ClaimedScheduledJob {
+            job_id,
+            _job_execution_gate: job_execution_gate,
+        })),
+        Ok(None) => Ok(None),
+        Err(err) => Err(err),
+    }
+}
+
+async fn claim_scheduled_job(
+    state: &AppState,
+    job_type: &str,
+    key_id: Option<&str>,
+    trigger_source: &str,
+    log_prefix: &str,
+) -> Option<ClaimedScheduledJob> {
+    match claim_scheduled_job_with_gate(state, job_type, key_id, trigger_source).await {
+        Ok(Some(job)) => Some(job),
         Ok(None) => {
             eprintln!("{log_prefix}: job already running; skip trigger");
             None
@@ -133,7 +155,10 @@ fn spawn_quota_sync_scheduler(state: Arc<AppState>) {
             for key_id in keys {
                 let delay = random_delay_secs(300);
                 tokio::time::sleep(Duration::from_secs(delay)).await;
-                let Some(job_id) = claim_scheduled_job(
+                let Some(ClaimedScheduledJob {
+                    job_id,
+                    _job_execution_gate,
+                }) = claim_scheduled_job(
                     cold_state.as_ref(),
                     "quota_sync",
                     Some(&key_id),
@@ -205,7 +230,10 @@ fn spawn_quota_sync_scheduler(state: Arc<AppState>) {
             for key_id in keys {
                 let delay = random_delay_secs(60);
                 tokio::time::sleep(Duration::from_secs(delay)).await;
-                let Some(job_id) = claim_scheduled_job(
+                let Some(ClaimedScheduledJob {
+                    job_id,
+                    _job_execution_gate,
+                }) = claim_scheduled_job(
                     hot_state.as_ref(),
                     "quota_sync/hot",
                     Some(&key_id),
@@ -260,7 +288,10 @@ fn spawn_quota_sync_scheduler(state: Arc<AppState>) {
 fn spawn_token_usage_rollup_scheduler(state: Arc<AppState>) {
     tokio::spawn(async move {
         loop {
-            let Some(job_id) = claim_scheduled_job(
+            let Some(ClaimedScheduledJob {
+                job_id,
+                _job_execution_gate,
+            }) = claim_scheduled_job(
                 state.as_ref(),
                 "token_usage_rollup",
                 None,
@@ -303,7 +334,10 @@ fn spawn_token_usage_rollup_scheduler(state: Arc<AppState>) {
 fn spawn_auth_token_logs_gc_scheduler(state: Arc<AppState>) {
     tokio::spawn(async move {
         loop {
-            let Some(job_id) = claim_scheduled_job(
+            let Some(ClaimedScheduledJob {
+                job_id,
+                _job_execution_gate,
+            }) = claim_scheduled_job(
                 state.as_ref(),
                 "auth_token_logs_gc",
                 None,
@@ -343,7 +377,10 @@ fn spawn_auth_token_logs_gc_scheduler(state: Arc<AppState>) {
 fn spawn_mcp_sessions_gc_scheduler(state: Arc<AppState>) {
     tokio::spawn(async move {
         loop {
-            let Some(job_id) = claim_scheduled_job(
+            let Some(ClaimedScheduledJob {
+                job_id,
+                _job_execution_gate,
+            }) = claim_scheduled_job(
                 state.as_ref(),
                 "mcp_sessions_gc",
                 None,
@@ -382,7 +419,10 @@ fn spawn_mcp_sessions_gc_scheduler(state: Arc<AppState>) {
 fn spawn_mcp_session_init_backoffs_gc_scheduler(state: Arc<AppState>) {
     tokio::spawn(async move {
         loop {
-            let Some(job_id) = claim_scheduled_job(
+            let Some(ClaimedScheduledJob {
+                job_id,
+                _job_execution_gate,
+            }) = claim_scheduled_job(
                 state.as_ref(),
                 "mcp_session_init_backoffs_gc",
                 None,
@@ -429,7 +469,7 @@ fn spawn_request_logs_gc_scheduler(state: Arc<AppState>) {
             // After we reach the scheduled time, keep retrying until we either run the job
             // successfully or record an error for this run window.
             loop {
-                let Some(job_id) = claim_scheduled_job(
+                let Some(claimed_job) = claim_scheduled_job(
                     state.as_ref(),
                     "request_logs_gc",
                     None,
@@ -442,14 +482,22 @@ fn spawn_request_logs_gc_scheduler(state: Arc<AppState>) {
                     continue;
                 };
 
-                let _ = run_request_logs_gc_catchup_claimed_job(state.clone(), job_id).await;
+                let _ = run_request_logs_gc_catchup_claimed_job(state.clone(), claimed_job).await;
                 break;
             }
         }
     });
 }
 
-async fn run_request_logs_gc_catchup_claimed_job(state: Arc<AppState>, job_id: i64) -> bool {
+async fn run_request_logs_gc_catchup_claimed_job(
+    state: Arc<AppState>,
+    claimed_job: ClaimedScheduledJob,
+) -> bool {
+    let ClaimedScheduledJob {
+        job_id,
+        _job_execution_gate,
+    } = claimed_job;
+    drop(_job_execution_gate);
     let mut cleaned_request_log_bodies = 0i64;
     let mut deleted_request_logs = 0i64;
     let mut deleted_rollups = 0i64;
@@ -458,12 +506,15 @@ async fn run_request_logs_gc_catchup_claimed_job(state: Arc<AppState>, job_id: i
     let mut passes = 0usize;
 
     loop {
+        let _job_execution_gate = acquire_db_job_execution_gate().await;
         let _maintenance = acquire_db_maintenance_read_gate().await;
-        match state
+        let result = state
             .proxy
             .gc_request_logs_with_options(scheduled_request_logs_gc_options())
-            .await
-        {
+            .await;
+        drop(_maintenance);
+
+        match result {
             Ok(report) => {
                 passes += 1;
                 cleaned_request_log_bodies += report.cleaned_request_log_bodies;
@@ -490,7 +541,7 @@ async fn run_request_logs_gc_catchup_claimed_job(state: Arc<AppState>, job_id: i
                     return true;
                 }
 
-                drop(_maintenance);
+                drop(_job_execution_gate);
                 tokio::time::sleep(Duration::from_secs(
                     request_logs_gc_catchup_recheck_secs(),
                 ))
@@ -538,7 +589,10 @@ async fn run_linuxdo_user_status_sync_job_with_source(
     state: Arc<AppState>,
     trigger_source: &'static str,
 ) {
-    let Some(job_id) = claim_scheduled_job(
+    let Some(ClaimedScheduledJob {
+        job_id,
+        _job_execution_gate,
+    }) = claim_scheduled_job(
         state.as_ref(),
         LINUXDO_USER_STATUS_SYNC_JOB_TYPE,
         None,
@@ -785,7 +839,10 @@ async fn run_linuxdo_user_tag_binding_refresh_job_with_source(
     state: Arc<AppState>,
     trigger_source: &'static str,
 ) {
-    let Some(job_id) = claim_scheduled_job(
+    let Some(ClaimedScheduledJob {
+        job_id,
+        _job_execution_gate,
+    }) = claim_scheduled_job(
         state.as_ref(),
         LINUXDO_USER_TAG_BINDING_REFRESH_JOB_TYPE,
         None,
@@ -854,7 +911,10 @@ async fn run_forward_proxy_geo_refresh_job_with_source(
     state: Arc<AppState>,
     trigger_source: &'static str,
 ) {
-    let Some(job_id) = claim_scheduled_job(
+    let Some(ClaimedScheduledJob {
+        job_id,
+        _job_execution_gate,
+    }) = claim_scheduled_job(
         state.as_ref(),
         "forward_proxy_geo_refresh",
         None,
@@ -892,8 +952,16 @@ async fn run_manual_claimed_job(
     state: Arc<AppState>,
     job_type: String,
     key_id: Option<String>,
-    job_id: i64,
+    claimed_job: ClaimedScheduledJob,
 ) -> bool {
+    if job_type == "request_logs_gc" {
+        return run_request_logs_gc_catchup_claimed_job(state, claimed_job).await;
+    }
+
+    let ClaimedScheduledJob {
+        job_id,
+        _job_execution_gate,
+    } = claimed_job;
     let finish = |state: Arc<AppState>, status: &'static str, message: String| async move {
         let succeeded = status == "success";
         let _ = state
@@ -960,7 +1028,7 @@ async fn run_manual_claimed_job(
                 Err(err) => finish(state, "error", err.to_string()).await,
             }
         },
-        "request_logs_gc" => run_request_logs_gc_catchup_claimed_job(state, job_id).await,
+        "request_logs_gc" => unreachable!("request_logs_gc handled above"),
         "linuxdo_user_status_sync" => {
             run_linuxdo_user_status_sync_claimed_job(state, job_id).await
         },

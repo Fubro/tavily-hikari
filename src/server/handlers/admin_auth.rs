@@ -196,18 +196,22 @@ async fn post_trigger_job(
         Err(err) => return Ok(manual_trigger_key_id_error_response(&job_type, err)),
     };
 
-    let claim = state
-        .proxy
-        .scheduled_job_claim(&job_type, TRIGGER_SOURCE_MANUAL, key_id.as_deref(), 1)
-        .await;
+    let claim = claim_scheduled_job_with_gate(
+        state.as_ref(),
+        &job_type,
+        key_id.as_deref(),
+        TRIGGER_SOURCE_MANUAL,
+    )
+    .await;
 
     match claim {
-        Ok(Some(job_id)) => {
+        Ok(Some(claimed_job)) => {
+            let job_id = claimed_job.job_id;
             let run_state = state.clone();
             let run_job_type = job_type.clone();
             let run_key_id = key_id.clone();
             tokio::spawn(async move {
-                run_manual_claimed_job(run_state, run_job_type, run_key_id, job_id).await;
+                run_manual_claimed_job(run_state, run_job_type, run_key_id, claimed_job).await;
             });
             Ok((
                 StatusCode::ACCEPTED,
