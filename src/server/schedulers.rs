@@ -604,6 +604,7 @@ async fn run_linuxdo_user_status_sync_job_with_source(
         return;
     };
 
+    drop(_job_execution_gate);
     run_linuxdo_user_status_sync_claimed_job(state, job_id).await;
 }
 
@@ -926,6 +927,7 @@ async fn run_forward_proxy_geo_refresh_job_with_source(
         return;
     };
 
+    drop(_job_execution_gate);
     let _maintenance = acquire_db_maintenance_read_gate().await;
     match state
         .proxy
@@ -1035,8 +1037,9 @@ async fn run_manual_claimed_job(
         },
         "request_logs_gc" => unreachable!("request_logs_gc handled above"),
         "linuxdo_user_status_sync" => {
+            drop(_job_execution_gate);
             run_linuxdo_user_status_sync_claimed_job(state, job_id).await
-        },
+        }
         "linuxdo_user_tag_binding_refresh" => {
             let _maintenance = acquire_db_maintenance_read_gate().await;
             match state.proxy.refresh_linuxdo_user_tag_bindings().await {
@@ -1045,6 +1048,7 @@ async fn run_manual_claimed_job(
             }
         },
         "forward_proxy_geo_refresh" => {
+            drop(_job_execution_gate);
             let _maintenance = acquire_db_maintenance_read_gate().await;
             match state
                 .proxy
