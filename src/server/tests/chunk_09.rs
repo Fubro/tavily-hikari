@@ -2498,3 +2498,25 @@
 
         let _ = std::fs::remove_file(db_path);
     }
+
+    #[tokio::test]
+    async fn db_job_execution_gate_serializes_overlapping_jobs() {
+        let gate = acquire_db_job_execution_gate().await;
+        let entered = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let entered_waiter = entered.clone();
+
+        let waiter = tokio::spawn(async move {
+            let _gate = acquire_db_job_execution_gate().await;
+            entered_waiter.store(true, std::sync::atomic::Ordering::SeqCst);
+        });
+
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        assert!(!entered.load(std::sync::atomic::Ordering::SeqCst));
+
+        drop(gate);
+        tokio::time::timeout(std::time::Duration::from_secs(1), waiter)
+            .await
+            .expect("waiter completed")
+            .expect("waiter join");
+        assert!(entered.load(std::sync::atomic::Ordering::SeqCst));
+    }

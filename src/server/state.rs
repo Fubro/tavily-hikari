@@ -14,9 +14,23 @@ struct AppState {
 }
 
 static DB_MAINTENANCE_GATE: OnceLock<RwLock<()>> = OnceLock::new();
+static DB_JOB_EXECUTION_GATES: OnceLock<std::sync::Mutex<HashMap<usize, std::sync::Weak<Mutex<()>>>>> =
+    OnceLock::new();
 
 fn db_maintenance_gate() -> &'static RwLock<()> {
     DB_MAINTENANCE_GATE.get_or_init(|| RwLock::new(()))
+}
+
+fn db_job_execution_gate_for_state(state: &AppState) -> Arc<Mutex<()>> {
+    let key = state as *const AppState as usize;
+    let gates = DB_JOB_EXECUTION_GATES.get_or_init(|| std::sync::Mutex::new(HashMap::new()));
+    let mut gates = gates.lock().expect("db job execution gate map lock");
+    if let Some(gate) = gates.get(&key).and_then(std::sync::Weak::upgrade) {
+        return gate;
+    }
+    let gate = Arc::new(Mutex::new(()));
+    gates.insert(key, Arc::downgrade(&gate));
+    gate
 }
 
 async fn acquire_db_maintenance_read_gate() -> tokio::sync::RwLockReadGuard<'static, ()> {
@@ -25,6 +39,22 @@ async fn acquire_db_maintenance_read_gate() -> tokio::sync::RwLockReadGuard<'sta
 
 async fn acquire_db_maintenance_write_gate() -> tokio::sync::RwLockWriteGuard<'static, ()> {
     db_maintenance_gate().write().await
+}
+
+async fn acquire_db_job_execution_gate_for_state(
+    state: &AppState,
+) -> tokio::sync::OwnedMutexGuard<()> {
+    db_job_execution_gate_for_state(state).lock_owned().await
+}
+
+#[cfg(test)]
+pub(crate) async fn acquire_db_job_execution_gate() -> tokio::sync::OwnedMutexGuard<()> {
+    static TEST_DB_JOB_EXECUTION_GATE: OnceLock<Arc<Mutex<()>>> = OnceLock::new();
+    TEST_DB_JOB_EXECUTION_GATE
+        .get_or_init(|| Arc::new(Mutex::new(())))
+        .clone()
+        .lock_owned()
+        .await
 }
 
 async fn db_maintenance_http_gate(

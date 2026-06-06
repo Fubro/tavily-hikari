@@ -196,18 +196,39 @@ async fn post_trigger_job(
         Err(err) => return Ok(manual_trigger_key_id_error_response(&job_type, err)),
     };
 
-    let claim = state
-        .proxy
-        .scheduled_job_claim(&job_type, TRIGGER_SOURCE_MANUAL, key_id.as_deref(), 1)
-        .await;
+    let claim = tokio::time::timeout(
+        Duration::from_secs(5),
+        claim_scheduled_job_with_gate(
+            state.as_ref(),
+            &job_type,
+            key_id.as_deref(),
+            TRIGGER_SOURCE_MANUAL,
+        ),
+    )
+    .await;
+
+    let claim = match claim {
+        Ok(claim) => claim,
+        Err(_) => {
+            return Ok((
+                StatusCode::SERVICE_UNAVAILABLE,
+                Json(json!({
+                    "error": "db_job_execution_busy",
+                    "detail": "another DB-backed maintenance job is active"
+                })),
+            )
+                .into_response());
+        }
+    };
 
     match claim {
-        Ok(Some(job_id)) => {
+        Ok(Some(claimed_job)) => {
+            let job_id = claimed_job.job_id;
             let run_state = state.clone();
             let run_job_type = job_type.clone();
             let run_key_id = key_id.clone();
             tokio::spawn(async move {
-                run_manual_claimed_job(run_state, run_job_type, run_key_id, job_id).await;
+                run_manual_claimed_job(run_state, run_job_type, run_key_id, claimed_job).await;
             });
             Ok((
                 StatusCode::ACCEPTED,
@@ -320,11 +341,24 @@ async fn run_manual_key_quota_sync(
     state: Arc<AppState>,
     key_id: &str,
 ) -> Result<(), ManualQuotaSyncError> {
-    let claim = state
-        .proxy
-        .scheduled_job_claim("quota_sync", TRIGGER_SOURCE_MANUAL, Some(key_id), 1)
-        .await
-        .map_err(|err| {
+    let claim = tokio::time::timeout(
+        Duration::from_secs(5),
+        claim_scheduled_job_with_gate(
+            state.as_ref(),
+            "quota_sync",
+            Some(key_id),
+            TRIGGER_SOURCE_MANUAL,
+        ),
+    )
+    .await
+    .map_err(|_| {
+        ManualQuotaSyncError::new(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "db_job_execution_busy",
+            "another DB-backed maintenance job is active".to_string(),
+        )
+    })?
+    .map_err(|err| {
             ManualQuotaSyncError::new(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "sync_failed",
@@ -332,8 +366,8 @@ async fn run_manual_key_quota_sync(
             )
         })?;
 
-    let job_id = match claim {
-        Some(job_id) => job_id,
+    let claimed_job = match claim {
+        Some(claimed_job) => claimed_job,
         None => {
             Err(ManualQuotaSyncError::new(
                 StatusCode::CONFLICT,
@@ -342,12 +376,11 @@ async fn run_manual_key_quota_sync(
             ))?
         }
     };
+    let job_id = claimed_job.job_id;
+    let _job_execution_gate = claimed_job._job_execution_gate;
+    drop(_job_execution_gate);
 
-    match state
-        .proxy
-        .sync_key_quota(key_id, &state.usage_base, "quota_sync/manual")
-        .await
-    {
+    match sync_key_quota_with_db_job_gate(state.as_ref(), key_id, "quota_sync/manual").await {
         Ok((limit, remaining)) => {
             let msg = format!("limit={limit} remaining={remaining}");
             let _ = state

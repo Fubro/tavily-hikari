@@ -51,20 +51,42 @@ const TRIGGER_SOURCE_SCHEDULER: &str = "scheduler";
 const TRIGGER_SOURCE_MANUAL: &str = "manual";
 const TRIGGER_SOURCE_AUTO: &str = "auto";
 
-async fn claim_scheduled_job(
+struct ClaimedScheduledJob {
+    job_id: i64,
+    _job_execution_gate: Option<OwnedMutexGuard<()>>,
+}
+
+async fn claim_scheduled_job_with_gate(
     state: &AppState,
     job_type: &str,
     key_id: Option<&str>,
     trigger_source: &str,
-    log_prefix: &str,
-) -> Option<i64> {
+) -> Result<Option<ClaimedScheduledJob>, ProxyError> {
+    let job_execution_gate = acquire_db_job_execution_gate_for_state(state).await;
     let _maintenance = acquire_db_maintenance_read_gate().await;
     match state
         .proxy
         .scheduled_job_claim(job_type, trigger_source, key_id, 1)
         .await
     {
-        Ok(Some(id)) => Some(id),
+        Ok(Some(job_id)) => Ok(Some(ClaimedScheduledJob {
+            job_id,
+            _job_execution_gate: Some(job_execution_gate),
+        })),
+        Ok(None) => Ok(None),
+        Err(err) => Err(err),
+    }
+}
+
+async fn claim_scheduled_job(
+    state: &AppState,
+    job_type: &str,
+    key_id: Option<&str>,
+    trigger_source: &str,
+    log_prefix: &str,
+) -> Option<ClaimedScheduledJob> {
+    match claim_scheduled_job_with_gate(state, job_type, key_id, trigger_source).await {
+        Ok(Some(job)) => Some(job),
         Ok(None) => {
             eprintln!("{log_prefix}: job already running; skip trigger");
             None
@@ -74,6 +96,43 @@ async fn claim_scheduled_job(
             None
         }
     }
+}
+
+async fn sync_key_quota_with_db_job_gate(
+    state: &AppState,
+    key_id: &str,
+    source: &str,
+) -> Result<(i64, i64), ProxyError> {
+    let secret = {
+        let _job_execution_gate = acquire_db_job_execution_gate_for_state(state).await;
+        let _maintenance = acquire_db_maintenance_read_gate().await;
+        state.proxy.quota_sync_api_key_secret(key_id).await?
+    };
+
+    let (limit, remaining) = match state
+        .proxy
+        .fetch_usage_quota_for_sync_secret(&secret, &state.usage_base, key_id)
+        .await
+    {
+        Ok(quota) => quota,
+        Err(err) => {
+            let _job_execution_gate = acquire_db_job_execution_gate_for_state(state).await;
+            let _maintenance = acquire_db_maintenance_read_gate().await;
+            state.proxy.record_quota_sync_usage_error(key_id, &err).await?;
+            return Err(err);
+        }
+    };
+
+    {
+        let _job_execution_gate = acquire_db_job_execution_gate_for_state(state).await;
+        let _maintenance = acquire_db_maintenance_read_gate().await;
+        state
+            .proxy
+            .record_quota_sync_result(key_id, limit, remaining, source)
+            .await?;
+    }
+
+    Ok((limit, remaining))
 }
 
 fn next_local_daily_run_after(now: DateTime<Local>, hour: u32, minute: u32) -> DateTime<Local> {
@@ -133,7 +192,10 @@ fn spawn_quota_sync_scheduler(state: Arc<AppState>) {
             for key_id in keys {
                 let delay = random_delay_secs(300);
                 tokio::time::sleep(Duration::from_secs(delay)).await;
-                let Some(job_id) = claim_scheduled_job(
+                let Some(ClaimedScheduledJob {
+                    job_id,
+                    _job_execution_gate,
+                }) = claim_scheduled_job(
                     cold_state.as_ref(),
                     "quota_sync",
                     Some(&key_id),
@@ -144,10 +206,8 @@ fn spawn_quota_sync_scheduler(state: Arc<AppState>) {
                 else {
                     continue;
                 };
-                let _maintenance = acquire_db_maintenance_read_gate().await;
-                match cold_state
-                    .proxy
-                    .sync_key_quota(&key_id, &cold_state.usage_base, "quota_sync")
+                drop(_job_execution_gate);
+                match sync_key_quota_with_db_job_gate(cold_state.as_ref(), &key_id, "quota_sync")
                     .await
                 {
                     Ok((limit, remaining)) => {
@@ -205,7 +265,10 @@ fn spawn_quota_sync_scheduler(state: Arc<AppState>) {
             for key_id in keys {
                 let delay = random_delay_secs(60);
                 tokio::time::sleep(Duration::from_secs(delay)).await;
-                let Some(job_id) = claim_scheduled_job(
+                let Some(ClaimedScheduledJob {
+                    job_id,
+                    _job_execution_gate,
+                }) = claim_scheduled_job(
                     hot_state.as_ref(),
                     "quota_sync/hot",
                     Some(&key_id),
@@ -216,10 +279,8 @@ fn spawn_quota_sync_scheduler(state: Arc<AppState>) {
                 else {
                     continue;
                 };
-                let _maintenance = acquire_db_maintenance_read_gate().await;
-                match hot_state
-                    .proxy
-                    .sync_key_quota(&key_id, &hot_state.usage_base, "quota_sync/hot")
+                drop(_job_execution_gate);
+                match sync_key_quota_with_db_job_gate(hot_state.as_ref(), &key_id, "quota_sync/hot")
                     .await
                 {
                     Ok((limit, remaining)) => {
@@ -260,7 +321,10 @@ fn spawn_quota_sync_scheduler(state: Arc<AppState>) {
 fn spawn_token_usage_rollup_scheduler(state: Arc<AppState>) {
     tokio::spawn(async move {
         loop {
-            let Some(job_id) = claim_scheduled_job(
+            let Some(ClaimedScheduledJob {
+                job_id,
+                _job_execution_gate,
+            }) = claim_scheduled_job(
                 state.as_ref(),
                 "token_usage_rollup",
                 None,
@@ -303,7 +367,10 @@ fn spawn_token_usage_rollup_scheduler(state: Arc<AppState>) {
 fn spawn_auth_token_logs_gc_scheduler(state: Arc<AppState>) {
     tokio::spawn(async move {
         loop {
-            let Some(job_id) = claim_scheduled_job(
+            let Some(ClaimedScheduledJob {
+                job_id,
+                _job_execution_gate,
+            }) = claim_scheduled_job(
                 state.as_ref(),
                 "auth_token_logs_gc",
                 None,
@@ -343,7 +410,10 @@ fn spawn_auth_token_logs_gc_scheduler(state: Arc<AppState>) {
 fn spawn_mcp_sessions_gc_scheduler(state: Arc<AppState>) {
     tokio::spawn(async move {
         loop {
-            let Some(job_id) = claim_scheduled_job(
+            let Some(ClaimedScheduledJob {
+                job_id,
+                _job_execution_gate,
+            }) = claim_scheduled_job(
                 state.as_ref(),
                 "mcp_sessions_gc",
                 None,
@@ -382,7 +452,10 @@ fn spawn_mcp_sessions_gc_scheduler(state: Arc<AppState>) {
 fn spawn_mcp_session_init_backoffs_gc_scheduler(state: Arc<AppState>) {
     tokio::spawn(async move {
         loop {
-            let Some(job_id) = claim_scheduled_job(
+            let Some(ClaimedScheduledJob {
+                job_id,
+                _job_execution_gate,
+            }) = claim_scheduled_job(
                 state.as_ref(),
                 "mcp_session_init_backoffs_gc",
                 None,
@@ -429,7 +502,7 @@ fn spawn_request_logs_gc_scheduler(state: Arc<AppState>) {
             // After we reach the scheduled time, keep retrying until we either run the job
             // successfully or record an error for this run window.
             loop {
-                let Some(job_id) = claim_scheduled_job(
+                let Some(claimed_job) = claim_scheduled_job(
                     state.as_ref(),
                     "request_logs_gc",
                     None,
@@ -442,14 +515,22 @@ fn spawn_request_logs_gc_scheduler(state: Arc<AppState>) {
                     continue;
                 };
 
-                let _ = run_request_logs_gc_catchup_claimed_job(state.clone(), job_id).await;
+                let _ = run_request_logs_gc_catchup_claimed_job(state.clone(), claimed_job).await;
                 break;
             }
         }
     });
 }
 
-async fn run_request_logs_gc_catchup_claimed_job(state: Arc<AppState>, job_id: i64) -> bool {
+async fn run_request_logs_gc_catchup_claimed_job(
+    state: Arc<AppState>,
+    claimed_job: ClaimedScheduledJob,
+) -> bool {
+    let ClaimedScheduledJob {
+        job_id,
+        _job_execution_gate,
+    } = claimed_job;
+    drop(_job_execution_gate);
     let mut cleaned_request_log_bodies = 0i64;
     let mut deleted_request_logs = 0i64;
     let mut deleted_rollups = 0i64;
@@ -458,12 +539,15 @@ async fn run_request_logs_gc_catchup_claimed_job(state: Arc<AppState>, job_id: i
     let mut passes = 0usize;
 
     loop {
+        let _job_execution_gate = acquire_db_job_execution_gate_for_state(state.as_ref()).await;
         let _maintenance = acquire_db_maintenance_read_gate().await;
-        match state
+        let result = state
             .proxy
             .gc_request_logs_with_options(scheduled_request_logs_gc_options())
-            .await
-        {
+            .await;
+        drop(_maintenance);
+
+        match result {
             Ok(report) => {
                 passes += 1;
                 cleaned_request_log_bodies += report.cleaned_request_log_bodies;
@@ -490,7 +574,7 @@ async fn run_request_logs_gc_catchup_claimed_job(state: Arc<AppState>, job_id: i
                     return true;
                 }
 
-                drop(_maintenance);
+                drop(_job_execution_gate);
                 tokio::time::sleep(Duration::from_secs(
                     request_logs_gc_catchup_recheck_secs(),
                 ))
@@ -513,6 +597,18 @@ async fn record_linuxdo_user_sync_failure(
     attempted_at: i64,
     error: &str,
 ) {
+    let _job_execution_gate = acquire_db_job_execution_gate_for_state(state).await;
+    let _maintenance = acquire_db_maintenance_read_gate().await;
+    record_linuxdo_user_sync_failure_in_db_window(state, provider_user_id, attempted_at, error)
+        .await;
+}
+
+async fn record_linuxdo_user_sync_failure_in_db_window(
+    state: &AppState,
+    provider_user_id: &str,
+    attempted_at: i64,
+    error: &str,
+) {
     if let Err(mark_err) = state
         .proxy
         .record_oauth_account_profile_sync_failure(
@@ -530,6 +626,20 @@ async fn record_linuxdo_user_sync_failure(
     }
 }
 
+async fn finish_scheduled_job_with_db_gate(
+    state: &AppState,
+    job_id: i64,
+    status: &str,
+    message: &str,
+) {
+    let _job_execution_gate = acquire_db_job_execution_gate_for_state(state).await;
+    let _maintenance = acquire_db_maintenance_read_gate().await;
+    let _ = state
+        .proxy
+        .scheduled_job_finish(job_id, status, Some(message))
+        .await;
+}
+
 async fn run_linuxdo_user_status_sync_job(state: Arc<AppState>) {
     run_linuxdo_user_status_sync_job_with_source(state, TRIGGER_SOURCE_SCHEDULER).await;
 }
@@ -538,7 +648,7 @@ async fn run_linuxdo_user_status_sync_job_with_source(
     state: Arc<AppState>,
     trigger_source: &'static str,
 ) {
-    let Some(job_id) = claim_scheduled_job(
+    let Some(claimed_job) = claim_scheduled_job(
         state.as_ref(),
         LINUXDO_USER_STATUS_SYNC_JOB_TYPE,
         None,
@@ -550,57 +660,79 @@ async fn run_linuxdo_user_status_sync_job_with_source(
         return;
     };
 
-    run_linuxdo_user_status_sync_claimed_job(state, job_id).await;
+    run_linuxdo_user_status_sync_claimed_job(state, claimed_job).await;
 }
 
-async fn run_linuxdo_user_status_sync_claimed_job(state: Arc<AppState>, job_id: i64) -> bool {
-    let _maintenance = acquire_db_maintenance_read_gate().await;
-    let cfg = &state.linuxdo_oauth;
-    if !cfg.is_enabled_and_configured() {
-        let _ = state
-            .proxy
-            .scheduled_job_finish(
-                job_id,
-                "success",
-                Some("attempted=0 success=0 skipped=0 failure=0 reason=linuxdo_oauth_not_configured"),
-            )
-            .await;
-        return true;
-    }
-    if !cfg.has_refresh_token_crypt_key() {
-        let _ = state
-            .proxy
-            .scheduled_job_finish(
-                job_id,
-                "success",
-                Some("attempted=0 success=0 skipped=0 failure=0 reason=missing_refresh_token_crypt_key"),
-            )
-            .await;
-        return true;
+async fn run_linuxdo_user_status_sync_claimed_job(
+    state: Arc<AppState>,
+    mut claimed_job: ClaimedScheduledJob,
+) -> bool {
+    if claimed_job._job_execution_gate.is_none() {
+        claimed_job._job_execution_gate =
+            Some(acquire_db_job_execution_gate_for_state(state.as_ref()).await);
     }
 
-    let records = match state.proxy.list_oauth_accounts_with_refresh_token("linuxdo").await {
-        Ok(records) => records,
-        Err(err) => {
+    let job_id = claimed_job.job_id;
+    let cfg = &state.linuxdo_oauth;
+
+    let records = {
+        let _job_execution_gate = claimed_job
+            ._job_execution_gate
+            .take()
+            .expect("claimed linuxdo job has execution gate");
+        let _maintenance = acquire_db_maintenance_read_gate().await;
+        if !cfg.is_enabled_and_configured() {
             let _ = state
                 .proxy
-                .scheduled_job_finish(job_id, "error", Some(&err.to_string()))
+                .scheduled_job_finish(
+                    job_id,
+                    "success",
+                    Some("attempted=0 success=0 skipped=0 failure=0 reason=linuxdo_oauth_not_configured"),
+                )
                 .await;
-            return false;
+            return true;
         }
-    };
+        if !cfg.has_refresh_token_crypt_key() {
+            let _ = state
+                .proxy
+                .scheduled_job_finish(
+                    job_id,
+                    "success",
+                    Some("attempted=0 success=0 skipped=0 failure=0 reason=missing_refresh_token_crypt_key"),
+                )
+                .await;
+            return true;
+        }
 
-    if records.is_empty() {
-        let _ = state
+        let records = match state
             .proxy
-            .scheduled_job_finish(
-                job_id,
-                "success",
-                Some("attempted=0 success=0 skipped=0 failure=0 reason=no_eligible_accounts"),
-            )
-            .await;
-        return true;
-    }
+            .list_oauth_accounts_with_refresh_token("linuxdo")
+            .await
+        {
+            Ok(records) => records,
+            Err(err) => {
+                let _ = state
+                    .proxy
+                    .scheduled_job_finish(job_id, "error", Some(&err.to_string()))
+                    .await;
+                return false;
+            }
+        };
+
+        if records.is_empty() {
+            let _ = state
+                .proxy
+                .scheduled_job_finish(
+                    job_id,
+                    "success",
+                    Some("attempted=0 success=0 skipped=0 failure=0 reason=no_eligible_accounts"),
+                )
+                .await;
+            return true;
+        }
+
+        records
+    };
 
     let client = reqwest::Client::new();
     let attempted = records.len();
@@ -675,79 +807,92 @@ async fn run_linuxdo_user_status_sync_claimed_job(state: Arc<AppState>, job_id: 
             continue;
         }
 
-        let upsert_result = if let Some(rotated_refresh_token) = token_payload
-            .refresh_token
-            .as_deref()
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
+        let mut upsert_failure_message = None;
         {
-            match encrypt_linuxdo_refresh_token(cfg, rotated_refresh_token) {
-                Ok(Some((refresh_token_ciphertext, refresh_token_nonce))) => {
-                    state
-                        .proxy
-                        .refresh_oauth_account_profile_with_refresh_token(
-                            &profile,
-                            &refresh_token_ciphertext,
-                            &refresh_token_nonce,
-                        )
-                        .await
-                }
-                Ok(None) => state.proxy.refresh_oauth_account_profile(&profile).await,
-                Err(err) => {
-                    let message = format!("encrypt rotated refresh token error: {err}");
-                    failure += 1;
-                    first_failure.get_or_insert_with(|| format!("{record_label}: {message}"));
-                    record_linuxdo_user_sync_failure(
-                        state.as_ref(),
-                        &record.provider_user_id,
-                        attempted_at,
-                        &message,
-                    )
-                    .await;
-                    continue;
-                }
-            }
-        } else {
-            state.proxy.refresh_oauth_account_profile(&profile).await
-        };
-
-        if let Err(err) = upsert_result {
-            let mut message = format!("upsert oauth account error: {err}");
-            if !profile.active
-                && let Err(deactivate_err) = state
-                    .proxy
-                    .set_user_active_status(&record.user_id, false)
-                    .await
+            let _job_execution_gate = acquire_db_job_execution_gate_for_state(state.as_ref()).await;
+            let _maintenance = acquire_db_maintenance_read_gate().await;
+            let upsert_result = if let Some(rotated_refresh_token) = token_payload
+                .refresh_token
+                .as_deref()
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
             {
-                message.push_str(&format!(
-                    "; deactivate local user error: {deactivate_err}"
-                ));
+                match encrypt_linuxdo_refresh_token(cfg, rotated_refresh_token) {
+                    Ok(Some((refresh_token_ciphertext, refresh_token_nonce))) => {
+                        state
+                            .proxy
+                            .refresh_oauth_account_profile_with_refresh_token(
+                                &profile,
+                                &refresh_token_ciphertext,
+                                &refresh_token_nonce,
+                            )
+                            .await
+                    }
+                    Ok(None) => state.proxy.refresh_oauth_account_profile(&profile).await,
+                    Err(err) => {
+                        let message = format!("encrypt rotated refresh token error: {err}");
+                        failure += 1;
+                        first_failure.get_or_insert_with(|| format!("{record_label}: {message}"));
+                        record_linuxdo_user_sync_failure_in_db_window(
+                            state.as_ref(),
+                            &record.provider_user_id,
+                            attempted_at,
+                            &message,
+                        )
+                        .await;
+                        continue;
+                    }
+                }
+            } else {
+                state.proxy.refresh_oauth_account_profile(&profile).await
+            };
+
+            if let Err(err) = upsert_result {
+                let mut message = format!("upsert oauth account error: {err}");
+                if !profile.active
+                    && let Err(deactivate_err) = state
+                        .proxy
+                        .set_user_active_status(&record.user_id, false)
+                        .await
+                {
+                    message.push_str(&format!(
+                        "; deactivate local user error: {deactivate_err}"
+                    ));
+                }
+                record_linuxdo_user_sync_failure_in_db_window(
+                    state.as_ref(),
+                    &record.provider_user_id,
+                    attempted_at,
+                    &message,
+                )
+                .await;
+                upsert_failure_message = Some(message);
             }
+        }
+
+        if let Some(message) = upsert_failure_message {
             failure += 1;
             first_failure.get_or_insert_with(|| format!("{record_label}: {message}"));
-            record_linuxdo_user_sync_failure(
-                state.as_ref(),
-                &record.provider_user_id,
-                attempted_at,
-                &message,
-            )
-            .await;
             continue;
         }
 
-        if let Err(err) = state
-            .proxy
-            .record_oauth_account_profile_sync_success(
-                "linuxdo",
-                &record.provider_user_id,
-                attempted_at,
-            )
-            .await
         {
-            eprintln!(
-                "linuxdo-user-sync: record success metadata error for {} (user_id={}): {}",
-                record.provider_user_id, record.user_id, err
-            );
+            let _job_execution_gate = acquire_db_job_execution_gate_for_state(state.as_ref()).await;
+            let _maintenance = acquire_db_maintenance_read_gate().await;
+            if let Err(err) = state
+                .proxy
+                .record_oauth_account_profile_sync_success(
+                    "linuxdo",
+                    &record.provider_user_id,
+                    attempted_at,
+                )
+                .await
+            {
+                eprintln!(
+                    "linuxdo-user-sync: record success metadata error for {} (user_id={}): {}",
+                    record.provider_user_id, record.user_id, err
+                );
+            }
         }
 
         success += 1;
@@ -759,10 +904,7 @@ async fn run_linuxdo_user_status_sync_claimed_job(state: Arc<AppState>, job_id: 
         message.push_str(&format!(" first_failure={first_failure}"));
     }
     let final_status = if failure > 0 { "error" } else { "success" };
-    let _ = state
-        .proxy
-        .scheduled_job_finish(job_id, final_status, Some(&message))
-        .await;
+    finish_scheduled_job_with_db_gate(state.as_ref(), job_id, final_status, &message).await;
     final_status == "success"
 }
 
@@ -785,7 +927,10 @@ async fn run_linuxdo_user_tag_binding_refresh_job_with_source(
     state: Arc<AppState>,
     trigger_source: &'static str,
 ) {
-    let Some(job_id) = claim_scheduled_job(
+    let Some(ClaimedScheduledJob {
+        job_id,
+        _job_execution_gate,
+    }) = claim_scheduled_job(
         state.as_ref(),
         LINUXDO_USER_TAG_BINDING_REFRESH_JOB_TYPE,
         None,
@@ -854,7 +999,10 @@ async fn run_forward_proxy_geo_refresh_job_with_source(
     state: Arc<AppState>,
     trigger_source: &'static str,
 ) {
-    let Some(job_id) = claim_scheduled_job(
+    let Some(ClaimedScheduledJob {
+        job_id,
+        _job_execution_gate,
+    }) = claim_scheduled_job(
         state.as_ref(),
         "forward_proxy_geo_refresh",
         None,
@@ -892,8 +1040,24 @@ async fn run_manual_claimed_job(
     state: Arc<AppState>,
     job_type: String,
     key_id: Option<String>,
-    job_id: i64,
+    mut claimed_job: ClaimedScheduledJob,
 ) -> bool {
+    if job_type == "request_logs_gc" {
+        return run_request_logs_gc_catchup_claimed_job(state, claimed_job).await;
+    }
+    if job_type == LINUXDO_USER_STATUS_SYNC_JOB_TYPE {
+        return run_linuxdo_user_status_sync_claimed_job(state, claimed_job).await;
+    }
+
+    if claimed_job._job_execution_gate.is_none() {
+        claimed_job._job_execution_gate =
+            Some(acquire_db_job_execution_gate_for_state(state.as_ref()).await);
+    }
+
+    let ClaimedScheduledJob {
+        job_id,
+        _job_execution_gate,
+    } = claimed_job;
     let finish = |state: Arc<AppState>, status: &'static str, message: String| async move {
         let succeeded = status == "success";
         let _ = state
@@ -908,10 +1072,8 @@ async fn run_manual_claimed_job(
             let Some(key_id) = key_id else {
                 return finish(state, "error", "missing key_id".to_string()).await;
             };
-            let _maintenance = acquire_db_maintenance_read_gate().await;
-            match state
-                .proxy
-                .sync_key_quota(&key_id, &state.usage_base, "quota_sync/manual")
+            drop(_job_execution_gate);
+            match sync_key_quota_with_db_job_gate(state.as_ref(), &key_id, "quota_sync/manual")
                 .await
             {
                 Ok((limit, remaining)) => {
@@ -960,10 +1122,8 @@ async fn run_manual_claimed_job(
                 Err(err) => finish(state, "error", err.to_string()).await,
             }
         },
-        "request_logs_gc" => run_request_logs_gc_catchup_claimed_job(state, job_id).await,
-        "linuxdo_user_status_sync" => {
-            run_linuxdo_user_status_sync_claimed_job(state, job_id).await
-        },
+        "request_logs_gc" => unreachable!("request_logs_gc handled above"),
+        "linuxdo_user_status_sync" => unreachable!("linuxdo_user_status_sync handled above"),
         "linuxdo_user_tag_binding_refresh" => {
             let _maintenance = acquire_db_maintenance_read_gate().await;
             match state.proxy.refresh_linuxdo_user_tag_bindings().await {
@@ -1038,6 +1198,7 @@ fn spawn_db_compaction_scheduler(state: Arc<AppState>) {
             if Instant::now() < next_allowed_at {
                 continue;
             }
+            let _job_execution_gate = acquire_db_job_execution_gate_for_state(state.as_ref()).await;
             let _maintenance = acquire_db_maintenance_write_gate().await;
             let stats = match state.proxy.sqlite_db_stats().await {
                 Ok(stats) => stats,
