@@ -11,6 +11,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 MANIFEST_PATH = ROOT / "scripts" / "ci_backend_test_manifest.json"
 BASE_CARGO_ARGS = ["cargo", "test", "--locked", "--all-features"]
+CARGO_LIST_TIMEOUT_SECONDS = 300
 
 
 def load_manifest():
@@ -74,13 +75,18 @@ def run_cargo(args):
 
 def capture_test_list(list_args):
     cmd = BASE_CARGO_ARGS + list_args + ["--", "--list"]
-    completed = subprocess.run(
-        cmd,
-        cwd=ROOT,
-        check=True,
-        capture_output=True,
-        text=True,
-    )
+    try:
+        completed = subprocess.run(
+            cmd,
+            cwd=ROOT,
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=CARGO_LIST_TIMEOUT_SECONDS,
+        )
+    except subprocess.TimeoutExpired as exc:
+        args = " ".join(cmd)
+        raise SystemExit(f"timed out listing tests for `{args}` after {exc.timeout}s") from exc
     return parse_test_list(completed.stdout)
 
 
@@ -172,11 +178,6 @@ def validate_shard_prefixes(shard, tests, target_id):
 
 def verify_manifest():
     targets, shards = load_manifest()
-    tests_by_target = {
-        target_id: capture_test_list(target["list_args"])
-        for target_id, target in targets.items()
-    }
-
     shards_by_kind = defaultdict(list)
     shards_by_target = defaultdict(list)
     matched_by_target = {}
@@ -185,11 +186,20 @@ def verify_manifest():
         shards_by_kind[shard["kind"]].append({"id": shard["id"], "name": shard["name"]})
         shards_by_target[shard["coverage_target"]].append(shard)
 
-    for target_id, tests in tests_by_target.items():
+    for target_id, target in targets.items():
+        target_shards = shards_by_target[target_id]
+
+        if len(target_shards) == 1 and target_shards[0]["mode"] == "all":
+            shard = target_shards[0]
+            matched_by_target[shard["id"]] = None
+            print(f"{target_id}: all tests covered by {shard['id']}", flush=True)
+            continue
+
+        tests = capture_test_list(target["list_args"])
         owners = defaultdict(list)
         shard_counts = []
 
-        for shard in shards_by_target[target_id]:
+        for shard in target_shards:
             validate_shard_prefixes(shard, tests, target_id)
             matched = shard_matches(shard, tests)
             matched_by_target[shard["id"]] = matched
@@ -238,6 +248,10 @@ def run_shard(shard_id):
     shard = next((item for item in shards if item["id"] == shard_id), None)
     if shard is None:
         raise SystemExit(f"unknown shard id: {shard_id}")
+
+    if shard["mode"] == "all":
+        run_cargo(shard["run_args"])
+        return
 
     target_id = shard["coverage_target"]
     target_tests = capture_test_list(targets[target_id]["list_args"])
