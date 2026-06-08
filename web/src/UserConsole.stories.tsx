@@ -1048,6 +1048,7 @@ export const ConsoleHome: Story = {
     for (const selector of [
       '.user-console-header',
       '.user-console-header-inline-meta',
+      '.user-console-announcements-trigger',
       '.user-console-account-trigger',
       '.user-console-landing-stack',
       '.user-console-recharge-section',
@@ -1055,6 +1056,9 @@ export const ConsoleHome: Story = {
       if (canvasElement.querySelector(selector) == null) {
         throw new Error(`Expected ConsoleHome to render ${selector}`)
       }
+    }
+    if (canvasElement.querySelector('.user-console-announcements-trigger svg') == null) {
+      throw new Error('Expected ConsoleHome to render a local svg icon inside the announcements trigger.')
     }
     const rechargeText = canvasElement.querySelector('.user-console-recharge-section')?.textContent ?? ''
     for (const expected of ['50.00 LDC', '+20', '+100', '+1,000']) {

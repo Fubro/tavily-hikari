@@ -117,7 +117,7 @@ export default function UserConsoleHeader(props: UserConsoleHeaderProps): JSX.El
             aria-label={props.announcementsLabel}
             onClick={props.onOpenAnnouncements}
           >
-            <Icon icon="mdi:bell-outline" width={16} height={16} aria-hidden="true" />
+            <Icon icon="mdi:bell-ring-outline" width={16} height={16} aria-hidden="true" />
             {props.announcementCount && props.announcementCount > 0 ? (
               <span className="user-console-announcements-count">{props.announcementCount}</span>
             ) : null}
