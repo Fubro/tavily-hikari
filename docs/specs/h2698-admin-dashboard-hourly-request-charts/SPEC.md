@@ -174,6 +174,7 @@
   story_id_or_title: `admin-components-dashboardoverview--results-area-mode`
   state: `results-area`
   evidence_note: 验证“24h 调用结果面积图”与主绝对图共享滚动 25 组窗口，并按结果分层堆叠展示。
+  pr: include
   image:
   ![管理员仪表盘小时图表：调用结果面积图](./assets/dashboard-hourly-results-area.png)
 
@@ -181,6 +182,7 @@
   story_id_or_title: `admin-components-dashboardoverview--types-area-mode`
   state: `types-area`
   evidence_note: 验证“24h 调用类型面积图”与主绝对图共享滚动 25 组窗口，并按类型分层堆叠展示。
+  pr: include
   image:
   ![管理员仪表盘小时图表：调用类型面积图](./assets/dashboard-hourly-types-area.png)
 
