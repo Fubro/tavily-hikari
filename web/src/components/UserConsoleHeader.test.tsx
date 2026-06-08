@@ -47,6 +47,9 @@ describe('UserConsoleHeader', () => {
         isAdmin
         adminHref="/admin"
         adminActionLabel="Open Admin Dashboard"
+        announcementsLabel="Open announcements"
+        announcementCount={2}
+        onOpenAnnouncements={() => undefined}
         logoutVisible
         isLoggingOut={false}
         logoutLabel="Sign out"
@@ -63,6 +66,7 @@ describe('UserConsoleHeader', () => {
     expect(html).toContain('Signed in as: Ivan')
     expect(html).toContain('user-console-header-inline-meta')
     expect(html).toContain('user-console-header-context')
+    expect(html).toContain('user-console-announcements-trigger')
     expect(html).toContain('user-console-account-trigger')
     expect(html).toContain('user-console-account-avatar-image')
   })
@@ -95,6 +99,37 @@ describe('UserConsoleHeader', () => {
     expect(html).toContain('Track account-level quotas.')
     expect(html).toContain('user-console-account-trigger')
     expect(html).not.toContain('Sign out')
+  })
+
+  it('renders a local svg icon inside the announcements trigger', () => {
+    const html = renderWithProviders(
+      <UserConsoleHeader
+        title="User Console"
+        subtitle="Your account dashboard and token management"
+        eyebrow="User Workspace"
+        currentViewLabel="Current View"
+        currentViewTitle="Account Overview"
+        currentViewDescription="Track account-level quotas."
+        sessionLabel="Signed in as"
+        sessionDisplayName="Ivan"
+        sessionProviderLabel="LinuxDo"
+        sessionAvatarUrl="https://connect.linux.do/user_avatar/connect.linux.do/ivan/96/1.png"
+        adminLabel="Admin"
+        isAdmin={false}
+        announcementsLabel="Open announcements"
+        announcementCount={1}
+        onOpenAnnouncements={() => undefined}
+        logoutVisible
+        isLoggingOut={false}
+        logoutLabel="Sign out"
+        loggingOutLabel="Signing out…"
+        onLogout={() => undefined}
+      />,
+    )
+
+    expect(html).toContain('user-console-announcements-trigger')
+    expect(html).toMatch(/user-console-announcements-trigger[\s\S]*?<svg/i)
+    expect(html).not.toContain('api.iconify.design')
   })
 
   it('retries avatar rendering after a broken image url is replaced', async () => {

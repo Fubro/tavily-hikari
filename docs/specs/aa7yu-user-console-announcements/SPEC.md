@@ -226,6 +226,13 @@
   ![Announcement ticker icon fixed](./assets/announcement-ticker-icon-fixed.png)
 
 - source_type: storybook_canvas
+  story_id_or_title: `User Console/UserConsole/Console Home`
+  state: user-console header announcement trigger icon restored
+  evidence_note: 用户控制台页头的通知入口恢复渲染离线铃铛图标，按钮不再只剩空白圆形外壳；该画布同时覆盖本轮新增的 Storybook `svg` 断言。
+  image:
+  ![User console announcement trigger icon fixed](./assets/user-console-announcement-trigger-icon-fixed.png)
+
+- source_type: storybook_canvas
   story_id_or_title: `Admin/AnnouncementsModule/Preview From List`
   state: admin list preview using user-console modal display
   evidence_note: 管理端列表页点击弹窗公告预览时，直接打开用户控制台的弹窗公告组件，展示方式与用户端保持一致。
