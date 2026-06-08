@@ -601,6 +601,10 @@ export interface AdminTranslationsShape {
       rechargeFeatureHint: string
       rechargeUserLabel: string
       rechargeUserHint: string
+      activeUsersDefaultLabel: string
+      activeUsersDefaultHint: string
+      activeUsersDefaultCount: string
+      activeUsersDefinition: string
       blockedKeyBaseLimitLabel: string
       blockedKeyBaseLimitHint: string
       currentBlockedKeyBaseLimitValue: string
@@ -639,6 +643,10 @@ export interface AdminTranslationsShape {
     searchPlaceholder: string
     search: string
     clear: string
+    filterStatus: {
+      defaultActiveOnly: string
+      searchAll: string
+    }
     pagination: string
     table: {
       user: string

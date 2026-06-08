@@ -991,8 +991,27 @@ struct ListUsersQuery {
     q: Option<String>,
     #[serde(rename = "tagId")]
     tag_id: Option<String>,
+    #[serde(rename = "activityScope", default)]
+    activity_scope: AdminUserActivityScopeQuery,
     sort: Option<AdminUsersSortField>,
     order: Option<AdminUsersSortDirection>,
+}
+
+#[derive(Debug, Deserialize, Clone, Copy, Default)]
+#[serde(rename_all = "camelCase")]
+enum AdminUserActivityScopeQuery {
+    #[default]
+    All,
+    Active90d,
+}
+
+impl AdminUserActivityScopeQuery {
+    fn to_admin_user_activity_scope(self) -> tavily_hikari::AdminUserActivityScope {
+        match self {
+            Self::All => tavily_hikari::AdminUserActivityScope::All,
+            Self::Active90d => tavily_hikari::AdminUserActivityScope::Active90d,
+        }
+    }
 }
 
 #[derive(Debug, Deserialize, Clone, Copy, PartialEq, Eq)]

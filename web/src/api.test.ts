@@ -19,6 +19,7 @@ import {
   fetchAnnouncements,
   fetchApiKeys,
   fetchDashboardOverview,
+  fetchForwardProxySettings,
   fetchJobs,
   fetchKeyLogsCatalog,
   fetchKeyLogDetails,
@@ -791,11 +792,11 @@ describe('admin user tag api helpers', () => {
     )
     globalThis.fetch = fetchMock as typeof fetch
 
-    await fetchAdminUsers(1, 20, 'L2', 'linuxdo_l2', 'monthlySuccessRate', 'asc')
+    await fetchAdminUsers(1, 20, 'L2', 'linuxdo_l2', 'all', 'monthlySuccessRate', 'asc')
 
     expect(fetchMock).toHaveBeenCalledTimes(1)
     const [input] = fetchMock.mock.calls[0] as [string, RequestInit]
-    expect(input).toBe('/api/users?page=1&per_page=20&q=L2&tagId=linuxdo_l2&sort=monthlySuccessRate&order=asc')
+    expect(input).toBe('/api/users?page=1&per_page=20&q=L2&tagId=linuxdo_l2&activityScope=all&sort=monthlySuccessRate&order=asc')
   })
 
   it('sends exact search and sort params when listing unbound token usage', async () => {
@@ -1244,8 +1245,25 @@ describe('admin user tag api helpers', () => {
               rebalanceMcpSessionPercent: 35,
               apiRebalanceEnabled: false,
               apiRebalancePercent: 0,
+              rechargeFeatureEnabled: false,
+              rechargeUserEnabled: false,
+              adminDefaultActiveUsersOnly: true,
               userBlockedKeyBaseLimit: 8,
               globalIpLimit: 5,
+              trustedProxyCidrs: ['127.0.0.0/8', '::1/128'],
+              trustedClientIpHeaders: ['cf-connecting-ip', 'x-forwarded-for'],
+              requestLogRetention: {
+                maxLogRetentionDays: 32,
+                heavyUsageThresholdPercent: 80,
+                global: { businessBodyDays: 7, nonBusinessBodyDays: 0, nonSuccessBodyDays: 3 },
+                heavyUsage: { businessBodyDays: 3, nonBusinessBodyDays: 0, nonSuccessBodyDays: 1 },
+                debugShared: { businessBodyDays: 14, nonBusinessBodyDays: 1, nonSuccessBodyDays: 7 },
+              },
+            },
+            adminUserListStats: {
+              activeUsers90d: 12,
+              totalUsers: 30,
+              windowDays: 90,
             },
           }),
           { status: 200, headers: { 'Content-Type': 'application/json' } },
@@ -1261,10 +1279,45 @@ describe('admin user tag api helpers', () => {
       rebalanceMcpSessionPercent: 35,
       apiRebalanceEnabled: false,
       apiRebalancePercent: 0,
+      rechargeFeatureEnabled: false,
+      rechargeUserEnabled: false,
+      adminDefaultActiveUsersOnly: true,
       userBlockedKeyBaseLimit: 8,
       globalIpLimit: 5,
+      trustedProxyCidrs: ['127.0.0.0/8', '::1/128'],
+      trustedClientIpHeaders: ['cf-connecting-ip', 'x-forwarded-for'],
+      requestLogRetention: {
+        maxLogRetentionDays: 32,
+        heavyUsageThresholdPercent: 80,
+        global: { businessBodyDays: 7, nonBusinessBodyDays: 0, nonSuccessBodyDays: 3 },
+        heavyUsage: { businessBodyDays: 3, nonBusinessBodyDays: 0, nonSuccessBodyDays: 1 },
+        debugShared: { businessBodyDays: 14, nonBusinessBodyDays: 1, nonSuccessBodyDays: 7 },
+      },
     })
     expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/settings')
+  })
+
+  it('fetches forward proxy settings from the dedicated endpoint', async () => {
+    const payload = {
+      proxyUrls: ['https://example.com/sub.txt'],
+      subscriptionServerSideEnabled: true,
+      sourceSubscriptionUrl: 'https://example.com/sub.txt',
+      validationSummary: null,
+      validationNodes: [],
+      runtime: null,
+    }
+    const fetchMock = mock(() =>
+      Promise.resolve(
+        new Response(JSON.stringify(payload), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      ),
+    )
+    globalThis.fetch = fetchMock as typeof fetch
+
+    await expect(fetchForwardProxySettings()).resolves.toEqual(payload)
+    expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/settings/forward-proxy')
   })
 
   it('updates system settings with requestRateLimit in the payload body', async () => {
@@ -1278,8 +1331,20 @@ describe('admin user tag api helpers', () => {
             rebalanceMcpSessionPercent: 100,
             apiRebalanceEnabled: true,
             apiRebalancePercent: 25,
+            rechargeFeatureEnabled: false,
+            rechargeUserEnabled: false,
+            adminDefaultActiveUsersOnly: true,
             userBlockedKeyBaseLimit: 5,
             globalIpLimit: 6,
+            trustedProxyCidrs: ['127.0.0.0/8', '::1/128'],
+            trustedClientIpHeaders: ['cf-connecting-ip', 'x-forwarded-for'],
+            requestLogRetention: {
+              maxLogRetentionDays: 32,
+              heavyUsageThresholdPercent: 80,
+              global: { businessBodyDays: 7, nonBusinessBodyDays: 0, nonSuccessBodyDays: 3 },
+              heavyUsage: { businessBodyDays: 3, nonBusinessBodyDays: 0, nonSuccessBodyDays: 1 },
+              debugShared: { businessBodyDays: 14, nonBusinessBodyDays: 1, nonSuccessBodyDays: 7 },
+            },
           }),
           { status: 200, headers: { 'Content-Type': 'application/json' } },
         ),
@@ -1295,19 +1360,43 @@ describe('admin user tag api helpers', () => {
         rebalanceMcpSessionPercent: 100,
         apiRebalanceEnabled: true,
         apiRebalancePercent: 25,
+        rechargeFeatureEnabled: false,
+        rechargeUserEnabled: false,
+        adminDefaultActiveUsersOnly: true,
         userBlockedKeyBaseLimit: 5,
         globalIpLimit: 6,
+        trustedProxyCidrs: ['127.0.0.0/8', '::1/128'],
+        trustedClientIpHeaders: ['cf-connecting-ip', 'x-forwarded-for'],
+        requestLogRetention: {
+          maxLogRetentionDays: 32,
+          heavyUsageThresholdPercent: 80,
+          global: { businessBodyDays: 7, nonBusinessBodyDays: 0, nonSuccessBodyDays: 3 },
+          heavyUsage: { businessBodyDays: 3, nonBusinessBodyDays: 0, nonSuccessBodyDays: 1 },
+          debugShared: { businessBodyDays: 14, nonBusinessBodyDays: 1, nonSuccessBodyDays: 7 },
+        },
       }),
     ).resolves.toEqual({
       requestRateLimit: 75,
       mcpSessionAffinityKeyCount: 4,
       rebalanceMcpEnabled: false,
-      rebalanceMcpSessionPercent: 100,
-      apiRebalanceEnabled: true,
-      apiRebalancePercent: 25,
-      userBlockedKeyBaseLimit: 5,
-      globalIpLimit: 6,
-    })
+        rebalanceMcpSessionPercent: 100,
+        apiRebalanceEnabled: true,
+        apiRebalancePercent: 25,
+        rechargeFeatureEnabled: false,
+        rechargeUserEnabled: false,
+        adminDefaultActiveUsersOnly: true,
+        userBlockedKeyBaseLimit: 5,
+        globalIpLimit: 6,
+        trustedProxyCidrs: ['127.0.0.0/8', '::1/128'],
+        trustedClientIpHeaders: ['cf-connecting-ip', 'x-forwarded-for'],
+        requestLogRetention: {
+          maxLogRetentionDays: 32,
+          heavyUsageThresholdPercent: 80,
+          global: { businessBodyDays: 7, nonBusinessBodyDays: 0, nonSuccessBodyDays: 3 },
+          heavyUsage: { businessBodyDays: 3, nonBusinessBodyDays: 0, nonSuccessBodyDays: 1 },
+          debugShared: { businessBodyDays: 14, nonBusinessBodyDays: 1, nonSuccessBodyDays: 7 },
+        },
+      })
 
     expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/settings/system')
     expect(fetchMock.mock.calls[0]?.[1]).toMatchObject({
@@ -1320,8 +1409,20 @@ describe('admin user tag api helpers', () => {
         rebalanceMcpSessionPercent: 100,
         apiRebalanceEnabled: true,
         apiRebalancePercent: 25,
+        rechargeFeatureEnabled: false,
+        rechargeUserEnabled: false,
+        adminDefaultActiveUsersOnly: true,
         userBlockedKeyBaseLimit: 5,
         globalIpLimit: 6,
+        trustedProxyCidrs: ['127.0.0.0/8', '::1/128'],
+        trustedClientIpHeaders: ['cf-connecting-ip', 'x-forwarded-for'],
+        requestLogRetention: {
+          maxLogRetentionDays: 32,
+          heavyUsageThresholdPercent: 80,
+          global: { businessBodyDays: 7, nonBusinessBodyDays: 0, nonSuccessBodyDays: 3 },
+          heavyUsage: { businessBodyDays: 3, nonBusinessBodyDays: 0, nonSuccessBodyDays: 1 },
+          debugShared: { businessBodyDays: 14, nonBusinessBodyDays: 1, nonSuccessBodyDays: 7 },
+        },
       }),
     })
   })

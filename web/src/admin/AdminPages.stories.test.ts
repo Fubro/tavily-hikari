@@ -184,6 +184,49 @@ describe('AdminPages Storybook proofs', () => {
     expect(usageMarkup).toContain('data-sort-field="recentIpCount7d"')
   })
 
+  it('renders active-only user stories with the default filter hint and search fallback hint', () => {
+    const renderUsersActiveOnly = adminPageStories.UsersActiveOnlyDefault.render as
+      | (() => JSX.Element)
+      | undefined
+    const renderUsersSearchAll = adminPageStories.UsersActiveOnlySearchAll.render as
+      | (() => JSX.Element)
+      | undefined
+    const renderUsageActiveOnly = adminPageStories.UsersUsageActiveOnlyDefault.render as
+      | (() => JSX.Element)
+      | undefined
+    const renderUsageSearchAll = adminPageStories.UsersUsageActiveOnlySearchAll.render as
+      | (() => JSX.Element)
+      | undefined
+    expect(renderUsersActiveOnly).toBeDefined()
+    expect(renderUsersSearchAll).toBeDefined()
+    expect(renderUsageActiveOnly).toBeDefined()
+    expect(renderUsageSearchAll).toBeDefined()
+
+    const renderMarkup = (renderStory: () => JSX.Element) =>
+      renderToStaticMarkup(
+        createElement(
+          LanguageProvider,
+          { initialLanguage: 'zh' },
+          createElement(ThemeProvider, null, createElement(TooltipProvider, null, createElement(renderStory))),
+        ),
+      )
+
+    const usersActiveOnlyMarkup = renderMarkup(renderUsersActiveOnly!)
+    const usersSearchAllMarkup = renderMarkup(renderUsersSearchAll!)
+    const usageActiveOnlyMarkup = renderMarkup(renderUsageActiveOnly!)
+    const usageSearchAllMarkup = renderMarkup(renderUsageSearchAll!)
+
+    expect(usersActiveOnlyMarkup).toContain('默认仅展示近 90 天内成功调用过接口的活跃用户。')
+    expect(usersActiveOnlyMarkup).not.toContain('Charlie Li')
+    expect(usersSearchAllMarkup).toContain('搜索已扩展到全部用户集合，避免遗漏非活跃用户。')
+    expect(usersSearchAllMarkup).toContain('Charlie Li')
+
+    expect(usageActiveOnlyMarkup).toContain('默认仅展示近 90 天内成功调用过接口的活跃用户。')
+    expect(usageActiveOnlyMarkup).not.toContain('Charlie Li')
+    expect(usageSearchAllMarkup).toContain('搜索已扩展到全部用户集合，避免遗漏非活跃用户。')
+    expect(usageSearchAllMarkup).toContain('Charlie Li')
+  })
+
   it('renders the system settings page story with a bundled navigation icon', () => {
     const renderStory = adminPageStories.SystemSettings.render as (() => JSX.Element) | undefined
     expect(renderStory).toBeDefined()
@@ -202,6 +245,7 @@ describe('AdminPages Storybook proofs', () => {
     expect(markup).toContain('admin-nav-item-active')
     expect(markup).toContain('admin-nav-item-icon')
     expect(markup).toContain('<svg')
+    expect(markup).toContain('活跃用户 12 / 总用户 30')
     expect(markup).not.toContain('HA service nodes')
   })
 

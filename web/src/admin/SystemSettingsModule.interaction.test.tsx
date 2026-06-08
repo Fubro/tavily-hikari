@@ -20,10 +20,18 @@ const initialSettings: SystemSettings = {
   apiRebalancePercent: 0,
   rechargeFeatureEnabled: true,
   rechargeUserEnabled: true,
+  adminDefaultActiveUsersOnly: false,
   userBlockedKeyBaseLimit: 5,
   globalIpLimit: 5,
   trustedProxyCidrs: ['127.0.0.0/8', '::1/128'],
   trustedClientIpHeaders: ['cf-connecting-ip', 'x-forwarded-for'],
+  requestLogRetention: {
+    maxLogRetentionDays: 32,
+    heavyUsageThresholdPercent: 80,
+    global: { businessBodyDays: 7, nonBusinessBodyDays: 0, nonSuccessBodyDays: 3 },
+    heavyUsage: { businessBodyDays: 3, nonBusinessBodyDays: 0, nonSuccessBodyDays: 1 },
+    debugShared: { businessBodyDays: 14, nonBusinessBodyDays: 1, nonSuccessBodyDays: 7 },
+  },
 }
 
 async function flushEffects(): Promise<void> {
@@ -173,6 +181,50 @@ describe('SystemSettingsModule interactions', () => {
 
     expect(applied[0]?.rechargeFeatureEnabled).toBe(false)
     expect(applied[1]?.rechargeUserEnabled).toBe(false)
+
+    await act(async () => root.unmount())
+  })
+
+  it('saves the active-users default switch immediately', async () => {
+    const applied: SystemSettings[] = []
+    const container = document.createElement('div')
+    document.body.appendChild(container)
+    const root = createRoot(container)
+
+    function Harness(): JSX.Element {
+      const [settings, setSettings] = useState<SystemSettings>(initialSettings)
+      return (
+        <SystemSettingsModule
+          strings={strings}
+          settings={settings}
+          userListStats={{ activeUsers90d: 12, totalUsers: 30, windowDays: 90 }}
+          loadState="ready"
+          error={null}
+          saving={false}
+          onApply={(nextSettings) => {
+            applied.push(nextSettings)
+            setSettings(nextSettings)
+          }}
+        />
+      )
+    }
+
+    await act(async () => {
+      root.render(<Harness />)
+    })
+    await flushEffects()
+
+    const switchButton = Array.from(document.querySelectorAll<HTMLButtonElement>('[role="switch"]')).find(
+      (button) => button.getAttribute('aria-label') === strings.form.activeUsersDefaultLabel,
+    )
+    expect(switchButton).not.toBeNull()
+
+    await act(async () => {
+      switchButton!.click()
+    })
+    await flushEffects()
+
+    expect(applied.at(-1)?.adminDefaultActiveUsersOnly).toBe(true)
 
     await act(async () => root.unmount())
   })

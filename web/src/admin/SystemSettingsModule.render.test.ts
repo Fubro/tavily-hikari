@@ -43,14 +43,23 @@ describe('SystemSettingsModule rendering', () => {
           apiRebalancePercent: 0,
           rechargeFeatureEnabled: true,
           rechargeUserEnabled: true,
+          adminDefaultActiveUsersOnly: false,
           userBlockedKeyBaseLimit: 5,
           globalIpLimit: 5,
           trustedProxyCidrs: ["127.0.0.0/8", "::1/128"],
           trustedClientIpHeaders: ["cf-connecting-ip", "x-forwarded-for"],
+          requestLogRetention: {
+            maxLogRetentionDays: 32,
+            heavyUsageThresholdPercent: 80,
+            global: { businessBodyDays: 7, nonBusinessBodyDays: 0, nonSuccessBodyDays: 3 },
+            heavyUsage: { businessBodyDays: 3, nonBusinessBodyDays: 0, nonSuccessBodyDays: 1 },
+            debugShared: { businessBodyDays: 14, nonBusinessBodyDays: 1, nonSuccessBodyDays: 7 },
+          },
         },
         loadState: 'ready',
         error: null,
         saving: false,
+        userListStats: { activeUsers90d: 128, totalUsers: 346, windowDays: 90 },
         onApply: () => {},
       }),
     )
@@ -69,6 +78,8 @@ describe('SystemSettingsModule rendering', () => {
     expect(markup).toContain(strings.form.apiRebalancePercentDisabledHint)
     expect(markup).toContain(strings.form.rechargeFeatureLabel)
     expect(markup).toContain(strings.form.rechargeUserLabel)
+    expect(markup).toContain(strings.form.activeUsersDefaultLabel)
+    expect(markup).toContain(strings.form.activeUsersDefaultCount.replace('{active}', '128').replace('{total}', '346'))
     expect(markup).toContain(strings.form.currentBlockedKeyBaseLimitValue.replace('{count}', '5'))
     expect(markup).toContain(strings.form.blockedKeyBaseLimitHint)
     expect(markup).toContain(strings.form.currentGlobalIpLimitValue.replace('{count}', '5'))
@@ -95,10 +106,18 @@ describe('SystemSettingsModule rendering', () => {
           apiRebalancePercent: 25,
           rechargeFeatureEnabled: true,
           rechargeUserEnabled: true,
+          adminDefaultActiveUsersOnly: false,
           userBlockedKeyBaseLimit: 5,
           globalIpLimit: 5,
           trustedProxyCidrs: ["127.0.0.0/8", "::1/128"],
           trustedClientIpHeaders: ["cf-connecting-ip", "x-forwarded-for"],
+          requestLogRetention: {
+            maxLogRetentionDays: 32,
+            heavyUsageThresholdPercent: 80,
+            global: { businessBodyDays: 7, nonBusinessBodyDays: 0, nonSuccessBodyDays: 3 },
+            heavyUsage: { businessBodyDays: 3, nonBusinessBodyDays: 0, nonSuccessBodyDays: 1 },
+            debugShared: { businessBodyDays: 14, nonBusinessBodyDays: 1, nonSuccessBodyDays: 7 },
+          },
         },
         loadState: 'ready',
         error: null,
@@ -123,10 +142,18 @@ describe('SystemSettingsModule rendering', () => {
           apiRebalancePercent: 25,
           rechargeFeatureEnabled: true,
           rechargeUserEnabled: true,
+          adminDefaultActiveUsersOnly: false,
           userBlockedKeyBaseLimit: 5,
           globalIpLimit: 5,
           trustedProxyCidrs: ["127.0.0.0/8", "::1/128"],
           trustedClientIpHeaders: ["cf-connecting-ip", "x-forwarded-for"],
+          requestLogRetention: {
+            maxLogRetentionDays: 32,
+            heavyUsageThresholdPercent: 80,
+            global: { businessBodyDays: 7, nonBusinessBodyDays: 0, nonSuccessBodyDays: 3 },
+            heavyUsage: { businessBodyDays: 3, nonBusinessBodyDays: 0, nonSuccessBodyDays: 1 },
+            debugShared: { businessBodyDays: 14, nonBusinessBodyDays: 1, nonSuccessBodyDays: 7 },
+          },
         },
         loadState: 'ready',
         error: null,

@@ -1,3 +1,5 @@
+ARG XRAY_CORE_VERSION=26.2.6
+
 ########## Stage 1: compile the Rust binary ##########
 FROM rust:1.91-bookworm AS builder
 ARG APP_EFFECTIVE_VERSION
@@ -24,28 +26,8 @@ RUN cargo build --release --locked \
     --bin mcp_request_log_retry_repair \
     --bin request_logs_gc_once
 
-########## Stage 2: create a slim runtime image ##########
-FROM debian:bookworm-slim AS xray-downloader
-ARG XRAY_CORE_VERSION=26.2.6
-ARG TARGETARCH
-
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends ca-certificates curl unzip \
-    && rm -rf /var/lib/apt/lists/* \
-    && ARCH="${TARGETARCH:-$(dpkg --print-architecture)}" \
-    && case "${ARCH}" in \
-        amd64) XRAY_ZIP="Xray-linux-64.zip" ;; \
-        arm64) XRAY_ZIP="Xray-linux-arm64-v8a.zip" ;; \
-        *) echo "Unsupported TARGETARCH=${TARGETARCH} resolved_arch=${ARCH} for Xray-core" >&2; exit 1 ;; \
-      esac \
-    && curl --fail --show-error --silent --location \
-      --retry 5 --retry-delay 2 --retry-all-errors \
-      -o /tmp/xray.zip "https://github.com/XTLS/Xray-core/releases/download/v${XRAY_CORE_VERSION}/${XRAY_ZIP}" \
-    && unzip -q /tmp/xray.zip -d /tmp/xray \
-    && install -m 0755 /tmp/xray/xray /usr/local/bin/xray \
-    && install -d /usr/local/share/licenses/xray-core \
-    && install -m 0644 /tmp/xray/LICENSE /usr/local/share/licenses/xray-core/LICENSE \
-    && rm -rf /tmp/xray /tmp/xray.zip
+########## Stage 2: import the official Xray runtime ##########
+FROM ghcr.io/xtls/xray-core:${XRAY_CORE_VERSION} AS xray-downloader
 
 FROM debian:bookworm-slim AS runtime
 ARG APP_EFFECTIVE_VERSION
@@ -63,7 +45,7 @@ COPY --from=builder /app/target/release/mcp_search_billing_repair /usr/local/bin
 COPY --from=builder /app/target/release/mcp_request_log_retry_repair /usr/local/bin/mcp_request_log_retry_repair
 COPY --from=builder /app/target/release/request_logs_gc_once /usr/local/bin/request_logs_gc_once
 COPY --from=xray-downloader /usr/local/bin/xray /usr/local/bin/xray
-COPY --from=xray-downloader /usr/local/share/licenses/xray-core/LICENSE /usr/local/share/licenses/xray-core/LICENSE
+COPY --from=xray-downloader /usr/local/share/xray /usr/local/share/xray
 # Copy prebuilt web assets (produced by CI before Docker build)
 COPY web/dist /srv/app/web
 

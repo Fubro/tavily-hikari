@@ -170,6 +170,7 @@ async fn list_users(
     } else {
         None
     };
+    let activity_scope = q.activity_scope.to_admin_user_activity_scope();
     let effective_sort_field = requested_sort.unwrap_or(AdminUsersSortField::LastLoginAt);
     let effective_sort_order = requested_order.unwrap_or(AdminUsersSortDirection::Desc);
     let use_default_paged_query =
@@ -181,7 +182,13 @@ async fn list_users(
     let (paged_rows, total) = if use_default_paged_query {
         let (users, total) = state
             .proxy
-            .list_admin_users_paged(page, per_page, q.q.as_deref(), q.tag_id.as_deref())
+            .list_admin_users_paged(
+                page,
+                per_page,
+                q.q.as_deref(),
+                q.tag_id.as_deref(),
+                activity_scope,
+            )
             .await
             .map_err(|err| {
                 eprintln!("list admin users error: {err}");
@@ -235,14 +242,15 @@ async fn list_users(
     } else if let Some(paged_sort_field) = paged_sort_field {
         let (users, total) = state
             .proxy
-            .list_admin_users_sorted_paged(
+            .list_admin_users_sorted_paged(AdminUserSortedPageRequest {
                 page,
                 per_page,
-                q.q.as_deref(),
-                q.tag_id.as_deref(),
-                paged_sort_field,
-                effective_sort_order.to_admin_list_sort_direction(),
-            )
+                query: q.q.as_deref(),
+                tag_id: q.tag_id.as_deref(),
+                activity_scope,
+                sort: paged_sort_field,
+                direction: effective_sort_order.to_admin_list_sort_direction(),
+            })
             .await
             .map_err(|err| {
                 eprintln!("list admin users sorted page error: {err}");
@@ -312,7 +320,7 @@ async fn list_users(
     } else {
         let users = state
             .proxy
-            .list_admin_users_filtered(q.q.as_deref(), q.tag_id.as_deref())
+            .list_admin_users_filtered(q.q.as_deref(), q.tag_id.as_deref(), activity_scope)
             .await
             .map_err(|err| {
                 eprintln!("list admin users error: {err}");

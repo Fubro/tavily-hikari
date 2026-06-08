@@ -9,6 +9,7 @@ export interface SystemSettings {
   apiRebalancePercent: number
   rechargeFeatureEnabled: boolean
   rechargeUserEnabled: boolean
+  adminDefaultActiveUsersOnly: boolean
   userBlockedKeyBaseLimit: number
   globalIpLimit: number
   trustedProxyCidrs: string[]
@@ -16,9 +17,16 @@ export interface SystemSettings {
   requestLogRetention: RequestLogRetentionSettings
 }
 
+export interface AdminUserListStats {
+  activeUsers90d: number
+  totalUsers: number
+  windowDays: number
+}
+
 export interface ForwardProxySettingsEnvelope {
   forwardProxy?: import('./runtime').ForwardProxySettings | null
   systemSettings?: SystemSettings | null
+  adminUserListStats?: AdminUserListStats | null
 }
 
 export interface UpdateSystemSettingsPayload {
@@ -30,6 +38,7 @@ export interface UpdateSystemSettingsPayload {
   apiRebalancePercent: number
   rechargeFeatureEnabled: boolean
   rechargeUserEnabled: boolean
+  adminDefaultActiveUsersOnly: boolean
   trustedProxyCidrs: string[]
   trustedClientIpHeaders: string[]
   userBlockedKeyBaseLimit: number

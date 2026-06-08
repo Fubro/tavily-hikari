@@ -596,6 +596,10 @@ export const ZH: TranslationShape = {
           currentApiRebalancePercentValue: '当前 API 比例：{percent}%',
           rechargeFeatureLabel: '启用充值功能', rechargeFeatureHint: '关闭后用户控制台不展示充值入口，后端也会拒绝创建充值订单；已支付回调仍会继续处理。',
           rechargeUserLabel: '开放非管理员充值', rechargeUserHint: '调试开关。关闭后只有管理员请求能看到并创建充值订单。',
+          activeUsersDefaultLabel: '默认仅展示活跃用户',
+          activeUsersDefaultHint: '控制用户管理与用户用量列表在未搜索时，默认展示全部用户还是仅展示活跃用户。',
+          activeUsersDefaultCount: '活跃用户 {active} / 总用户 {total}',
+          activeUsersDefinition: '活跃用户指最近 {days} 天内至少成功调用过一次接口的用户。',
           ...adminTotpTranslations.zh, ...adminTrustedClientIpTranslations.zh,
           blockedKeyBaseLimitLabel: '封禁数基础值',
           blockedKeyBaseLimitHint: '作为所有用户封禁数限额的全局基础值；用户隐藏附加额度可正可负，最终有效值不会低于 0。',
@@ -628,6 +632,10 @@ export const ZH: TranslationShape = {
         searchPlaceholder: '按用户 ID、显示名、用户名或标签搜索',
         search: '搜索',
         clear: '清空',
+        filterStatus: {
+          defaultActiveOnly: '默认仅展示近 90 天内成功调用过接口的活跃用户。',
+          searchAll: '搜索已扩展到全部用户集合，避免遗漏非活跃用户。',
+        },
         pagination: '第 {page}/{total} 页',
         table: {
           user: '用户',

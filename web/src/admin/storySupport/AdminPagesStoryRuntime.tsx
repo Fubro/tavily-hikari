@@ -4778,7 +4778,13 @@ function JobsPageCanvas(): JSX.Element {
   )
 }
 
-function UsersPageCanvas(): JSX.Element {
+function UsersPageCanvas({
+  initialQuery = '',
+  defaultActiveUsersOnly = false,
+}: {
+  initialQuery?: string
+  defaultActiveUsersOnly?: boolean
+} = {}): JSX.Element {
   const admin = useTranslate().admin
   const { language } = useLanguage()
   const users = admin.users
@@ -4791,11 +4797,15 @@ function UsersPageCanvas(): JSX.Element {
     resetSearch,
     handleQueryInputChange,
     handleQueryInputKeyDown,
-  } = useStorySearchController()
+  } = useStorySearchController(initialQuery)
   const normalizedQuery = query.trim().toLowerCase()
+  const visibleUsers =
+    defaultActiveUsersOnly && normalizedQuery.length === 0
+      ? MOCK_USERS.filter((item) => item.lastActivity != null)
+      : MOCK_USERS
   const effectiveSortField = sortField ?? ADMIN_USERS_DEFAULT_SORT_FIELD
   const effectiveSortOrder = sortOrder ?? ADMIN_USERS_DEFAULT_SORT_ORDER
-  const filteredUsers = MOCK_USERS.filter((item) => {
+  const filteredUsers = visibleUsers.filter((item) => {
     if (!normalizedQuery) return true
     const displayName = item.displayName?.toLowerCase() ?? ''
     const username = item.username?.toLowerCase() ?? ''
@@ -4808,6 +4818,11 @@ function UsersPageCanvas(): JSX.Element {
   const sortedUsers = [...filteredUsers].sort((left, right) =>
     compareAdminUserSummaryRows(left, right, sortField, sortOrder)
   )
+  const usersFilterStatusText = defaultActiveUsersOnly
+    ? normalizedQuery.length > 0
+      ? users.filterStatus.searchAll
+      : users.filterStatus.defaultActiveOnly
+    : null
 
   const toggleSort = (field: AdminUsersSortField) => {
     const isActive = effectiveSortField === field
@@ -4851,6 +4866,11 @@ function UsersPageCanvas(): JSX.Element {
             )}
           </div>
         </div>
+        {usersFilterStatusText && (
+          <p className="panel-description" data-testid="users-filter-status">
+            {usersFilterStatusText}
+          </p>
+        )}
 
         <div className="table-wrapper jobs-table-wrapper">
           {filteredUsers.length === 0 ? (
@@ -5008,8 +5028,12 @@ function UsersPageCanvas(): JSX.Element {
 
 function UsersUsagePageCanvas({
   initialDrawerUserId,
+  initialQuery = '',
+  defaultActiveUsersOnly = false,
 }: {
   initialDrawerUserId?: string
+  initialQuery?: string
+  defaultActiveUsersOnly?: boolean
 } = {}): JSX.Element {
   const admin = useTranslate().admin
   const { language } = useLanguage()
@@ -5025,7 +5049,7 @@ function UsersUsagePageCanvas({
     resetSearch,
     handleQueryInputChange,
     handleQueryInputKeyDown,
-  } = useStorySearchController()
+  } = useStorySearchController(initialQuery)
   const [monthlyBrokenDrawer, setMonthlyBrokenDrawer] = useState<{
     label: string
     items: MonthlyBrokenKeyDetail[]
@@ -5039,9 +5063,13 @@ function UsersUsagePageCanvas({
     }
   })
   const normalizedQuery = query.trim().toLowerCase()
+  const visibleUsers =
+    defaultActiveUsersOnly && normalizedQuery.length === 0
+      ? MOCK_USERS.filter((item) => item.lastActivity != null)
+      : MOCK_USERS
   const effectiveSortField = sortField ?? ADMIN_USERS_DEFAULT_SORT_FIELD
   const effectiveSortOrder = sortOrder ?? ADMIN_USERS_DEFAULT_SORT_ORDER
-  const filteredUsers = MOCK_USERS.filter((item) => {
+  const filteredUsers = visibleUsers.filter((item) => {
     if (!normalizedQuery) return true
     const displayName = item.displayName?.toLowerCase() ?? ''
     const username = item.username?.toLowerCase() ?? ''
@@ -5054,6 +5082,11 @@ function UsersUsagePageCanvas({
   const sortedUsers = [...filteredUsers].sort((left, right) =>
     compareAdminUserSummaryRows(left, right, sortField, sortOrder)
   )
+  const usersFilterStatusText = defaultActiveUsersOnly
+    ? normalizedQuery.length > 0
+      ? users.filterStatus.searchAll
+      : users.filterStatus.defaultActiveOnly
+    : null
 
   const toggleSort = (field: AdminUsersSortField) => {
     const isActive = effectiveSortField === field
@@ -5168,6 +5201,11 @@ function UsersUsagePageCanvas({
             </div>
           </div>
         </div>
+        {usersFilterStatusText && (
+          <p className="panel-description" data-testid="users-filter-status">
+            {usersFilterStatusText}
+          </p>
+        )}
 
         <div className="table-wrapper jobs-table-wrapper">
           {filteredUsers.length === 0 ? (
@@ -6415,6 +6453,7 @@ function SystemSettingsPageCanvas(): JSX.Element {
           apiRebalancePercent: 0,
           rechargeFeatureEnabled: true,
           rechargeUserEnabled: true,
+          adminDefaultActiveUsersOnly: false,
           userBlockedKeyBaseLimit: 5,
           globalIpLimit: 5,
           trustedProxyCidrs: ["127.0.0.0/8", "::1/128"],
@@ -6430,6 +6469,7 @@ function SystemSettingsPageCanvas(): JSX.Element {
         loadState="ready"
         error={null}
         saving={false}
+        userListStats={{ activeUsers90d: 12, totalUsers: 30, windowDays: 90 }}
         registrationPolicy={{
           strings: admin.users.registration,
           checked: false,
@@ -6717,6 +6757,20 @@ export const Users: Story = {
   },
 }
 
+export const UsersActiveOnlyDefault: Story = {
+  render: () => <UsersPageCanvas defaultActiveUsersOnly />,
+  parameters: {
+    viewport: { defaultViewport: '1440-device-desktop' },
+  },
+}
+
+export const UsersActiveOnlySearchAll: Story = {
+  render: () => <UsersPageCanvas defaultActiveUsersOnly initialQuery="charlie" />,
+  parameters: {
+    viewport: { defaultViewport: '1440-device-desktop' },
+  },
+}
+
 export const UsersUsage: Story = {
   render: () => <UsersUsagePageCanvas />,
   parameters: {
@@ -6766,6 +6820,20 @@ export const UsersUsage: Story = {
     if (getFirstRenderedUserLabel(canvasElement) !== 'Alice Wang') {
       throw new Error('Expected users usage story clear action to restore the full list.')
     }
+  },
+}
+
+export const UsersUsageActiveOnlyDefault: Story = {
+  render: () => <UsersUsagePageCanvas defaultActiveUsersOnly />,
+  parameters: {
+    viewport: { defaultViewport: '1440-device-desktop' },
+  },
+}
+
+export const UsersUsageActiveOnlySearchAll: Story = {
+  render: () => <UsersUsagePageCanvas defaultActiveUsersOnly initialQuery="charlie" />,
+  parameters: {
+    viewport: { defaultViewport: '1440-device-desktop' },
   },
 }
 

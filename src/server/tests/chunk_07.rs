@@ -658,6 +658,94 @@
                 .is_some_and(|value| value == alice.user_id)
         }));
 
+        let active_only_url = format!(
+            "http://{}/api/users?page=1&per_page=20&activityScope=active90d",
+            addr
+        );
+        let active_only_resp = client
+            .get(&active_only_url)
+            .send()
+            .await
+            .expect("active-only list request");
+        assert_eq!(active_only_resp.status(), reqwest::StatusCode::OK);
+        let active_only_body: serde_json::Value =
+            active_only_resp.json().await.expect("active-only list json");
+        assert_eq!(
+            active_only_body.get("total").and_then(|value| value.as_i64()),
+            Some(1)
+        );
+        let active_only_items = active_only_body
+            .get("items")
+            .and_then(|value| value.as_array())
+            .expect("active-only items array");
+        assert_eq!(active_only_items.len(), 1);
+        assert_eq!(
+            active_only_items
+                .first()
+                .and_then(|item| item.get("userId"))
+                .and_then(|value| value.as_str()),
+            Some(alice.user_id.as_str())
+        );
+
+        let active_only_search_url = format!(
+            "http://{}/api/users?page=1&per_page=20&q={}&activityScope=active90d",
+            addr,
+            urlencoding::encode("Charlie")
+        );
+        let active_only_search_resp = client
+            .get(&active_only_search_url)
+            .send()
+            .await
+            .expect("active-only search request");
+        assert_eq!(active_only_search_resp.status(), reqwest::StatusCode::OK);
+        let active_only_search_body: serde_json::Value = active_only_search_resp
+            .json()
+            .await
+            .expect("active-only search json");
+        assert_eq!(
+            active_only_search_body
+                .get("total")
+                .and_then(|value| value.as_i64()),
+            Some(0)
+        );
+        assert_eq!(
+            active_only_search_body
+                .get("items")
+                .and_then(|value| value.as_array())
+                .map(Vec::len),
+            Some(0)
+        );
+
+        let active_only_quota_sort_url = format!(
+            "http://{}/api/users?page=1&per_page=20&activityScope=active90d&sort=quotaMonthlyUsed&order=desc",
+            addr
+        );
+        let active_only_quota_sort_resp = client
+            .get(&active_only_quota_sort_url)
+            .send()
+            .await
+            .expect("active-only quota sort request");
+        assert_eq!(active_only_quota_sort_resp.status(), reqwest::StatusCode::OK);
+        let active_only_quota_sort_body: serde_json::Value = active_only_quota_sort_resp
+            .json()
+            .await
+            .expect("active-only quota sort json");
+        assert_eq!(
+            active_only_quota_sort_body
+                .get("total")
+                .and_then(|value| value.as_i64()),
+            Some(1)
+        );
+        assert_eq!(
+            active_only_quota_sort_body
+                .get("items")
+                .and_then(|value| value.as_array())
+                .and_then(|items| items.first())
+                .and_then(|item| item.get("userId"))
+                .and_then(|value| value.as_str()),
+            Some(alice.user_id.as_str())
+        );
+
         let order_only_url = format!("http://{}/api/users?page=1&per_page=20&order=asc", addr);
         let order_only_resp = client
             .get(&order_only_url)

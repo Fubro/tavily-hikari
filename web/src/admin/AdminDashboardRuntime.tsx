@@ -116,6 +116,10 @@ import {
   type QuotaSliderField,
   type QuotaSliderSeed,
 } from './quotaSlider'
+import {
+  resolveAdminUserActivityScope,
+  resolveAdminUserActivityScopeFromSettings,
+} from './userActivityScope'
 import { formatRequestRateScope, formatRequestRateSummary, resolveRequestRate } from '../requestRate'
 import {
   type AdminUsersCollectionView,
@@ -251,6 +255,7 @@ import {
   bindAdminUserTag,
   unbindAdminUserTag,
   type AdminUserSummary,
+  type AdminUserListStats,
   type AdminUnboundTokenUsageSortField,
   type AdminUnboundTokenUsageSummary,
   type AdminUserDetail,
@@ -270,7 +275,7 @@ import {
   type ForwardProxyProgressEvent,
   type HaStatus,
   fetchForwardProxySettings,
-  fetchSystemSettings,
+  fetchSystemSettingsEnvelope,
   fetchForwardProxyErrorStats,
   fetchForwardProxyStats,
   revalidateForwardProxyWithProgress,
@@ -1811,6 +1816,7 @@ function AdminDashboard(): JSX.Element {
   const [forwardProxySettingsLoadState, setForwardProxySettingsLoadState] = useState<QueryLoadState>('initial_loading')
   const [forwardProxySettingsError, setForwardProxySettingsError] = useState<string | null>(null)
   const [systemSettings, setSystemSettings] = useState<SystemSettings | null>(null)
+  const [adminUserListStats, setAdminUserListStats] = useState<AdminUserListStats | null>(null)
   const [systemSettingsLoadState, setSystemSettingsLoadState] =
     useState<QueryLoadState>('initial_loading')
   const [systemSettingsError, setSystemSettingsError] = useState<string | null>(null)
@@ -1865,6 +1871,10 @@ function AdminDashboard(): JSX.Element {
   const systemSettingsLoadedRef = useRef(false)
   const forwardProxyStatsLoadedRef = useRef(false)
   const forwardProxyErrorStatsLoadedRef = useRef(false)
+  const needsSystemSettingsForUsers =
+    (isUsersCollectionRoute || route.name === 'user') && usersQuery.trim().length === 0
+  const waitingForUsersSystemSettings =
+    needsSystemSettingsForUsers && !systemSettingsLoadedRef.current && systemSettingsLoadState !== 'error'
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null)
   const [version, setVersion] = useState<{ backend: string; frontend: string } | null>(null)
   const [profile, setProfile] = useState<Profile | null>(null)
@@ -2795,7 +2805,7 @@ function AdminDashboard(): JSX.Element {
     }: {
       signal?: AbortSignal
       reason?: 'initial' | 'switch' | 'refresh'
-    } = {}) => {
+    } = {}): Promise<SystemSettings | null | undefined> => {
       const request = beginManagedRequest(systemSettingsAbortRef, signal)
       setSystemSettingsLoadState(
         reason === 'refresh'
@@ -2805,12 +2815,14 @@ function AdminDashboard(): JSX.Element {
       setSystemSettingsError(null)
 
       try {
-        const nextSettings = await fetchSystemSettings(request.signal)
+        const envelope = await fetchSystemSettingsEnvelope(request.signal)
         if (request.signal.aborted) return
-        setSystemSettings(nextSettings)
+        setSystemSettings(envelope.systemSettings ?? null)
+        setAdminUserListStats(envelope.adminUserListStats ?? null)
         setSystemSettingsLoadState('ready')
         setLastUpdated(new Date())
         systemSettingsLoadedRef.current = true
+        return envelope.systemSettings ?? null
       } catch (err) {
         if (request.signal.aborted) return
         console.error(err)
@@ -2821,6 +2833,20 @@ function AdminDashboard(): JSX.Element {
       }
     },
     [beginManagedRequest, loadingStateStrings.error],
+  )
+
+  const ensureUsersSystemSettings = useCallback(
+    async (
+      signal?: AbortSignal,
+      fallbackSettings?: SystemSettings | null,
+    ): Promise<SystemSettings | null> => {
+      if (usersQuery.trim().length > 0) return fallbackSettings ?? systemSettings ?? null
+      const knownSettings = fallbackSettings ?? systemSettings
+      if (knownSettings != null) return knownSettings
+      const loadedSettings = await loadSystemSettingsData({ signal, reason: 'refresh' })
+      return loadedSettings ?? null
+    },
+    [loadSystemSettingsData, systemSettings, usersQuery],
   )
 
   const loadForwardProxyStatsData = useCallback(
@@ -3325,7 +3351,7 @@ function AdminDashboard(): JSX.Element {
   }, [])
 
   useEffect(() => {
-    if (!(route.name === 'user' || route.name === 'user-usage')) return
+    if (!(isUsersCollectionRoute || route.name === 'user')) return
     if (systemSettingsLoadedRef.current) return
 
     const controller = new AbortController()
@@ -3335,7 +3361,7 @@ function AdminDashboard(): JSX.Element {
     })
 
     return () => controller.abort()
-  }, [route, loadSystemSettingsData])
+  }, [isUsersCollectionRoute, route, loadSystemSettingsData])
 
   useEffect(() => {
     if (!(route.name === 'module' && route.module === 'proxy-settings')) {
@@ -3720,6 +3746,7 @@ function AdminDashboard(): JSX.Element {
     const usersRouteActive =
       isUsersCollectionRoute || route.name === 'user'
     if (!usersRouteActive) return
+    if (waitingForUsersSystemSettings) return
 
     const request = beginManagedRequest(usersAbortRef)
     const nextQueryKey = [
@@ -3738,9 +3765,22 @@ function AdminDashboard(): JSX.Element {
       setUsers([])
       setUsersTotal(0)
     }
-    fetchAdminUsers(usersPage, USERS_PER_PAGE, usersQuery, usersTagFilterId, usersSort, usersSortOrder, request.signal)
+    Promise.resolve().then(() =>
+      fetchAdminUsers(
+        usersPage,
+        USERS_PER_PAGE,
+        usersQuery,
+        usersTagFilterId,
+        resolveAdminUserActivityScope(
+          usersQuery,
+          systemSettings?.adminDefaultActiveUsersOnly,
+        ),
+        usersSort,
+        usersSortOrder,
+        request.signal,
+      ))
       .then((result) => {
-        if (request.signal.aborted) return
+        if (result == null || request.signal.aborted) return
         setUsers(result.items)
         setUsersTotal(result.total)
         setUsersLoadState('ready')
@@ -3767,8 +3807,10 @@ function AdminDashboard(): JSX.Element {
     beginManagedRequest,
     isUsersCollectionRoute,
     route,
+    waitingForUsersSystemSettings,
     usersPage,
     usersQuery,
+    systemSettings?.adminDefaultActiveUsersOnly,
     usersSort,
     usersSortOrder,
     usersTagFilterId,
@@ -4571,6 +4613,7 @@ function AdminDashboard(): JSX.Element {
   const handleManualRefresh = () => {
     const controller = new AbortController()
     setLoading(true)
+    let usersSystemSettingsPromise: Promise<SystemSettings | null | undefined> | null = null
     if (route.name === 'module' && route.module === 'keys') {
       clearKeySelection()
       setKeysBulkFeedback(null)
@@ -4593,6 +4636,10 @@ function AdminDashboard(): JSX.Element {
     }
     if (route.name === 'module' && route.module === 'system-settings') {
       tasks.push(loadSystemSettingsData({ signal: controller.signal, reason: 'refresh' }))
+    }
+    if (isUsersCollectionRoute || route.name === 'user') {
+      usersSystemSettingsPromise = ensureUsersSystemSettings(controller.signal, systemSettings)
+      tasks.push(usersSystemSettingsPromise)
     }
     if (route.name === 'module' && route.module === 'requests') {
       const request = beginManagedRequest(requestsAbortRef, controller.signal)
@@ -4681,16 +4728,26 @@ function AdminDashboard(): JSX.Element {
       setUsersLoadState(getRefreshingLoadState(usersLoadedRef.current))
       setUsersError(null)
       tasks.push(
-        fetchAdminUsers(
-          usersPage,
-          USERS_PER_PAGE,
-          usersQuery,
-          usersTagFilterId,
-          usersSort,
-          usersSortOrder,
-          request.signal,
-        ).then((result) => {
-          if (request.signal.aborted) return
+        Promise.resolve(usersSystemSettingsPromise)
+          .then((loadedSystemSettings) => {
+            if (request.signal.aborted) return null
+            return fetchAdminUsers(
+              usersPage,
+              USERS_PER_PAGE,
+              usersQuery,
+              usersTagFilterId,
+              resolveAdminUserActivityScopeFromSettings(
+                usersQuery,
+                loadedSystemSettings,
+                systemSettings,
+              ),
+              usersSort,
+              usersSortOrder,
+              request.signal,
+            )
+          })
+          .then((result) => {
+          if (result == null || request.signal.aborted) return
           setUsers(result.items)
           setUsersTotal(result.total)
           setUsersLoadState('ready')
@@ -6150,6 +6207,12 @@ function AdminDashboard(): JSX.Element {
       setSystemSettingsLoadState('ready')
       setLastUpdated(new Date())
       systemSettingsLoadedRef.current = true
+      try {
+        const envelope = await fetchSystemSettingsEnvelope()
+        setAdminUserListStats(envelope.adminUserListStats ?? null)
+      } catch (refreshErr) {
+        console.error(refreshErr)
+      }
     } catch (err) {
       console.error(err)
       setSystemSettingsError(
@@ -6161,11 +6224,17 @@ function AdminDashboard(): JSX.Element {
     }
   }, [systemSettingsStrings.form.saveFailed])
   const refreshUsersList = async () => {
+    const settingsForUsers = await ensureUsersSystemSettings(undefined, systemSettings)
     const pagedUsers = await fetchAdminUsers(
       usersPage,
       USERS_PER_PAGE,
       usersQuery,
       usersTagFilterId,
+      resolveAdminUserActivityScopeFromSettings(
+        usersQuery,
+        settingsForUsers,
+        systemSettings,
+      ),
       usersSort,
       usersSortOrder,
     )
@@ -7246,6 +7315,12 @@ function AdminDashboard(): JSX.Element {
       : allowRegistration
         ? usersStrings.registration.enabled
         : usersStrings.registration.disabled
+  const usersFilterStatusText =
+    systemSettings?.adminDefaultActiveUsersOnly
+      ? usersQuery.trim().length > 0
+        ? usersStrings.filterStatus.searchAll
+        : usersStrings.filterStatus.defaultActiveOnly
+      : null
 
   const sortedTagCatalog = useMemo(
     () => [...tagCatalog].sort((left, right) => right.userCount - left.userCount || left.displayName.localeCompare(right.displayName)),
@@ -8848,30 +8923,33 @@ function AdminDashboard(): JSX.Element {
                   {usersStrings.usage.back}
                 </Button>
               </div>
-              <div className="users-search-controls">
-                <Input
-                  type="text"
-                  name="user-usage-search"
-                  className="users-search-input"
-                  placeholder={usersStrings.searchPlaceholder}
-                  value={usersQueryInput}
-                  disabled={usersBlocking}
-                  onChange={(event) => setUsersQueryInput(event.target.value)}
-                  onKeyDown={(event) => {
-                    if (event.key === 'Enter') {
-                      event.preventDefault()
-                      applyUserSearch()
-                    }
-                  }}
-                />
-                <Button type="button" variant="outline" onClick={applyUserSearch} disabled={usersBlocking}>
-                  {usersStrings.search}
-                </Button>
-                {(usersQueryInput.length > 0 || usersQuery.length > 0 || usersTagFilterId != null) && (
-                  <Button type="button" variant="ghost" onClick={resetUserSearch} disabled={usersBlocking}>
-                    {usersStrings.clear}
+              <div style={{ display: 'grid', gap: 6 }}>
+                <div className="users-search-controls">
+                  <Input
+                    type="text"
+                    name="user-usage-search"
+                    className="users-search-input"
+                    placeholder={usersStrings.searchPlaceholder}
+                    value={usersQueryInput}
+                    disabled={usersBlocking}
+                    onChange={(event) => setUsersQueryInput(event.target.value)}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter') {
+                        event.preventDefault()
+                        applyUserSearch()
+                      }
+                    }}
+                  />
+                  <Button type="button" variant="outline" onClick={applyUserSearch} disabled={usersBlocking}>
+                    {usersStrings.search}
                   </Button>
-                )}
+                  {(usersQueryInput.length > 0 || usersQuery.length > 0 || usersTagFilterId != null) && (
+                    <Button type="button" variant="ghost" onClick={resetUserSearch} disabled={usersBlocking}>
+                      {usersStrings.clear}
+                    </Button>
+                  )}
+                </div>
+                {usersFilterStatusText && <p className="panel-description">{usersFilterStatusText}</p>}
               </div>
             </div>
           </div>
@@ -9699,29 +9777,36 @@ function AdminDashboard(): JSX.Element {
     />
   )
   const renderUsersSearchControls = (className?: string) => (
-    <div className={['users-search-controls', className].filter(Boolean).join(' ')}>
-      <Input
-        type="text"
-        name="users-search"
-        className="users-search-input"
-        placeholder={usersStrings.searchPlaceholder}
-        value={usersQueryInput}
-        disabled={usersBlocking}
-        onChange={(event) => setUsersQueryInput(event.target.value)}
-        onKeyDown={(event) => {
-          if (event.key === 'Enter') {
-            event.preventDefault()
-            applyUserSearch()
-          }
-        }}
-      />
-      <Button type="button" variant="outline" onClick={applyUserSearch} disabled={usersBlocking}>
-        {usersStrings.search}
-      </Button>
-      {(usersQueryInput.length > 0 || usersQuery.length > 0 || usersTagFilterId != null) && (
-        <Button type="button" variant="ghost" onClick={resetUserSearch} disabled={usersBlocking}>
-          {usersStrings.clear}
+    <div style={{ display: 'grid', gap: 6 }}>
+      <div className={['users-search-controls', className].filter(Boolean).join(' ')}>
+        <Input
+          type="text"
+          name="users-search"
+          className="users-search-input"
+          placeholder={usersStrings.searchPlaceholder}
+          value={usersQueryInput}
+          disabled={usersBlocking}
+          onChange={(event) => setUsersQueryInput(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter') {
+              event.preventDefault()
+              applyUserSearch()
+            }
+          }}
+        />
+        <Button type="button" variant="outline" onClick={applyUserSearch} disabled={usersBlocking}>
+          {usersStrings.search}
         </Button>
+        {(usersQueryInput.length > 0 || usersQuery.length > 0 || usersTagFilterId != null) && (
+          <Button type="button" variant="ghost" onClick={resetUserSearch} disabled={usersBlocking}>
+            {usersStrings.clear}
+          </Button>
+        )}
+      </div>
+      {usersFilterStatusText && (
+        <p className="panel-description" data-testid="users-filter-status">
+          {usersFilterStatusText}
+        </p>
       )}
     </div>
   )
@@ -11898,6 +11983,7 @@ function AdminDashboard(): JSX.Element {
             error={systemSettingsError}
             saving={systemSettingsSaving}
             displayDensity={adminDisplayDensity}
+            userListStats={adminUserListStats}
             registrationPolicy={{
               strings: usersStrings.registration,
               checked: allowRegistration,

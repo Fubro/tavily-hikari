@@ -62,11 +62,12 @@ struct SummarySig {
 use std::time::{Duration, Instant};
 use tavily_hikari::{
     AdminTokenEnabledFilter, AdminTokenListFilters, AdminTokenOwnerFilter, AdminUserIdentity,
-    AdminUserUsageSeriesKind, ApiKeyMetrics, ApiKeyStickyNode, ApiKeyStickyUser,
-    ApiKeyUserUsageBucket, AuthToken, ClientIpInfo, ForwardProxyHourlyBucketResponse,
-    ForwardProxyStatsResponse, ForwardProxyWeightHourlyBucketResponse, JobLog, LogFacetOption,
-    OAuthAccountProfile, PendingBillingSettleOutcome, ProxyError, ProxyRequest, ProxyResponse,
-    ProxySummary, RequestLogBodiesRecord, RequestLogRecord, RequestLogsCatalog, RequestLogsCursor,
+    AdminUserSortedPageRequest, AdminUserUsageSeriesKind, ApiKeyMetrics, ApiKeyStickyNode,
+    ApiKeyStickyUser, ApiKeyUserUsageBucket, AuthToken, ClientIpInfo,
+    ForwardProxyHourlyBucketResponse, ForwardProxyStatsResponse,
+    ForwardProxyWeightHourlyBucketResponse, JobLog, LogFacetOption, OAuthAccountProfile,
+    PendingBillingSettleOutcome, ProxyError, ProxyRequest, ProxyResponse, ProxySummary,
+    RequestLogBodiesRecord, RequestLogRecord, RequestLogsCatalog, RequestLogsCursor,
     RequestLogsCursorDirection, RequestLogsCursorPage, RequestLogsGcOptions, StickyCreditsWindow,
     TavilyProxy, TokenHourlyBucket, TokenHourlyRequestVerdict, TokenLogRecord, TokenLogsCursorPage,
     TokenQuotaVerdict, TokenRequestKindOption, TokenSummary, TokenUsageBucket,

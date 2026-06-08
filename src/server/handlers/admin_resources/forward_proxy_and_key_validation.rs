@@ -13,10 +13,33 @@ async fn get_settings(
         eprintln!("get system settings error: {err}");
         (StatusCode::INTERNAL_SERVER_ERROR, err.to_string())
     })?;
+    let admin_user_list_stats = state.proxy.get_admin_user_list_stats().await.map_err(|err| {
+        eprintln!("get admin user list stats error: {err}");
+        (StatusCode::INTERNAL_SERVER_ERROR, err.to_string())
+    })?;
     Ok(Json(SettingsResponse {
         forward_proxy: Some(forward_proxy),
         system_settings,
+        admin_user_list_stats,
     }))
+}
+
+async fn get_forward_proxy_settings(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+) -> Result<Json<tavily_hikari::ForwardProxySettingsResponse>, (StatusCode, String)> {
+    if !is_admin_request(state.as_ref(), &headers) {
+        return Err((StatusCode::FORBIDDEN, "forbidden".to_string()));
+    }
+    state
+        .proxy
+        .get_forward_proxy_settings()
+        .await
+        .map(Json)
+        .map_err(|err| {
+            eprintln!("get forward proxy settings error: {err}");
+            (StatusCode::INTERNAL_SERVER_ERROR, err.to_string())
+        })
 }
 
 async fn put_system_settings(
@@ -65,6 +88,9 @@ async fn put_system_settings(
             recharge_user_enabled: payload
                 .recharge_user_enabled
                 .unwrap_or(current_settings.recharge_user_enabled),
+            admin_default_active_users_only: payload
+                .admin_default_active_users_only
+                .unwrap_or(current_settings.admin_default_active_users_only),
             user_blocked_key_base_limit: payload
                 .user_blocked_key_base_limit
                 .unwrap_or(current_settings.user_blocked_key_base_limit),
