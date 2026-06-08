@@ -116,6 +116,7 @@ import {
   type QuotaSliderField,
   type QuotaSliderSeed,
 } from './quotaSlider'
+import { resolveAdminUserActivityScope } from './userActivityScope'
 import { formatRequestRateScope, formatRequestRateSummary, resolveRequestRate } from '../requestRate'
 import {
   type AdminUsersCollectionView,
@@ -251,6 +252,7 @@ import {
   bindAdminUserTag,
   unbindAdminUserTag,
   type AdminUserSummary,
+  type AdminUserListStats,
   type AdminUnboundTokenUsageSortField,
   type AdminUnboundTokenUsageSummary,
   type AdminUserDetail,
@@ -270,7 +272,7 @@ import {
   type ForwardProxyProgressEvent,
   type HaStatus,
   fetchForwardProxySettings,
-  fetchSystemSettings,
+  fetchSystemSettingsEnvelope,
   fetchForwardProxyErrorStats,
   fetchForwardProxyStats,
   revalidateForwardProxyWithProgress,
@@ -1811,6 +1813,7 @@ function AdminDashboard(): JSX.Element {
   const [forwardProxySettingsLoadState, setForwardProxySettingsLoadState] = useState<QueryLoadState>('initial_loading')
   const [forwardProxySettingsError, setForwardProxySettingsError] = useState<string | null>(null)
   const [systemSettings, setSystemSettings] = useState<SystemSettings | null>(null)
+  const [adminUserListStats, setAdminUserListStats] = useState<AdminUserListStats | null>(null)
   const [systemSettingsLoadState, setSystemSettingsLoadState] =
     useState<QueryLoadState>('initial_loading')
   const [systemSettingsError, setSystemSettingsError] = useState<string | null>(null)
@@ -2805,9 +2808,10 @@ function AdminDashboard(): JSX.Element {
       setSystemSettingsError(null)
 
       try {
-        const nextSettings = await fetchSystemSettings(request.signal)
+        const envelope = await fetchSystemSettingsEnvelope(request.signal)
         if (request.signal.aborted) return
-        setSystemSettings(nextSettings)
+        setSystemSettings(envelope.systemSettings ?? null)
+        setAdminUserListStats(envelope.adminUserListStats ?? null)
         setSystemSettingsLoadState('ready')
         setLastUpdated(new Date())
         systemSettingsLoadedRef.current = true
@@ -3325,7 +3329,7 @@ function AdminDashboard(): JSX.Element {
   }, [])
 
   useEffect(() => {
-    if (!(route.name === 'user' || route.name === 'user-usage')) return
+    if (!(isUsersCollectionRoute || route.name === 'user')) return
     if (systemSettingsLoadedRef.current) return
 
     const controller = new AbortController()
@@ -3335,7 +3339,7 @@ function AdminDashboard(): JSX.Element {
     })
 
     return () => controller.abort()
-  }, [route, loadSystemSettingsData])
+  }, [isUsersCollectionRoute, route, loadSystemSettingsData])
 
   useEffect(() => {
     if (!(route.name === 'module' && route.module === 'proxy-settings')) {
@@ -3738,7 +3742,16 @@ function AdminDashboard(): JSX.Element {
       setUsers([])
       setUsersTotal(0)
     }
-    fetchAdminUsers(usersPage, USERS_PER_PAGE, usersQuery, usersTagFilterId, usersSort, usersSortOrder, request.signal)
+    fetchAdminUsers(
+      usersPage,
+      USERS_PER_PAGE,
+      usersQuery,
+      usersTagFilterId,
+      resolveAdminUserActivityScope(usersQuery, systemSettings?.adminDefaultActiveUsersOnly),
+      usersSort,
+      usersSortOrder,
+      request.signal,
+    )
       .then((result) => {
         if (request.signal.aborted) return
         setUsers(result.items)
@@ -3769,6 +3782,7 @@ function AdminDashboard(): JSX.Element {
     route,
     usersPage,
     usersQuery,
+    systemSettings?.adminDefaultActiveUsersOnly,
     usersSort,
     usersSortOrder,
     usersTagFilterId,
@@ -4686,6 +4700,7 @@ function AdminDashboard(): JSX.Element {
           USERS_PER_PAGE,
           usersQuery,
           usersTagFilterId,
+          effectiveUserActivityScope,
           usersSort,
           usersSortOrder,
           request.signal,
@@ -6150,6 +6165,12 @@ function AdminDashboard(): JSX.Element {
       setSystemSettingsLoadState('ready')
       setLastUpdated(new Date())
       systemSettingsLoadedRef.current = true
+      try {
+        const envelope = await fetchSystemSettingsEnvelope()
+        setAdminUserListStats(envelope.adminUserListStats ?? null)
+      } catch (refreshErr) {
+        console.error(refreshErr)
+      }
     } catch (err) {
       console.error(err)
       setSystemSettingsError(
@@ -6166,6 +6187,7 @@ function AdminDashboard(): JSX.Element {
       USERS_PER_PAGE,
       usersQuery,
       usersTagFilterId,
+      effectiveUserActivityScope,
       usersSort,
       usersSortOrder,
     )
@@ -7246,6 +7268,14 @@ function AdminDashboard(): JSX.Element {
       : allowRegistration
         ? usersStrings.registration.enabled
         : usersStrings.registration.disabled
+  const effectiveUserActivityScope: 'all' | 'active90d' =
+    resolveAdminUserActivityScope(usersQuery, systemSettings?.adminDefaultActiveUsersOnly)
+  const usersFilterStatusText =
+    systemSettings?.adminDefaultActiveUsersOnly
+      ? usersQuery.trim().length > 0
+        ? usersStrings.filterStatus.searchAll
+        : usersStrings.filterStatus.defaultActiveOnly
+      : null
 
   const sortedTagCatalog = useMemo(
     () => [...tagCatalog].sort((left, right) => right.userCount - left.userCount || left.displayName.localeCompare(right.displayName)),
@@ -8848,30 +8878,33 @@ function AdminDashboard(): JSX.Element {
                   {usersStrings.usage.back}
                 </Button>
               </div>
-              <div className="users-search-controls">
-                <Input
-                  type="text"
-                  name="user-usage-search"
-                  className="users-search-input"
-                  placeholder={usersStrings.searchPlaceholder}
-                  value={usersQueryInput}
-                  disabled={usersBlocking}
-                  onChange={(event) => setUsersQueryInput(event.target.value)}
-                  onKeyDown={(event) => {
-                    if (event.key === 'Enter') {
-                      event.preventDefault()
-                      applyUserSearch()
-                    }
-                  }}
-                />
-                <Button type="button" variant="outline" onClick={applyUserSearch} disabled={usersBlocking}>
-                  {usersStrings.search}
-                </Button>
-                {(usersQueryInput.length > 0 || usersQuery.length > 0 || usersTagFilterId != null) && (
-                  <Button type="button" variant="ghost" onClick={resetUserSearch} disabled={usersBlocking}>
-                    {usersStrings.clear}
+              <div style={{ display: 'grid', gap: 6 }}>
+                <div className="users-search-controls">
+                  <Input
+                    type="text"
+                    name="user-usage-search"
+                    className="users-search-input"
+                    placeholder={usersStrings.searchPlaceholder}
+                    value={usersQueryInput}
+                    disabled={usersBlocking}
+                    onChange={(event) => setUsersQueryInput(event.target.value)}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter') {
+                        event.preventDefault()
+                        applyUserSearch()
+                      }
+                    }}
+                  />
+                  <Button type="button" variant="outline" onClick={applyUserSearch} disabled={usersBlocking}>
+                    {usersStrings.search}
                   </Button>
-                )}
+                  {(usersQueryInput.length > 0 || usersQuery.length > 0 || usersTagFilterId != null) && (
+                    <Button type="button" variant="ghost" onClick={resetUserSearch} disabled={usersBlocking}>
+                      {usersStrings.clear}
+                    </Button>
+                  )}
+                </div>
+                {usersFilterStatusText && <p className="panel-description">{usersFilterStatusText}</p>}
               </div>
             </div>
           </div>
@@ -9699,29 +9732,36 @@ function AdminDashboard(): JSX.Element {
     />
   )
   const renderUsersSearchControls = (className?: string) => (
-    <div className={['users-search-controls', className].filter(Boolean).join(' ')}>
-      <Input
-        type="text"
-        name="users-search"
-        className="users-search-input"
-        placeholder={usersStrings.searchPlaceholder}
-        value={usersQueryInput}
-        disabled={usersBlocking}
-        onChange={(event) => setUsersQueryInput(event.target.value)}
-        onKeyDown={(event) => {
-          if (event.key === 'Enter') {
-            event.preventDefault()
-            applyUserSearch()
-          }
-        }}
-      />
-      <Button type="button" variant="outline" onClick={applyUserSearch} disabled={usersBlocking}>
-        {usersStrings.search}
-      </Button>
-      {(usersQueryInput.length > 0 || usersQuery.length > 0 || usersTagFilterId != null) && (
-        <Button type="button" variant="ghost" onClick={resetUserSearch} disabled={usersBlocking}>
-          {usersStrings.clear}
+    <div style={{ display: 'grid', gap: 6 }}>
+      <div className={['users-search-controls', className].filter(Boolean).join(' ')}>
+        <Input
+          type="text"
+          name="users-search"
+          className="users-search-input"
+          placeholder={usersStrings.searchPlaceholder}
+          value={usersQueryInput}
+          disabled={usersBlocking}
+          onChange={(event) => setUsersQueryInput(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter') {
+              event.preventDefault()
+              applyUserSearch()
+            }
+          }}
+        />
+        <Button type="button" variant="outline" onClick={applyUserSearch} disabled={usersBlocking}>
+          {usersStrings.search}
         </Button>
+        {(usersQueryInput.length > 0 || usersQuery.length > 0 || usersTagFilterId != null) && (
+          <Button type="button" variant="ghost" onClick={resetUserSearch} disabled={usersBlocking}>
+            {usersStrings.clear}
+          </Button>
+        )}
+      </div>
+      {usersFilterStatusText && (
+        <p className="panel-description" data-testid="users-filter-status">
+          {usersFilterStatusText}
+        </p>
       )}
     </div>
   )
@@ -11898,6 +11938,7 @@ function AdminDashboard(): JSX.Element {
             error={systemSettingsError}
             saving={systemSettingsSaving}
             displayDensity={adminDisplayDensity}
+            userListStats={adminUserListStats}
             registrationPolicy={{
               strings: usersStrings.registration,
               checked: allowRegistration,

@@ -3,7 +3,7 @@ import { useLayoutEffect, useState } from 'react'
 import type { Meta, StoryObj } from '@storybook/react-vite'
 
 import SystemSettingsModule from './SystemSettingsModule'
-import type { SystemSettings } from '../api'
+import type { AdminUserListStats, SystemSettings } from '../api'
 import type { AdminDisplayDensity } from './displayDensity'
 import { translations } from '../i18n'
 
@@ -28,6 +28,8 @@ function SystemSettingsCanvas(props: {
   saving?: boolean
   helpBubbleOpen?: boolean
   displayDensity?: AdminDisplayDensity
+  adminDefaultActiveUsersOnly?: boolean
+  userListStats?: AdminUserListStats
 }): JSX.Element {
   const [displayDensity, setDisplayDensity] = useState<AdminDisplayDensity>(props.displayDensity ?? 'comfortable')
   const [allowRegistration, setAllowRegistration] = useState(false)
@@ -40,6 +42,7 @@ function SystemSettingsCanvas(props: {
     apiRebalancePercent: props.apiRebalancePercent ?? 0,
     rechargeFeatureEnabled: true,
     rechargeUserEnabled: true,
+    adminDefaultActiveUsersOnly: props.adminDefaultActiveUsersOnly ?? false,
     userBlockedKeyBaseLimit: props.blockedKeyBaseLimit ?? 5,
     globalIpLimit: 5,
     trustedProxyCidrs: ['127.0.0.0/8', '::1/128'],
@@ -63,6 +66,7 @@ function SystemSettingsCanvas(props: {
         saving={props.saving ?? false}
         helpBubbleOpen={props.helpBubbleOpen}
         displayDensity={displayDensity}
+        userListStats={props.userListStats ?? { activeUsers90d: 128, totalUsers: 346, windowDays: 90 }}
         registrationPolicy={{
           strings: translations.zh.admin.users.registration,
           checked: allowRegistration,
@@ -200,6 +204,7 @@ const meta = {
       apiRebalancePercent: 0,
       rechargeFeatureEnabled: true,
       rechargeUserEnabled: true,
+      adminDefaultActiveUsersOnly: false,
       userBlockedKeyBaseLimit: 5,
       globalIpLimit: 5,
       trustedProxyCidrs: ['127.0.0.0/8', '::1/128'],
@@ -247,6 +252,15 @@ export const ApiRebalanceDisabledSliderLocked: Story = {
 export const Applying: Story = {
   render: () => (
     <SystemSettingsCanvas rebalanceEnabled rebalancePercent={35} apiRebalanceEnabled apiRebalancePercent={25} saving />
+  ),
+}
+
+export const ActiveUsersDefaultEnabled: Story = {
+  render: () => (
+    <SystemSettingsCanvas
+      adminDefaultActiveUsersOnly
+      userListStats={{ activeUsers90d: 128, totalUsers: 346, windowDays: 90 }}
+    />
   ),
 }
 

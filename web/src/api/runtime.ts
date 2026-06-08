@@ -6,7 +6,12 @@ import {
 import type { TokenLogRequestKindOption } from '../tokenLogRequestKinds'
 import type { ClientIpHeaderValue } from './clientIp'
 import type { RequestLogRetentionSettings } from './requestLogRetention'
-import type { ForwardProxySettingsEnvelope, SystemSettings, UpdateSystemSettingsPayload } from './systemSettingsTypes'
+import type {
+  AdminUserListStats,
+  ForwardProxySettingsEnvelope,
+  SystemSettings,
+  UpdateSystemSettingsPayload,
+} from './systemSettingsTypes'
 import type { AuthToken, AuthTokenSecret } from './tokens'
 import { normalizeUserDashboard, normalizeUserTokenSummary, normalizeUserTokenSummaryList } from './userConsoleNormalization'
 
@@ -2717,6 +2722,7 @@ export function fetchAdminUsers(
   perPage = 20,
   query?: string,
   tagId?: string | null,
+  activityScope: 'all' | 'active90d' = 'all',
   sort?: AdminUsersSortField | null,
   order?: SortDirection | null,
   signal?: AbortSignal,
@@ -2731,6 +2737,7 @@ export function fetchAdminUsers(
   if (tagId && tagId.trim().length > 0) {
     params.set('tagId', tagId.trim())
   }
+  params.set('activityScope', activityScope)
   if (sort) {
     params.set('sort', sort)
     params.set('order', order ?? 'desc')
@@ -3149,6 +3156,7 @@ function createEmptySystemSettings(): SystemSettings {
     apiRebalancePercent: 0,
     rechargeFeatureEnabled: false,
     rechargeUserEnabled: false,
+    adminDefaultActiveUsersOnly: false,
     userBlockedKeyBaseLimit: 5,
     globalIpLimit: 5,
     trustedProxyCidrs: ['127.0.0.0/8', '::1/128'],
@@ -3163,13 +3171,30 @@ function createEmptySystemSettings(): SystemSettings {
   }
 }
 
-export async function fetchForwardProxySettings(signal?: AbortSignal): Promise<ForwardProxySettings> {
+function createEmptyAdminUserListStats(): AdminUserListStats {
+  return {
+    activeUsers90d: 0,
+    totalUsers: 0,
+    windowDays: 90,
+  }
+}
+
+export async function fetchSystemSettingsEnvelope(signal?: AbortSignal): Promise<ForwardProxySettingsEnvelope> {
   const response = await requestJson<ForwardProxySettingsEnvelope>('/api/settings', { signal })
+  return {
+    forwardProxy: response.forwardProxy ?? createEmptyForwardProxySettings(),
+    systemSettings: response.systemSettings ?? createEmptySystemSettings(),
+    adminUserListStats: response.adminUserListStats ?? createEmptyAdminUserListStats(),
+  }
+}
+
+export async function fetchForwardProxySettings(signal?: AbortSignal): Promise<ForwardProxySettings> {
+  const response = await fetchSystemSettingsEnvelope(signal)
   return response.forwardProxy ?? createEmptyForwardProxySettings()
 }
 
 export async function fetchSystemSettings(signal?: AbortSignal): Promise<SystemSettings> {
-  const response = await requestJson<ForwardProxySettingsEnvelope>('/api/settings', { signal })
+  const response = await fetchSystemSettingsEnvelope(signal)
   return response.systemSettings ?? createEmptySystemSettings()
 }
 

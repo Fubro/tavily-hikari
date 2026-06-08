@@ -19,6 +19,7 @@
                 api_rebalance_percent: tavily_hikari::API_REBALANCE_PERCENT_DEFAULT,
                 recharge_feature_enabled: true,
                 recharge_user_enabled: true,
+                admin_default_active_users_only: false,
                 user_blocked_key_base_limit: 7,
                 global_ip_limit: tavily_hikari::GLOBAL_IP_LIMIT_DEFAULT,
                 trusted_proxy_cidrs: tavily_hikari::TrustedClientIpSettings::default().trusted_proxy_cidrs,
@@ -72,8 +73,16 @@
             persisted_system_settings["globalIpLimit"].as_i64(),
             Some(tavily_hikari::GLOBAL_IP_LIMIT_DEFAULT)
         );
+        assert_eq!(
+            persisted_system_settings["adminDefaultActiveUsersOnly"].as_bool(),
+            Some(false)
+        );
         assert_eq!(persisted_system_settings["apiRebalanceEnabled"].as_bool(), Some(false));
         assert_eq!(persisted_system_settings["apiRebalancePercent"].as_i64(), Some(0));
+        let admin_user_list_stats = &persisted_body["adminUserListStats"];
+        assert_eq!(admin_user_list_stats["windowDays"].as_i64(), Some(90));
+        assert_eq!(admin_user_list_stats["activeUsers90d"].as_i64(), Some(0));
+        assert_eq!(admin_user_list_stats["totalUsers"].as_i64(), Some(0));
 
         let _ = std::fs::remove_file(db_path);
     }
@@ -1748,6 +1757,7 @@
                 api_rebalance_percent: tavily_hikari::API_REBALANCE_PERCENT_DEFAULT,
                 recharge_feature_enabled: true,
                 recharge_user_enabled: true,
+                admin_default_active_users_only: false,
                 user_blocked_key_base_limit: tavily_hikari::USER_MONTHLY_BROKEN_LIMIT_DEFAULT,
                 global_ip_limit: tavily_hikari::GLOBAL_IP_LIMIT_DEFAULT,
                 trusted_proxy_cidrs: tavily_hikari::TrustedClientIpSettings::default().trusted_proxy_cidrs,
@@ -2028,6 +2038,7 @@
                 api_rebalance_percent: tavily_hikari::API_REBALANCE_PERCENT_DEFAULT,
                 recharge_feature_enabled: true,
                 recharge_user_enabled: true,
+                admin_default_active_users_only: false,
                 user_blocked_key_base_limit: tavily_hikari::USER_MONTHLY_BROKEN_LIMIT_DEFAULT,
                 global_ip_limit: tavily_hikari::GLOBAL_IP_LIMIT_DEFAULT,
                 trusted_proxy_cidrs: tavily_hikari::TrustedClientIpSettings::default().trusted_proxy_cidrs,
@@ -2168,6 +2179,7 @@
                 api_rebalance_percent: tavily_hikari::API_REBALANCE_PERCENT_DEFAULT,
                 recharge_feature_enabled: true,
                 recharge_user_enabled: true,
+                admin_default_active_users_only: false,
                 user_blocked_key_base_limit: tavily_hikari::USER_MONTHLY_BROKEN_LIMIT_DEFAULT,
                 global_ip_limit: tavily_hikari::GLOBAL_IP_LIMIT_DEFAULT,
                 trusted_proxy_cidrs: tavily_hikari::TrustedClientIpSettings::default().trusted_proxy_cidrs,

@@ -931,11 +931,20 @@ pub struct SystemSettings {
     pub api_rebalance_percent: i64,
     pub recharge_feature_enabled: bool,
     pub recharge_user_enabled: bool,
+    pub admin_default_active_users_only: bool,
     pub user_blocked_key_base_limit: i64,
     pub global_ip_limit: i64,
     pub trusted_proxy_cidrs: Vec<String>,
     pub trusted_client_ip_headers: Vec<String>,
     pub request_log_retention: RequestLogRetentionSettings,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct AdminUserListStats {
+    pub active_users_90d: i64,
+    pub total_users: i64,
+    pub window_days: i64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -1611,6 +1620,23 @@ pub enum AdminUserListSortField {
 pub enum AdminListSortDirection {
     Asc,
     Desc,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AdminUserActivityScope {
+    All,
+    Active90d,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AdminUserSortedPageRequest<'a> {
+    pub page: i64,
+    pub per_page: i64,
+    pub query: Option<&'a str>,
+    pub tag_id: Option<&'a str>,
+    pub activity_scope: AdminUserActivityScope,
+    pub sort: AdminUserListSortField,
+    pub direction: AdminListSortDirection,
 }
 
 #[derive(Debug, Clone)]

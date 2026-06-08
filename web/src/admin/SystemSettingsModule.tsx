@@ -4,6 +4,7 @@ import {
   confirmAdminTotp,
   createAdminTotpSetup,
   disableAdminTotp,
+  type AdminUserListStats,
   fetchAdminTotpStatus,
   resetAdminTotp,
   fetchObservedClientIpRequests,
@@ -40,6 +41,7 @@ interface SystemSettingsModuleProps {
   saving: boolean
   helpBubbleOpen?: boolean
   displayDensity?: AdminDisplayDensity
+  userListStats?: AdminUserListStats | null
   registrationPolicy?: {
     strings: AdminTranslations['users']['registration']
     checked: boolean | null
@@ -63,6 +65,7 @@ type NormalSystemSettingsOverrides = Partial<
     | 'apiRebalancePercent'
     | 'rechargeFeatureEnabled'
     | 'rechargeUserEnabled'
+    | 'adminDefaultActiveUsersOnly'
     | 'userBlockedKeyBaseLimit'
     | 'globalIpLimit'
     | 'requestLogRetention'
@@ -233,6 +236,7 @@ export default function SystemSettingsModule({
   saving,
   helpBubbleOpen,
   displayDensity = 'comfortable',
+  userListStats,
   registrationPolicy,
   onDisplayDensityChange = () => {},
   onApply,
@@ -253,6 +257,9 @@ export default function SystemSettingsModule({
     settings?.rechargeFeatureEnabled ?? true,
   )
   const [draftRechargeUserEnabled, setDraftRechargeUserEnabled] = useState(settings?.rechargeUserEnabled ?? true)
+  const [draftAdminDefaultActiveUsersOnly, setDraftAdminDefaultActiveUsersOnly] = useState(
+    settings?.adminDefaultActiveUsersOnly ?? false,
+  )
   const [draftBlockedKeyBaseLimit, setDraftBlockedKeyBaseLimit] = useState(() =>
     settings ? String(settings.userBlockedKeyBaseLimit) : '5',
   )
@@ -285,6 +292,7 @@ export default function SystemSettingsModule({
     setDraftApiRebalancePercent(settings ? String(settings.apiRebalancePercent) : '0')
     setDraftRechargeFeatureEnabled(settings?.rechargeFeatureEnabled ?? true)
     setDraftRechargeUserEnabled(settings?.rechargeUserEnabled ?? true)
+    setDraftAdminDefaultActiveUsersOnly(settings?.adminDefaultActiveUsersOnly ?? false)
     setDraftBlockedKeyBaseLimit(settings ? String(settings.userBlockedKeyBaseLimit) : '5')
     setDraftGlobalIpLimit(settings ? String(settings.globalIpLimit) : '5')
     setDraftRequestLogRetention(cloneRequestLogRetention(settings?.requestLogRetention))
@@ -301,6 +309,7 @@ export default function SystemSettingsModule({
     settings?.apiRebalancePercent,
     settings?.rechargeFeatureEnabled,
     settings?.rechargeUserEnabled,
+    settings?.adminDefaultActiveUsersOnly,
     settings?.userBlockedKeyBaseLimit,
     settings?.globalIpLimit,
     settings?.requestLogRetention,
@@ -432,6 +441,7 @@ export default function SystemSettingsModule({
       parsedApiRebalancePercent !== settings.apiRebalancePercent ||
       draftRechargeFeatureEnabled !== settings.rechargeFeatureEnabled ||
       draftRechargeUserEnabled !== settings.rechargeUserEnabled ||
+      draftAdminDefaultActiveUsersOnly !== settings.adminDefaultActiveUsersOnly ||
       parsedBlockedKeyBaseLimit !== settings.userBlockedKeyBaseLimit ||
       parsedGlobalIpLimit !== settings.globalIpLimit ||
       JSON.stringify(draftRequestLogRetention) !== JSON.stringify(settings.requestLogRetention))
@@ -494,6 +504,8 @@ export default function SystemSettingsModule({
       apiRebalancePercent: overrides.apiRebalancePercent ?? parsedApiRebalancePercent,
       rechargeFeatureEnabled: overrides.rechargeFeatureEnabled ?? draftRechargeFeatureEnabled,
       rechargeUserEnabled: overrides.rechargeUserEnabled ?? draftRechargeUserEnabled,
+      adminDefaultActiveUsersOnly:
+        overrides.adminDefaultActiveUsersOnly ?? draftAdminDefaultActiveUsersOnly,
       userBlockedKeyBaseLimit: overrides.userBlockedKeyBaseLimit ?? parsedBlockedKeyBaseLimit,
       globalIpLimit: overrides.globalIpLimit ?? parsedGlobalIpLimit,
       requestLogRetention: overrides.requestLogRetention ?? draftRequestLogRetention,
@@ -512,6 +524,7 @@ export default function SystemSettingsModule({
       payload.apiRebalancePercent !== settings.apiRebalancePercent ||
       payload.rechargeFeatureEnabled !== settings.rechargeFeatureEnabled ||
       payload.rechargeUserEnabled !== settings.rechargeUserEnabled ||
+      payload.adminDefaultActiveUsersOnly !== settings.adminDefaultActiveUsersOnly ||
       payload.userBlockedKeyBaseLimit !== settings.userBlockedKeyBaseLimit ||
       payload.globalIpLimit !== settings.globalIpLimit ||
       JSON.stringify(payload.requestLogRetention) !== JSON.stringify(settings.requestLogRetention))
@@ -900,6 +913,47 @@ export default function SystemSettingsModule({
                       rechargeUserEnabled: checked,
                     }).then((saved) => {
                       if (!saved) setDraftRechargeUserEnabled(settings?.rechargeUserEnabled ?? true)
+                    })
+                  }}
+                />
+              </div>
+
+              <div className="system-settings-action-row" aria-labelledby="system-settings-active-users-default-title">
+                <div className="system-settings-toggle-copy">
+                  <span
+                    className="system-settings-setting-title"
+                    id="system-settings-active-users-default-title"
+                  >
+                    {strings.form.activeUsersDefaultLabel}
+                  </span>
+                  <p>{strings.form.activeUsersDefaultHint}</p>
+                  {userListStats && (
+                    <p className="text-xs text-muted-foreground">
+                      {strings.form.activeUsersDefaultCount
+                        .replace('{active}', String(userListStats.activeUsers90d))
+                        .replace('{total}', String(userListStats.totalUsers))}
+                    </p>
+                  )}
+                  {userListStats && (
+                    <p className="text-xs text-muted-foreground">
+                      {strings.form.activeUsersDefinition.replace('{days}', String(userListStats.windowDays))}
+                    </p>
+                  )}
+                </div>
+                <Switch
+                  checked={draftAdminDefaultActiveUsersOnly}
+                  disabled={saving}
+                  aria-label={strings.form.activeUsersDefaultLabel}
+                  onCheckedChange={(checked) => {
+                    setDraftAdminDefaultActiveUsersOnly(checked)
+                    void commitNormalSettings({
+                      adminDefaultActiveUsersOnly: checked,
+                    }).then((saved) => {
+                      if (!saved) {
+                        setDraftAdminDefaultActiveUsersOnly(
+                          settings?.adminDefaultActiveUsersOnly ?? false,
+                        )
+                      }
                     })
                   }}
                 />

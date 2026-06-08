@@ -60,6 +60,11 @@ impl KeyStore {
             .await?
             .unwrap_or(0)
             != 0;
+        let admin_default_active_users_only = self
+            .get_meta_i64(META_KEY_ADMIN_DEFAULT_ACTIVE_USERS_ONLY_V1)
+            .await?
+            .unwrap_or(0)
+            != 0;
         let user_blocked_key_base_limit = self.fetch_user_blocked_key_base_limit().await?;
         let global_ip_limit = self
             .get_meta_i64(META_KEY_GLOBAL_IP_LIMIT_V1)
@@ -145,6 +150,7 @@ impl KeyStore {
             api_rebalance_percent,
             recharge_feature_enabled,
             recharge_user_enabled,
+            admin_default_active_users_only,
             user_blocked_key_base_limit,
             global_ip_limit,
             trusted_proxy_cidrs,
@@ -255,6 +261,11 @@ impl KeyStore {
         )
         .await?;
         self.set_meta_i64(
+            META_KEY_ADMIN_DEFAULT_ACTIVE_USERS_ONLY_V1,
+            i64::from(settings.admin_default_active_users_only),
+        )
+        .await?;
+        self.set_meta_i64(
             META_KEY_USER_BLOCKED_KEY_BASE_LIMIT_V1,
             settings.user_blocked_key_base_limit,
         )
@@ -342,6 +353,7 @@ impl KeyStore {
             api_rebalance_percent: settings.api_rebalance_percent,
             recharge_feature_enabled: settings.recharge_feature_enabled,
             recharge_user_enabled: settings.recharge_user_enabled,
+            admin_default_active_users_only: settings.admin_default_active_users_only,
             user_blocked_key_base_limit: settings.user_blocked_key_base_limit,
             global_ip_limit: settings.global_ip_limit,
             trusted_proxy_cidrs: trusted_client_ip.trusted_proxy_cidrs,

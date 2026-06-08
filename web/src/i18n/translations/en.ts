@@ -595,6 +595,10 @@ export const EN: TranslationShape = {
           currentApiRebalancePercentValue: 'Current API ratio: {percent}%',
           rechargeFeatureLabel: 'Enable recharge', rechargeFeatureHint: 'Hides recharge from the user console and rejects new recharge orders. Paid callbacks are still processed.',
           rechargeUserLabel: 'Allow non-admin recharge', rechargeUserHint: 'Debug switch. When off, only admin requests can see and create recharge orders.',
+          activeUsersDefaultLabel: 'Default to active users only',
+          activeUsersDefaultHint: 'Controls whether user management and user usage lists default to all users or only active users when no search is applied.',
+          activeUsersDefaultCount: 'Active users {active} / Total users {total}',
+          activeUsersDefinition: 'Active users are users with at least one successful API call in the last {days} days.',
           ...adminTotpTranslations.en, ...adminTrustedClientIpTranslations.en,
           blockedKeyBaseLimitLabel: 'Blocked-key base limit',
           blockedKeyBaseLimitHint: 'Global base for every user blocked-key limit. Hidden user deltas may be positive or negative; the effective limit never drops below 0.',
@@ -627,6 +631,10 @@ export const EN: TranslationShape = {
         searchPlaceholder: 'Search by user ID, display name, username, or tag',
         search: 'Search',
         clear: 'Clear',
+        filterStatus: {
+          defaultActiveOnly: 'The default view currently shows only users with a successful call in the last 90 days.',
+          searchAll: 'Search is currently expanded to the full user set so inactive matches are not missed.',
+        },
         pagination: 'Page {page} of {total}',
         table: {
           user: 'User',

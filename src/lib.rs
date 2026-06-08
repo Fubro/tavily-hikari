@@ -473,6 +473,7 @@ const DEV_OPEN_ADMIN_TOKEN_SECRET: &str = "dev-open-admin";
 const DEV_OPEN_ADMIN_TOKEN_NOTE: &str = "[system] dev-open-admin placeholder";
 pub const USER_MONTHLY_BROKEN_LIMIT_DEFAULT: i64 = 5;
 pub const GLOBAL_IP_LIMIT_DEFAULT: i64 = 5;
+pub const ADMIN_ACTIVE_USERS_WINDOW_DAYS: i64 = 90;
 pub const UNBOUND_TOKEN_MONTHLY_BROKEN_LIMIT_DEFAULT: i64 = 2;
 pub const LOW_QUOTA_DEPLETION_THRESHOLD_DEFAULT: i64 = 15;
 const BLOCKED_KEY_REASON_ACCOUNT_DEACTIVATED: &str = "account_deactivated";
@@ -679,6 +680,7 @@ const USAGE_PROBE_TIMEOUT_SECS: u64 = 8;
 // This is purely time-driven and must not depend on access token enable/disable/delete status,
 // to preserve auditability.
 const AUTH_TOKEN_LOG_RETENTION_SECS: i64 = 90 * SECS_PER_DAY;
+pub const ADMIN_ACTIVE_USERS_WINDOW_SECS: i64 = ADMIN_ACTIVE_USERS_WINDOW_DAYS * SECS_PER_DAY;
 
 const META_KEY_DATA_CONSISTENCY_DONE: &str = "data_consistency_v1_done";
 const META_KEY_TOKEN_USAGE_ROLLUP_TS: &str = "token_usage_rollup_last_ts";
@@ -710,6 +712,7 @@ const META_KEY_ACCOUNT_LIMIT_SNAPSHOT_BACKFILL_V1: &str = "account_limit_snapsho
 const META_KEY_ALLOW_REGISTRATION_V1: &str = "allow_registration_v1";
 const META_KEY_RECHARGE_FEATURE_ENABLED_V1: &str = "recharge_feature_enabled_v1";
 const META_KEY_RECHARGE_USER_ENABLED_V1: &str = "recharge_user_enabled_v1";
+const META_KEY_ADMIN_DEFAULT_ACTIVE_USERS_ONLY_V1: &str = "admin_default_active_users_only_v1";
 const META_KEY_ADMIN_TOTP_SECRET_CIPHERTEXT_V1: &str = "admin_totp_secret_ciphertext_v1";
 const META_KEY_ADMIN_TOTP_SECRET_NONCE_V1: &str = "admin_totp_secret_nonce_v1";
 const META_KEY_ADMIN_TOTP_ENABLED_AT_V1: &str = "admin_totp_enabled_at_v1";

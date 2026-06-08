@@ -1,8 +1,18 @@
 impl KeyStore {
+    fn admin_user_activity_since(scope: AdminUserActivityScope) -> Option<i64> {
+        match scope {
+            AdminUserActivityScope::All => None,
+            AdminUserActivityScope::Active90d => {
+                Some(Utc::now().timestamp() - ADMIN_ACTIVE_USERS_WINDOW_SECS)
+            }
+        }
+    }
+
     fn push_admin_user_filters<'a>(
         builder: &mut QueryBuilder<'a, Sqlite>,
         tag_id: Option<&'a str>,
         search: Option<&'a str>,
+        active_since: Option<i64>,
     ) {
         builder.push("(");
         builder.push_bind(tag_id);
@@ -20,7 +30,95 @@ impl KeyStore {
         builder.push_bind(search);
         builder.push(" OR COALESCE(ut_search.display_name, '') LIKE ");
         builder.push_bind(search);
-        builder.push(")))");
+        builder.push("))) AND (");
+        builder.push_bind(active_since);
+        builder.push(
+            " IS NULL OR EXISTS (SELECT 1 FROM auth_token_logs atl WHERE atl.request_user_id = u.id AND atl.result_status = ",
+        );
+        builder.push_bind(OUTCOME_SUCCESS);
+        builder.push(" AND atl.created_at >= ");
+        builder.push_bind(active_since);
+        builder.push("))");
+    }
+
+    fn push_admin_user_listing_select(builder: &mut QueryBuilder<'_, Sqlite>) {
+        builder.push(
+            r#"SELECT
+                 u.id,
+                 u.display_name,
+                 u.username,
+                 u.active,
+                 u.last_login_at,
+                 COALESCE(COUNT(b.token_id), 0) AS token_count
+               FROM users u
+               LEFT JOIN user_token_bindings b ON b.user_id = u.id
+               WHERE "#,
+        );
+    }
+
+    fn push_admin_user_listing_group_order(builder: &mut QueryBuilder<'_, Sqlite>) {
+        builder.push(
+            r#" GROUP BY u.id, u.display_name, u.username, u.active, u.last_login_at
+                ORDER BY (u.last_login_at IS NULL) ASC, u.last_login_at DESC, u.id ASC"#,
+        );
+    }
+
+    fn map_admin_user_identity_row(
+        (user_id, display_name, username, active, last_login_at, token_count): (
+            String,
+            Option<String>,
+            Option<String>,
+            i64,
+            Option<i64>,
+            i64,
+        ),
+    ) -> AdminUserIdentity {
+        AdminUserIdentity {
+            user_id,
+            display_name,
+            username,
+            active: active == 1,
+            last_login_at,
+            token_count,
+        }
+    }
+
+    pub(crate) async fn count_total_users(&self) -> Result<i64, ProxyError> {
+        sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM users")
+            .fetch_one(&self.pool)
+            .await
+            .map_err(ProxyError::Database)
+    }
+
+    pub(crate) async fn count_active_users_since(&self, since: i64) -> Result<i64, ProxyError> {
+        sqlx::query_scalar::<_, i64>(
+            r#"SELECT COUNT(*)
+               FROM users u
+               WHERE EXISTS (
+                   SELECT 1
+                   FROM auth_token_logs atl
+                   WHERE atl.request_user_id = u.id
+                     AND atl.result_status = ?
+                     AND atl.created_at >= ?
+               )"#,
+        )
+        .bind(OUTCOME_SUCCESS)
+        .bind(since)
+        .fetch_one(&self.pool)
+        .await
+        .map_err(ProxyError::Database)
+    }
+
+    pub(crate) async fn get_admin_user_list_stats(&self) -> Result<AdminUserListStats, ProxyError> {
+        let total_users = self.count_total_users().await?;
+        let active_users_90d = self
+            .count_active_users_since(Utc::now().timestamp() - ADMIN_ACTIVE_USERS_WINDOW_SECS)
+            .await?;
+        Ok(AdminUserListStats {
+            active_users_90d,
+            total_users,
+            window_days: ADMIN_ACTIVE_USERS_WINDOW_DAYS,
+        })
     }
 
     fn admin_user_sort_direction_sql(direction: AdminListSortDirection) -> &'static str {
@@ -1669,6 +1767,7 @@ impl KeyStore {
         per_page: i64,
         query: Option<&str>,
         tag_id: Option<&str>,
+        activity_scope: AdminUserActivityScope,
     ) -> Result<(Vec<AdminUserIdentity>, i64), ProxyError> {
         let _permit = self
             .admin_heavy_read_semaphore
@@ -1683,280 +1782,38 @@ impl KeyStore {
             .filter(|value| !value.is_empty())
             .map(|value| format!("%{value}%"));
         let tag_id = tag_id.map(str::trim).filter(|value| !value.is_empty());
+        let active_since = Self::admin_user_activity_since(activity_scope);
 
-        let total = match (search.as_ref(), tag_id) {
-            (Some(search), Some(tag_id)) => {
-                sqlx::query_scalar::<_, i64>(
-                    r#"SELECT COUNT(*)
-                       FROM users u
-                       WHERE EXISTS (
-                               SELECT 1
-                               FROM user_tag_bindings utb
-                               WHERE utb.user_id = u.id
-                                 AND utb.tag_id = ?
-                           )
-                         AND (
-                               u.id LIKE ?
-                               OR COALESCE(u.display_name, '') LIKE ?
-                               OR COALESCE(u.username, '') LIKE ?
-                               OR EXISTS (
-                                   SELECT 1
-                                   FROM user_tag_bindings utb
-                                   JOIN user_tags ut ON ut.id = utb.tag_id
-                                   WHERE utb.user_id = u.id
-                                     AND (
-                                         ut.name LIKE ?
-                                         OR COALESCE(ut.display_name, '') LIKE ?
-                                     )
-                               )
-                           )"#,
-                )
-                .bind(tag_id)
-                .bind(search)
-                .bind(search)
-                .bind(search)
-                .bind(search)
-                .bind(search)
-                .fetch_one(&self.pool)
-                .await?
-            }
-            (Some(search), None) => {
-                sqlx::query_scalar::<_, i64>(
-                    r#"SELECT COUNT(*)
-                       FROM users u
-                       WHERE u.id LIKE ?
-                          OR COALESCE(u.display_name, '') LIKE ?
-                          OR COALESCE(u.username, '') LIKE ?
-                          OR EXISTS (
-                               SELECT 1
-                               FROM user_tag_bindings utb
-                               JOIN user_tags ut ON ut.id = utb.tag_id
-                               WHERE utb.user_id = u.id
-                                 AND (
-                                   ut.name LIKE ?
-                                   OR COALESCE(ut.display_name, '') LIKE ?
-                                 )
-                           )"#,
-                )
-                .bind(search)
-                .bind(search)
-                .bind(search)
-                .bind(search)
-                .bind(search)
-                .fetch_one(&self.pool)
-                .await?
-            }
-            (None, Some(tag_id)) => {
-                sqlx::query_scalar::<_, i64>(
-                    r#"SELECT COUNT(*)
-                       FROM users u
-                       WHERE EXISTS (
-                           SELECT 1
-                           FROM user_tag_bindings utb
-                           WHERE utb.user_id = u.id
-                             AND utb.tag_id = ?
-                       )"#,
-                )
-                .bind(tag_id)
-                .fetch_one(&self.pool)
-                .await?
-            }
-            (None, None) => {
-                sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM users")
-                    .fetch_one(&self.pool)
-                    .await?
-            }
-        };
+        let mut count_builder = QueryBuilder::<Sqlite>::new("SELECT COUNT(*) FROM users u WHERE ");
+        Self::push_admin_user_filters(&mut count_builder, tag_id, search.as_deref(), active_since);
+        let total = count_builder
+            .build_query_scalar::<i64>()
+            .fetch_one(&self.pool)
+            .await?;
 
-        let rows = match (search.as_ref(), tag_id) {
-            (Some(search), Some(tag_id)) => {
-                sqlx::query_as::<
-                    _,
-                    (
-                        String,
-                        Option<String>,
-                        Option<String>,
-                        i64,
-                        Option<i64>,
-                        i64,
-                    ),
-                >(
-                    r#"SELECT
-                         u.id,
-                         u.display_name,
-                         u.username,
-                         u.active,
-                         u.last_login_at,
-                         COALESCE(COUNT(b.token_id), 0) AS token_count
-                       FROM users u
-                       LEFT JOIN user_token_bindings b ON b.user_id = u.id
-                       WHERE EXISTS (
-                               SELECT 1
-                               FROM user_tag_bindings utb
-                               WHERE utb.user_id = u.id
-                                 AND utb.tag_id = ?
-                           )
-                         AND (
-                               u.id LIKE ?
-                               OR COALESCE(u.display_name, '') LIKE ?
-                               OR COALESCE(u.username, '') LIKE ?
-                               OR EXISTS (
-                                   SELECT 1
-                                   FROM user_tag_bindings utb
-                                   JOIN user_tags ut ON ut.id = utb.tag_id
-                                   WHERE utb.user_id = u.id
-                                     AND (
-                                         ut.name LIKE ?
-                                         OR COALESCE(ut.display_name, '') LIKE ?
-                                     )
-                               )
-                           )
-                       GROUP BY u.id, u.display_name, u.username, u.active, u.last_login_at
-                       ORDER BY (u.last_login_at IS NULL) ASC, u.last_login_at DESC, u.id ASC
-                       LIMIT ? OFFSET ?"#,
-                )
-                .bind(tag_id)
-                .bind(search)
-                .bind(search)
-                .bind(search)
-                .bind(search)
-                .bind(search)
-                .bind(per_page)
-                .bind(offset)
-                .fetch_all(&self.pool)
-                .await?
-            }
-            (Some(search), None) => {
-                sqlx::query_as::<
-                    _,
-                    (
-                        String,
-                        Option<String>,
-                        Option<String>,
-                        i64,
-                        Option<i64>,
-                        i64,
-                    ),
-                >(
-                    r#"SELECT
-                         u.id,
-                         u.display_name,
-                         u.username,
-                         u.active,
-                         u.last_login_at,
-                         COALESCE(COUNT(b.token_id), 0) AS token_count
-                       FROM users u
-                       LEFT JOIN user_token_bindings b ON b.user_id = u.id
-                       WHERE u.id LIKE ?
-                          OR COALESCE(u.display_name, '') LIKE ?
-                          OR COALESCE(u.username, '') LIKE ?
-                          OR EXISTS (
-                               SELECT 1
-                               FROM user_tag_bindings utb
-                               JOIN user_tags ut ON ut.id = utb.tag_id
-                               WHERE utb.user_id = u.id
-                                 AND (
-                                   ut.name LIKE ?
-                                   OR COALESCE(ut.display_name, '') LIKE ?
-                                 )
-                           )
-                       GROUP BY u.id, u.display_name, u.username, u.active, u.last_login_at
-                       ORDER BY (u.last_login_at IS NULL) ASC, u.last_login_at DESC, u.id ASC
-                       LIMIT ? OFFSET ?"#,
-                )
-                .bind(search)
-                .bind(search)
-                .bind(search)
-                .bind(search)
-                .bind(search)
-                .bind(per_page)
-                .bind(offset)
-                .fetch_all(&self.pool)
-                .await?
-            }
-            (None, Some(tag_id)) => {
-                sqlx::query_as::<
-                    _,
-                    (
-                        String,
-                        Option<String>,
-                        Option<String>,
-                        i64,
-                        Option<i64>,
-                        i64,
-                    ),
-                >(
-                    r#"SELECT
-                         u.id,
-                         u.display_name,
-                         u.username,
-                         u.active,
-                         u.last_login_at,
-                         COALESCE(COUNT(b.token_id), 0) AS token_count
-                       FROM users u
-                       LEFT JOIN user_token_bindings b ON b.user_id = u.id
-                       WHERE EXISTS (
-                           SELECT 1
-                           FROM user_tag_bindings utb
-                           WHERE utb.user_id = u.id
-                             AND utb.tag_id = ?
-                       )
-                       GROUP BY u.id, u.display_name, u.username, u.active, u.last_login_at
-                       ORDER BY (u.last_login_at IS NULL) ASC, u.last_login_at DESC, u.id ASC
-                       LIMIT ? OFFSET ?"#,
-                )
-                .bind(tag_id)
-                .bind(per_page)
-                .bind(offset)
-                .fetch_all(&self.pool)
-                .await?
-            }
-            (None, None) => {
-                sqlx::query_as::<
-                    _,
-                    (
-                        String,
-                        Option<String>,
-                        Option<String>,
-                        i64,
-                        Option<i64>,
-                        i64,
-                    ),
-                >(
-                    r#"SELECT
-                         u.id,
-                         u.display_name,
-                         u.username,
-                         u.active,
-                         u.last_login_at,
-                         COALESCE(COUNT(b.token_id), 0) AS token_count
-                       FROM users u
-                       LEFT JOIN user_token_bindings b ON b.user_id = u.id
-                       GROUP BY u.id, u.display_name, u.username, u.active, u.last_login_at
-                       ORDER BY (u.last_login_at IS NULL) ASC, u.last_login_at DESC, u.id ASC
-                       LIMIT ? OFFSET ?"#,
-                )
-                .bind(per_page)
-                .bind(offset)
-                .fetch_all(&self.pool)
-                .await?
-            }
-        };
+        let mut builder = QueryBuilder::<Sqlite>::new("");
+        Self::push_admin_user_listing_select(&mut builder);
+        Self::push_admin_user_filters(&mut builder, tag_id, search.as_deref(), active_since);
+        Self::push_admin_user_listing_group_order(&mut builder);
+        builder.push(" LIMIT ");
+        builder.push_bind(per_page);
+        builder.push(" OFFSET ");
+        builder.push_bind(offset);
+        let rows = builder
+            .build_query_as::<(
+                String,
+                Option<String>,
+                Option<String>,
+                i64,
+                Option<i64>,
+                i64,
+            )>()
+            .fetch_all(&self.pool)
+            .await?;
 
         let items = rows
             .into_iter()
-            .map(
-                |(user_id, display_name, username, active, last_login_at, token_count)| {
-                    AdminUserIdentity {
-                        user_id,
-                        display_name,
-                        username,
-                        active: active == 1,
-                        last_login_at,
-                        token_count,
-                    }
-                },
-            )
+            .map(Self::map_admin_user_identity_row)
             .collect();
         Ok((items, total))
     }
@@ -1965,6 +1822,7 @@ impl KeyStore {
         &self,
         query: Option<&str>,
         tag_id: Option<&str>,
+        activity_scope: AdminUserActivityScope,
     ) -> Result<Vec<AdminUserIdentity>, ProxyError> {
         let _permit = self
             .admin_heavy_read_semaphore
@@ -1976,184 +1834,26 @@ impl KeyStore {
             .filter(|value| !value.is_empty())
             .map(|value| format!("%{value}%"));
         let tag_id = tag_id.map(str::trim).filter(|value| !value.is_empty());
-
-        let rows = match (search.as_ref(), tag_id) {
-            (Some(search), Some(tag_id)) => {
-                sqlx::query_as::<
-                    _,
-                    (
-                        String,
-                        Option<String>,
-                        Option<String>,
-                        i64,
-                        Option<i64>,
-                        i64,
-                    ),
-                >(
-                    r#"SELECT
-                         u.id,
-                         u.display_name,
-                         u.username,
-                         u.active,
-                         u.last_login_at,
-                         COALESCE(COUNT(b.token_id), 0) AS token_count
-                       FROM users u
-                       LEFT JOIN user_token_bindings b ON b.user_id = u.id
-                       WHERE EXISTS (
-                               SELECT 1
-                               FROM user_tag_bindings utb
-                               WHERE utb.user_id = u.id
-                                 AND utb.tag_id = ?
-                           )
-                         AND (
-                               u.id LIKE ?
-                               OR COALESCE(u.display_name, '') LIKE ?
-                               OR COALESCE(u.username, '') LIKE ?
-                               OR EXISTS (
-                                   SELECT 1
-                                   FROM user_tag_bindings utb
-                                   JOIN user_tags ut ON ut.id = utb.tag_id
-                                   WHERE utb.user_id = u.id
-                                     AND (
-                                         ut.name LIKE ?
-                                         OR COALESCE(ut.display_name, '') LIKE ?
-                                     )
-                               )
-                           )
-                       GROUP BY u.id, u.display_name, u.username, u.active, u.last_login_at
-                       ORDER BY (u.last_login_at IS NULL) ASC, u.last_login_at DESC, u.id ASC"#,
-                )
-                .bind(tag_id)
-                .bind(search)
-                .bind(search)
-                .bind(search)
-                .bind(search)
-                .bind(search)
-                .fetch_all(&self.pool)
-                .await?
-            }
-            (Some(search), None) => {
-                sqlx::query_as::<
-                    _,
-                    (
-                        String,
-                        Option<String>,
-                        Option<String>,
-                        i64,
-                        Option<i64>,
-                        i64,
-                    ),
-                >(
-                    r#"SELECT
-                         u.id,
-                         u.display_name,
-                         u.username,
-                         u.active,
-                         u.last_login_at,
-                         COALESCE(COUNT(b.token_id), 0) AS token_count
-                       FROM users u
-                       LEFT JOIN user_token_bindings b ON b.user_id = u.id
-                       WHERE u.id LIKE ?
-                          OR COALESCE(u.display_name, '') LIKE ?
-                          OR COALESCE(u.username, '') LIKE ?
-                          OR EXISTS (
-                               SELECT 1
-                               FROM user_tag_bindings utb
-                               JOIN user_tags ut ON ut.id = utb.tag_id
-                               WHERE utb.user_id = u.id
-                                 AND (
-                                   ut.name LIKE ?
-                                   OR COALESCE(ut.display_name, '') LIKE ?
-                                 )
-                           )
-                       GROUP BY u.id, u.display_name, u.username, u.active, u.last_login_at
-                       ORDER BY (u.last_login_at IS NULL) ASC, u.last_login_at DESC, u.id ASC"#,
-                )
-                .bind(search)
-                .bind(search)
-                .bind(search)
-                .bind(search)
-                .bind(search)
-                .fetch_all(&self.pool)
-                .await?
-            }
-            (None, Some(tag_id)) => {
-                sqlx::query_as::<
-                    _,
-                    (
-                        String,
-                        Option<String>,
-                        Option<String>,
-                        i64,
-                        Option<i64>,
-                        i64,
-                    ),
-                >(
-                    r#"SELECT
-                         u.id,
-                         u.display_name,
-                         u.username,
-                         u.active,
-                         u.last_login_at,
-                         COALESCE(COUNT(b.token_id), 0) AS token_count
-                       FROM users u
-                       LEFT JOIN user_token_bindings b ON b.user_id = u.id
-                       WHERE EXISTS (
-                           SELECT 1
-                           FROM user_tag_bindings utb
-                           WHERE utb.user_id = u.id
-                             AND utb.tag_id = ?
-                       )
-                       GROUP BY u.id, u.display_name, u.username, u.active, u.last_login_at
-                       ORDER BY (u.last_login_at IS NULL) ASC, u.last_login_at DESC, u.id ASC"#,
-                )
-                .bind(tag_id)
-                .fetch_all(&self.pool)
-                .await?
-            }
-            (None, None) => {
-                sqlx::query_as::<
-                    _,
-                    (
-                        String,
-                        Option<String>,
-                        Option<String>,
-                        i64,
-                        Option<i64>,
-                        i64,
-                    ),
-                >(
-                    r#"SELECT
-                         u.id,
-                         u.display_name,
-                         u.username,
-                         u.active,
-                         u.last_login_at,
-                         COALESCE(COUNT(b.token_id), 0) AS token_count
-                       FROM users u
-                       LEFT JOIN user_token_bindings b ON b.user_id = u.id
-                       GROUP BY u.id, u.display_name, u.username, u.active, u.last_login_at
-                       ORDER BY (u.last_login_at IS NULL) ASC, u.last_login_at DESC, u.id ASC"#,
-                )
-                .fetch_all(&self.pool)
-                .await?
-            }
-        };
+        let active_since = Self::admin_user_activity_since(activity_scope);
+        let mut builder = QueryBuilder::<Sqlite>::new("");
+        Self::push_admin_user_listing_select(&mut builder);
+        Self::push_admin_user_filters(&mut builder, tag_id, search.as_deref(), active_since);
+        Self::push_admin_user_listing_group_order(&mut builder);
+        let rows = builder
+            .build_query_as::<(
+                String,
+                Option<String>,
+                Option<String>,
+                i64,
+                Option<i64>,
+                i64,
+            )>()
+            .fetch_all(&self.pool)
+            .await?;
 
         Ok(rows
             .into_iter()
-            .map(
-                |(user_id, display_name, username, active, last_login_at, token_count)| {
-                    AdminUserIdentity {
-                        user_id,
-                        display_name,
-                        username,
-                        active: active == 1,
-                        last_login_at,
-                        token_count,
-                    }
-                },
-            )
+            .map(Self::map_admin_user_identity_row)
             .collect())
     }
 

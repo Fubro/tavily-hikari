@@ -6,6 +6,7 @@ impl KeyStore {
         per_page: i64,
         query: Option<&str>,
         tag_id: Option<&str>,
+        activity_scope: AdminUserActivityScope,
         sort: AdminUserListSortField,
         direction: AdminListSortDirection,
         hour_window_start: i64,
@@ -27,9 +28,10 @@ impl KeyStore {
             .filter(|value| !value.is_empty())
             .map(|value| format!("%{value}%"));
         let tag_id = tag_id.map(str::trim).filter(|value| !value.is_empty());
+        let active_since = Self::admin_user_activity_since(activity_scope);
 
         let mut count_builder = QueryBuilder::<Sqlite>::new("SELECT COUNT(*) FROM users u WHERE ");
-        Self::push_admin_user_filters(&mut count_builder, tag_id, search.as_deref());
+        Self::push_admin_user_filters(&mut count_builder, tag_id, search.as_deref(), active_since);
         let total = count_builder
             .build_query_scalar::<i64>()
             .fetch_one(&self.pool)
@@ -39,7 +41,7 @@ impl KeyStore {
         let mut builder = QueryBuilder::<Sqlite>::new(
             "WITH filtered_users AS (SELECT u.id FROM users u WHERE ",
         );
-        Self::push_admin_user_filters(&mut builder, tag_id, search.as_deref());
+        Self::push_admin_user_filters(&mut builder, tag_id, search.as_deref(), active_since);
         builder.push(
             "), metric(user_id, sort_value, sort_limit, sort_total, sort_failure) AS (",
         );

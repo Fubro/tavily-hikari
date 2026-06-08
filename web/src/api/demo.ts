@@ -362,6 +362,17 @@ function createDemoUsers() {
     createDemoUser('user-demo-admin', 'Hikari Demo Admin', 'hikari-demo', 2, 3, 42, 180, 388, 1600, 8400, 24000),
     createDemoUser('user-research', 'Research Team', 'research-team', 1, 1, 28, 100, 312, 900, 4200, 10000),
     createDemoUser('user-ops', 'Ops Runner', 'ops-runner', 1, 1, 12, 80, 760, 800, 7800, 12000),
+    createDemoUser('user-charlie', 'Charlie Li', 'charlie', 0, 0, 0, 80, 0, 800, 0, 12000, {
+      active: false,
+      tags: [],
+      recentIpCount24h: 0,
+      recentIpCount7d: 0,
+      lastActivity: null,
+      dailySuccess: 0,
+      dailyFailure: 0,
+      monthlySuccess: 0,
+      monthlyFailure: 0,
+    }),
   ]
 }
 
@@ -377,16 +388,40 @@ function createDemoUser(
   dailyLimit: number,
   monthlyUsed: number,
   monthlyLimit: number,
+  overrides: Partial<{
+    active: boolean
+    tags: Array<{
+      tagId: string
+      name: string
+      displayName: string
+      icon: string | null
+      systemKey: string | null
+      effectKind: string
+      hourlyAnyDelta: number
+      hourlyDelta: number
+      dailyDelta: number
+      monthlyDelta: number
+      source: string
+    }>
+    recentIpCount24h: number
+    recentIpCount7d: number
+    lastActivity: number | null
+    dailySuccess: number
+    dailyFailure: number
+    monthlySuccess: number
+    monthlyFailure: number
+    lastLoginAt: number
+  }> = {},
 ) {
   return {
     userId,
     displayName,
     username,
-    active: true,
-    lastLoginAt: nowSeconds(-1800),
+    active: overrides.active ?? true,
+    lastLoginAt: overrides.lastLoginAt ?? nowSeconds(-1800),
     tokenCount,
     apiKeyCount,
-    tags: [{
+    tags: overrides.tags ?? [{
       tagId: 'tag-demo',
       name: 'demo',
       displayName: 'Demo',
@@ -408,16 +443,53 @@ function createDemoUser(
     quotaDailyLimit: dailyLimit,
     quotaMonthlyUsed: monthlyUsed,
     quotaMonthlyLimit: monthlyLimit,
-    dailySuccess: Math.max(1, dailyUsed - 18),
-    dailyFailure: 18,
-    monthlySuccess: Math.max(1, monthlyUsed - 140),
-    monthlyFailure: 140,
+    dailySuccess: overrides.dailySuccess ?? Math.max(1, dailyUsed - 18),
+    dailyFailure: overrides.dailyFailure ?? 18,
+    monthlySuccess: overrides.monthlySuccess ?? Math.max(1, monthlyUsed - 140),
+    monthlyFailure: overrides.monthlyFailure ?? 140,
     monthlyBrokenCount: userId === 'user-ops' ? 3 : 1,
     monthlyBrokenLimit: 5,
-    recentIpCount24h: 3,
-    recentIpCount7d: 7,
-    lastActivity: nowSeconds(-240),
+    recentIpCount24h: overrides.recentIpCount24h ?? 3,
+    recentIpCount7d: overrides.recentIpCount7d ?? 7,
+    lastActivity: overrides.lastActivity === undefined ? nowSeconds(-240) : overrides.lastActivity,
   }
+}
+
+function createDemoAdminUserListStats() {
+  const activeUsers90d = demoState.users.filter((user) => user.lastActivity != null).length
+  return {
+    activeUsers90d,
+    totalUsers: demoState.users.length,
+    windowDays: 90,
+  }
+}
+
+function filterDemoUsers(url: URL) {
+  const query = (url.searchParams.get('q') ?? '').trim().toLowerCase()
+  const explicitScope = url.searchParams.get('activityScope')
+  const defaultActiveOnly = demoState.systemSettings.adminDefaultActiveUsersOnly && query.length === 0
+  const activityScope = explicitScope ?? (defaultActiveOnly ? 'active90d' : 'all')
+  const tagId = url.searchParams.get('tagId')
+
+  let items = demoState.users.slice()
+  if (activityScope === 'active90d') {
+    items = items.filter((user) => user.lastActivity != null)
+  }
+  if (tagId) {
+    items = items.filter((user) => user.tags.some((tag) => tag.tagId === tagId))
+  }
+  if (query.length > 0) {
+    items = items.filter((user) => {
+      const haystacks = [
+        user.userId,
+        user.displayName,
+        user.username,
+        ...user.tags.flatMap((tag) => [tag.name, tag.displayName]),
+      ]
+      return haystacks.some((value) => value.toLowerCase().includes(query))
+    })
+  }
+  return items
 }
 
 function createDemoJobs() {
@@ -478,6 +550,7 @@ function createDemoSystemSettings() {
     rebalanceMcpSessionPercent: 35,
     apiRebalanceEnabled: true,
     apiRebalancePercent: 25,
+    adminDefaultActiveUsersOnly: true,
     rechargeFeatureEnabled: true,
     rechargeUserEnabled: true,
     userBlockedKeyBaseLimit: 5,
@@ -1131,7 +1204,7 @@ async function handleDemoRoute(url: URL, method: string, init?: RequestInit): Pr
   if (path === '/api/announcements') return handleAnnouncementsRoute({ announcements: demoState.announcements, path, method, init, nowSeconds, readJsonBody, jsonResponse })
   if (path.startsWith('/api/announcements/')) return handleAnnouncementsRoute({ announcements: demoState.announcements, path, method, init, nowSeconds, readJsonBody, jsonResponse })
 
-  if (path === '/api/users') return jsonResponse(buildListPage(demoState.users, url))
+  if (path === '/api/users') return jsonResponse(buildListPage(filterDemoUsers(url), url))
   if (path.startsWith('/api/users/')) return handleUserRoute(path, url, method, init)
   if (path === '/api/user-tags') return handleUserTags(path, method, init)
   if (path.startsWith('/api/user-tags/')) return handleUserTags(path, method, init)
@@ -1143,7 +1216,13 @@ async function handleDemoRoute(url: URL, method: string, init?: RequestInit): Pr
   if (path === '/api/tokens' && method === 'POST') return createDemoToken(init)
   if (path.startsWith('/api/tokens/')) return handleTokenRoute(path, url, method)
 
-  if (path === '/api/settings') return jsonResponse({ forwardProxy: demoState.forwardProxy, systemSettings: demoState.systemSettings })
+  if (path === '/api/settings') {
+    return jsonResponse({
+      forwardProxy: demoState.forwardProxy,
+      systemSettings: demoState.systemSettings,
+      adminUserListStats: createDemoAdminUserListStats(),
+    })
+  }
   if (path === '/api/settings/forward-proxy') return jsonResponse(demoState.forwardProxy)
   if (path === '/api/settings/system') return jsonResponse(demoState.systemSettings)
   if (path === '/api/settings/forward-proxy/validate') return jsonResponse({ ok: true, message: 'Demo proxy candidate is reachable', normalizedValue: 'socks5://demo.internal:1080', discoveredNodes: 3, latencyMs: 94, nodes: [{ displayName: 'HK edge', protocol: 'socks5', ok: true, latencyMs: 94, ip: '198.51.100.30', location: 'HK' }] })

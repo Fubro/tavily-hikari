@@ -843,21 +843,17 @@ impl TavilyProxy {
         per_page: i64,
         query: Option<&str>,
         tag_id: Option<&str>,
+        activity_scope: AdminUserActivityScope,
     ) -> Result<(Vec<AdminUserIdentity>, i64), ProxyError> {
         self.key_store
-            .list_admin_users_paged(page, per_page, query, tag_id)
+            .list_admin_users_paged(page, per_page, query, tag_id, activity_scope)
             .await
     }
 
     /// Admin: list users with pagination pushed below expensive usage hydration.
     pub async fn list_admin_users_sorted_paged(
         &self,
-        page: i64,
-        per_page: i64,
-        query: Option<&str>,
-        tag_id: Option<&str>,
-        sort: AdminUserListSortField,
-        direction: AdminListSortDirection,
+        request: AdminUserSortedPageRequest<'_>,
     ) -> Result<(Vec<AdminUserIdentity>, i64), ProxyError> {
         let now = Utc::now();
         let month_start = start_of_month(now).timestamp();
@@ -865,12 +861,13 @@ impl TavilyProxy {
         let minute_bucket = now.timestamp() - (now.timestamp() % SECS_PER_MINUTE);
         self.key_store
             .list_admin_users_sorted_paged(
-                page,
-                per_page,
-                query,
-                tag_id,
-                sort,
-                direction,
+                request.page,
+                request.per_page,
+                request.query,
+                request.tag_id,
+                request.activity_scope,
+                request.sort,
+                request.direction,
                 minute_bucket - 59 * SECS_PER_MINUTE,
                 server_daily_window.start,
                 server_daily_window.end,
@@ -885,10 +882,15 @@ impl TavilyProxy {
         &self,
         query: Option<&str>,
         tag_id: Option<&str>,
+        activity_scope: AdminUserActivityScope,
     ) -> Result<Vec<AdminUserIdentity>, ProxyError> {
         self.key_store
-            .list_admin_users_filtered(query, tag_id)
+            .list_admin_users_filtered(query, tag_id, activity_scope)
             .await
+    }
+
+    pub async fn get_admin_user_list_stats(&self) -> Result<AdminUserListStats, ProxyError> {
+        self.key_store.get_admin_user_list_stats().await
     }
 
     /// Admin: get a single user identity by id.

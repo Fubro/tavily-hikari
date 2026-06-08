@@ -678,6 +678,7 @@ struct ValidateKeysResponse {
 struct SettingsResponse {
     forward_proxy: Option<tavily_hikari::ForwardProxySettingsResponse>,
     system_settings: tavily_hikari::SystemSettings,
+    admin_user_list_stats: tavily_hikari::AdminUserListStats,
 }
 
 #[derive(Debug, Deserialize)]
@@ -720,6 +721,7 @@ struct SystemSettingsUpdatePayload {
     api_rebalance_percent: Option<i64>,
     recharge_feature_enabled: Option<bool>,
     recharge_user_enabled: Option<bool>,
+    admin_default_active_users_only: Option<bool>,
     user_blocked_key_base_limit: Option<i64>,
     global_ip_limit: Option<i64>,
     trusted_proxy_cidrs: Option<Vec<String>>,
