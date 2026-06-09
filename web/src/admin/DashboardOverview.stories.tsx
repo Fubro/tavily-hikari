@@ -618,7 +618,7 @@ const zhDarkEvidenceTodayMetrics: DashboardMetricCard[] = [
     id: 'today-upstream-exhausted',
     label: '上游 Key 耗尽',
     value: '42',
-    subtitle: '今日新增',
+    valueMeta: '今日新增',
     comparison: {
       label: '较昨日同刻',
       value: '+38 (950%)',

@@ -32,6 +32,7 @@ async fn summary_windows_include_quota_charge_estimates_and_sample_diffs() {
     };
     let today_start = start_of_local_day_utc_ts(now);
     let yesterday_start = previous_local_day_start_utc_ts(now);
+    let yesterday_same_time_end = previous_local_same_time_utc_ts(now).saturating_add(1);
     let local_month_start = start_of_local_month_utc_ts(now);
     let previous_month_start = previous_local_month_start_utc_ts(now);
     let utc_month_start = start_of_month(now.with_timezone(&Utc)).timestamp();
@@ -129,7 +130,11 @@ async fn summary_windows_include_quota_charge_estimates_and_sample_diffs() {
     assert_eq!(summary.today_start, today_start);
     assert_eq!(summary.today_end, now_ts.saturating_add(1));
     assert_eq!(summary.yesterday_start, yesterday_start);
-    assert_eq!(summary.yesterday_end, today_start);
+    assert_eq!(summary.yesterday_end, yesterday_same_time_end);
+    assert_eq!(
+        summary.yesterday_end - summary.yesterday_start,
+        summary.today_end - summary.today_start
+    );
     assert_eq!(summary.month_start, local_month_start);
     assert_eq!(summary.month_end, summary.today_end);
     assert_eq!(summary.previous_month_start, previous_month_start);

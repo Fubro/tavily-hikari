@@ -2135,6 +2135,7 @@ async fn summary_windows_split_today_yesterday_and_month() {
         1,
     )
     .await;
+    insert_summary_window_logs(&proxy, &key_id, yesterday_same_time, OUTCOME_SUCCESS, 3).await;
     insert_summary_window_logs(
         &proxy,
         &key_id,
@@ -2165,10 +2166,10 @@ async fn summary_windows_split_today_yesterday_and_month() {
         expected_month.valuable_success_count += 5;
         expected_month.valuable_failure_count += 2;
     }
-    if yesterday_same_time + 60 >= local_month_start {
-        expected_month.total_requests += 3;
-        expected_month.success_count += 3;
-        expected_month.valuable_success_count += 3;
+    if yesterday_same_time >= local_month_start {
+        expected_month.total_requests += 6;
+        expected_month.success_count += 6;
+        expected_month.valuable_success_count += 6;
     }
     if local_month_start < yesterday_start {
         expected_month.total_requests += 3;
@@ -2217,6 +2218,10 @@ async fn summary_windows_split_today_yesterday_and_month() {
         }
     );
     assert_eq!(summary.month, expected_month);
+    assert_eq!(
+        summary.yesterday_end - summary.yesterday_start,
+        summary.today_end - summary.today_start
+    );
 
     let _ = std::fs::remove_file(db_path);
 }

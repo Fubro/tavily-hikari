@@ -540,6 +540,7 @@ impl TavilyProxy {
     ) -> Result<SummaryWindows, ProxyError> {
         let today_start = start_of_local_day_utc_ts(now);
         let yesterday_start = previous_local_day_start_utc_ts(now);
+        let yesterday_end = previous_local_same_time_utc_ts(now).saturating_add(1);
         let month_start = start_of_local_month_utc_ts(now);
         let previous_month_start = previous_local_month_start_utc_ts(now);
         let month_quota_charge_start = start_of_month(now.with_timezone(&Utc)).timestamp();
@@ -550,7 +551,7 @@ impl TavilyProxy {
                 today_start,
                 today_end,
                 yesterday_start,
-                yesterday_end: today_start,
+                yesterday_end,
                 month_start,
                 month_quota_charge_start,
                 previous_month_start,

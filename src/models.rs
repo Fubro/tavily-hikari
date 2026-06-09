@@ -2754,7 +2754,6 @@ pub(crate) fn previous_local_day_start_utc_ts(now: chrono::DateTime<Local>) -> i
     local_date_start_utc_ts(previous_date, now)
 }
 
-#[cfg(test)]
 pub(crate) fn previous_local_same_time_utc_ts(now: chrono::DateTime<Local>) -> i64 {
     let previous_date = now
         .date_naive()
