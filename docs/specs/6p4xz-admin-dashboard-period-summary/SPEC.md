@@ -33,7 +33,7 @@
   - `month`: `{ total_requests, success_count, error_count, quota_exhausted_count, upstream_exhausted_key_count }`
 - `today_start` 使用服务端本地自然日 0 点；`today_end` 使用服务端当前时刻加一秒作为半开区间上界。
 - `yesterday_start` 使用服务端本地昨日 0 点；`yesterday_end` 使用 `yesterday_start + (today_end - today_start)` 推导，必须满足 `yesterday_end - yesterday_start = today_end - today_start`。
-- `yesterday` 窗口是半开区间 `[yesterday_start, yesterday_end)`；昨日同一日内进度之后的数据不得进入今日对比。非 DST 切换日下，该边界等价于昨日同一时刻加一秒。
+- `yesterday` 窗口是半开区间 `[yesterday_start, yesterday_end)`；昨日同一日内进度之后的数据不得进入今日对比，即使这些数据落在截止时间所在的同一分钟内也必须排除。非 DST 切换日下，该边界等价于昨日同一时刻加一秒。
 - `quota_exhausted_count` 继续保持请求级语义，供请求日志、详情页和旧消费者使用；dashboard 的耗尽卡改读 `upstream_exhausted_key_count`。
 - 时间窗口边界统一使用服务端本地时区的日/月 bucket 口径，而不是浏览器时区。
 
@@ -58,7 +58,7 @@
 - `今日` 的 `总请求数` 与 `上游 Key 耗尽` 继续显示较昨日同一时刻的数量差与方向，其中 `上游 Key 耗尽` 只统计系统自动标记 exhausted 的唯一上游 Key 数。
 - `本月` 的四项指标能正确显示月累计值；其中 `上游 Key 耗尽` 使用 `本月新增` 副标题且不再显示请求占比。
 - `站点当前状态` 保留 `剩余可用`、`活跃密钥`、`隔离中`、`已耗尽` 四项实时快照。
-- `GET /api/summary/windows` 在空窗口时返回 `0`，`today` 与 `yesterday` 的窗口时长相同，昨日对比窗口不会混入昨日同刻之后的数据，本月窗口累计到当前时刻，并继续向下游保留请求级 `quota_exhausted_count` 兼容字段。
+- `GET /api/summary/windows` 在空窗口时返回 `0`，`today` 与 `yesterday` 的窗口时长相同，昨日对比窗口不会混入昨日同刻之后的数据，包括截止分钟内的后续请求；本月窗口累计到当前时刻，并继续向下游保留请求级 `quota_exhausted_count` 兼容字段。
 - `cargo test`、`cargo clippy -- -D warnings`、`cd web && bun run build`、`cd web && bun run build-storybook` 全部通过。
 
 ## 成果展示

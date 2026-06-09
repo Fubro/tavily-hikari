@@ -2103,8 +2103,8 @@ async fn summary_windows_split_today_yesterday_and_month() {
     let fallback_now = Local::now();
     let now_naive = fallback_now
         .date_naive()
-        .and_hms_opt(12, 0, 0)
-        .expect("valid midday");
+        .and_hms_opt(12, 0, 30)
+        .expect("valid partial minute midday");
     let now = match Local.from_local_datetime(&now_naive) {
         chrono::LocalResult::Single(dt) => dt,
         chrono::LocalResult::Ambiguous(dt, _) => dt,
@@ -2135,11 +2135,11 @@ async fn summary_windows_split_today_yesterday_and_month() {
         1,
     )
     .await;
-    insert_summary_window_logs(&proxy, &key_id, yesterday_same_time, OUTCOME_SUCCESS, 3).await;
+    insert_summary_window_logs(&proxy, &key_id, yesterday_same_time, OUTCOME_SUCCESS, 1).await;
     insert_summary_window_logs(
         &proxy,
         &key_id,
-        yesterday_same_time + 60,
+        yesterday_same_time + 1,
         OUTCOME_SUCCESS,
         3,
     )
@@ -2167,9 +2167,9 @@ async fn summary_windows_split_today_yesterday_and_month() {
         expected_month.valuable_failure_count += 2;
     }
     if yesterday_same_time >= local_month_start {
-        expected_month.total_requests += 6;
-        expected_month.success_count += 6;
-        expected_month.valuable_success_count += 6;
+        expected_month.total_requests += 4;
+        expected_month.success_count += 4;
+        expected_month.valuable_success_count += 4;
     }
     if local_month_start < yesterday_start {
         expected_month.total_requests += 3;
@@ -2204,11 +2204,11 @@ async fn summary_windows_split_today_yesterday_and_month() {
     assert_eq!(
         summary.yesterday,
         SummaryWindowMetrics {
-            total_requests: 10,
-            success_count: 8,
+            total_requests: 8,
+            success_count: 6,
             error_count: 1,
             quota_exhausted_count: 1,
-            valuable_success_count: 8,
+            valuable_success_count: 6,
             valuable_failure_count: 2,
             quota_charge: SummaryQuotaCharge {
                 stale_key_count: 1,

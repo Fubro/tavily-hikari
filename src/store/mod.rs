@@ -90,6 +90,29 @@ fn add_summary_window_metrics(target: &mut SummaryWindowMetrics, delta: &Summary
     target.quota_charge.local_estimated_credits += delta.quota_charge.local_estimated_credits;
 }
 
+fn summary_window_metrics_from_dashboard_counts(
+    counts: DashboardRequestRollupCounts,
+) -> SummaryWindowMetrics {
+    SummaryWindowMetrics {
+        total_requests: counts.total_requests,
+        success_count: counts.success_count,
+        error_count: counts.error_count,
+        quota_exhausted_count: counts.quota_exhausted_count,
+        valuable_success_count: counts.valuable_success_count,
+        valuable_failure_count: counts.valuable_failure_count,
+        other_success_count: counts.other_success_count,
+        other_failure_count: counts.other_failure_count,
+        unknown_count: counts.unknown_count,
+        upstream_exhausted_key_count: 0,
+        new_keys: 0,
+        new_quarantines: 0,
+        quota_charge: SummaryQuotaCharge {
+            local_estimated_credits: counts.local_estimated_credits,
+            ..SummaryQuotaCharge::default()
+        },
+    }
+}
+
 fn subtract_nonnegative(total: i64, subtract: i64) -> i64 {
     total.saturating_sub(subtract).max(0)
 }
