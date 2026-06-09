@@ -55,6 +55,13 @@ const ADMIN_BASE = '/admin'
 const DEFAULT_KEYS_PER_PAGE = 20
 const DEFAULT_TOKENS_PER_PAGE = 20
 const TOKEN_PER_PAGE_OPTIONS = [20, 50, 100, 200] as const
+const ADMIN_USERS_OVERVIEW_SORT_FIELDS = new Set<AdminUsersSortField>([
+  'quotaDailyUsed',
+  'quotaMonthlyUsed',
+  'recentIpCount7d',
+  'lastActivity',
+  'lastLoginAt',
+])
 
 function normalizeTokenPerPage(value?: number | null): number {
   if (!Number.isFinite(value)) return DEFAULT_TOKENS_PER_PAGE
@@ -438,6 +445,23 @@ export function buildAdminUsersPath(
   order?: SortDirection | null,
 ): string {
   return appendUsersContext(`${ADMIN_BASE}/users`, query, tagId, page, sort, order)
+}
+
+export function isAdminUsersOverviewSortField(
+  value: AdminUsersSortField | null | undefined,
+): value is AdminUsersSortField {
+  return value != null && ADMIN_USERS_OVERVIEW_SORT_FIELDS.has(value)
+}
+
+export function buildAdminUsersOverviewPath(
+  query?: string,
+  tagId?: string | null,
+  page?: number | null,
+  sort?: AdminUsersSortField | null,
+  order?: SortDirection | null,
+): string {
+  const normalizedSort = isAdminUsersOverviewSortField(sort) ? sort : null
+  return buildAdminUsersPath(query, tagId, page, normalizedSort, normalizedSort ? order : null)
 }
 
 export function userUsagePath(

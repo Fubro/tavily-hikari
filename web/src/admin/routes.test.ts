@@ -5,7 +5,9 @@ import {
   announcementEditPath,
   announcementListPath,
   buildAdminKeysPath,
+  buildAdminUsersOverviewPath,
   buildAdminUsersPath,
+  isAdminUsersOverviewSortField,
   isSameAdminRoute,
   keyDetailPath,
   parseAdminPath,
@@ -124,6 +126,17 @@ describe('admin user tag routes', () => {
       '/admin/users/tags/linuxdo%20l2?q=L2&tagId=linuxdo_l2&page=3&sort=monthlySuccessRate&order=asc',
     )
     expect(userDetailPath('usr_alice')).toBe('/admin/users/usr_alice')
+  })
+
+  it('drops usage-only sort state when building an overview return path', () => {
+    expect(isAdminUsersOverviewSortField('recentIpCount7d')).toBe(true)
+    expect(isAdminUsersOverviewSortField('monthlySuccessRate')).toBe(false)
+    expect(buildAdminUsersOverviewPath('L2', 'linuxdo_l2', 3, 'recentIpCount7d', 'asc')).toBe(
+      '/admin/users?q=L2&tagId=linuxdo_l2&page=3&sort=recentIpCount7d&order=asc',
+    )
+    expect(buildAdminUsersOverviewPath('L2', 'linuxdo_l2', 3, 'monthlySuccessRate', 'asc')).toBe(
+      '/admin/users?q=L2&tagId=linuxdo_l2&page=3',
+    )
   })
 
   it('marks detail and tag routes that were opened from the usage view', () => {
