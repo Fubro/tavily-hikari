@@ -392,6 +392,9 @@ async fn run_manual_key_quota_sync(
             .map(|(status, body)| (status.trim(), body.to_string()))
             .unwrap_or((rest.trim(), String::new()));
         let status = status_text
+            .split_whitespace()
+            .next()
+            .unwrap_or(status_text)
             .parse::<reqwest::StatusCode>()
             .unwrap_or(reqwest::StatusCode::BAD_GATEWAY);
         let http_status = if status == reqwest::StatusCode::UNAUTHORIZED {
