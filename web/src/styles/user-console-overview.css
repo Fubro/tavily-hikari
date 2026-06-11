@@ -1,0 +1,273 @@
+.user-console-shell {
+  width: min(100%, 2400px);
+  max-width: none;
+  padding-inline: clamp(18px, 2.8vw, 40px);
+  gap: 28px;
+}
+
+.user-console-shell .panel {
+  padding: clamp(20px, 2vw, 30px);
+}
+
+.user-console-shell .user-console-landing-stack {
+  gap: 22px;
+}
+
+.user-console-overview-grid {
+  display: grid;
+  gap: 18px;
+}
+
+.user-console-summary-grid,
+.user-console-progress-grid {
+  display: grid;
+  grid-template-columns: repeat(12, minmax(0, 1fr));
+  gap: 18px;
+}
+
+.user-console-summary-card,
+.user-console-progress-card {
+  position: relative;
+  overflow: hidden;
+  border: 1px solid hsl(var(--border) / 0.78);
+  border-radius: 26px;
+  background:
+    linear-gradient(180deg, hsl(var(--card) / 0.98) 0%, hsl(var(--card) / 0.92) 100%);
+  box-shadow:
+    inset 0 1px 0 hsl(var(--background) / 0.65),
+    0 18px 34px hsl(24 22% 27% / 0.08);
+}
+
+.user-console-summary-card {
+  grid-column: span 4;
+  min-height: 176px;
+  padding: 24px 24px 22px;
+}
+
+.user-console-progress-card {
+  grid-column: span 6;
+  min-height: 262px;
+  padding: 22px 22px 20px;
+}
+
+.user-console-summary-card::before,
+.user-console-progress-card::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(120% 120% at 100% 0%, hsl(var(--primary) / 0.12), transparent 56%),
+    linear-gradient(180deg, hsl(var(--background) / 0.05), transparent 46%);
+}
+
+.user-console-summary-card-success {
+  --user-console-accent: 151 55% 40%;
+}
+
+.user-console-summary-card-failure {
+  --user-console-accent: 24 94% 56%;
+}
+
+.user-console-summary-card-month {
+  --user-console-accent: 194 82% 42%;
+}
+
+.user-console-progress-card-request {
+  --user-console-accent: 194 82% 42%;
+}
+
+.user-console-progress-card-hour {
+  --user-console-accent: 157 62% 39%;
+}
+
+.user-console-progress-card-day {
+  --user-console-accent: 204 78% 47%;
+}
+
+.user-console-progress-card-month {
+  --user-console-accent: 17 80% 52%;
+}
+
+.user-console-summary-card-header,
+.user-console-progress-card-header {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.user-console-summary-card-label,
+.user-console-progress-card-label {
+  color: hsl(var(--foreground) / 0.74);
+  font-size: 0.94rem;
+  font-weight: 650;
+  line-height: 1.45;
+}
+
+.user-console-summary-card-marker,
+.user-console-progress-card-marker {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 28px;
+  padding: 0 11px;
+  border-radius: 999px;
+  border: 1px solid hsl(var(--user-console-accent) / 0.18);
+  background: hsl(var(--user-console-accent) / 0.11);
+  color: hsl(var(--user-console-accent));
+  font-size: 0.74rem;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+}
+
+.user-console-summary-card-value,
+.user-console-progress-card-value {
+  position: relative;
+  z-index: 1;
+  margin-top: 22px;
+  color: hsl(var(--foreground));
+}
+
+.user-console-summary-card-value {
+  font-size: clamp(2.1rem, 3vw, 3.25rem);
+  line-height: 1;
+  letter-spacing: -0.04em;
+}
+
+.user-console-progress-card-copy {
+  position: relative;
+  z-index: 1;
+}
+
+.user-console-progress-card-value {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.user-console-progress-card-value strong {
+  font-size: clamp(2rem, 2.7vw, 3rem);
+  line-height: 1;
+  letter-spacing: -0.045em;
+}
+
+.user-console-progress-card-value span {
+  font-size: 1rem;
+  color: hsl(var(--muted-foreground));
+  font-weight: 600;
+}
+
+.user-console-progress-card.is-loading .user-console-progress-card-value strong,
+.user-console-progress-card.is-loading .user-console-progress-card-value span {
+  color: hsl(var(--muted-foreground) / 0.72);
+}
+
+.user-console-progress-chart,
+.user-console-progress-chart-empty {
+  position: absolute;
+  inset: auto 0 0 0;
+  height: 57%;
+}
+
+.user-console-progress-chart-empty {
+  background:
+    linear-gradient(180deg, transparent 0%, hsl(var(--muted) / 0.12) 100%);
+}
+
+.user-console-progress-chart-svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  color: hsl(var(--user-console-accent));
+}
+
+.user-console-progress-limit-path {
+  fill: none;
+  stroke: hsl(var(--foreground) / 0.24);
+  stroke-width: 1.5;
+  stroke-dasharray: 5 5;
+  stroke-linecap: round;
+}
+
+.user-console-progress-line-path {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2.4;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.user-console-progress-line-cap {
+  fill: currentColor;
+  stroke: hsl(var(--card));
+  stroke-width: 2;
+}
+
+@media (max-width: 1279px) {
+  .user-console-summary-card {
+    grid-column: span 12;
+    min-height: 154px;
+  }
+
+  .user-console-progress-card {
+    grid-column: span 12;
+  }
+}
+
+@media (max-width: 767px) {
+  .user-console-shell {
+    padding-inline: 12px;
+    gap: 18px;
+  }
+
+  .user-console-shell .panel {
+    padding: 16px 14px 20px;
+  }
+
+  .user-console-summary-grid,
+  .user-console-progress-grid {
+    gap: 14px;
+  }
+
+  .user-console-summary-card,
+  .user-console-progress-card {
+    border-radius: 20px;
+  }
+
+  .user-console-summary-card {
+    min-height: 136px;
+    padding: 18px 16px;
+  }
+
+  .user-console-progress-card {
+    min-height: 224px;
+    padding: 18px 16px 16px;
+  }
+
+  .user-console-summary-card-value {
+    font-size: clamp(1.9rem, 10vw, 2.5rem);
+  }
+
+  .user-console-progress-card-label {
+    max-width: 18ch;
+    font-size: 0.9rem;
+  }
+
+  .user-console-progress-card-value strong {
+    font-size: clamp(1.7rem, 9vw, 2.35rem);
+  }
+
+  .user-console-progress-card-value span {
+    font-size: 0.9rem;
+  }
+
+  .user-console-progress-chart,
+  .user-console-progress-chart-empty {
+    height: 52%;
+  }
+}

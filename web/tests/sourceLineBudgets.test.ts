@@ -32,8 +32,8 @@ const EXCEPTIONS = new Map<string, { max: number; reason: string }>([
   [
     'src/api/runtime.ts',
     {
-      max: 3330,
-      reason: 'API barrel still carries admin settings and user-list contracts until the proxy API surface is split out.',
+      max: 3400,
+      reason: 'API barrel still carries admin settings, user-list contracts, and user-console overview APIs until the proxy API surface is split out.',
     },
   ],
   [
@@ -74,8 +74,8 @@ const EXCEPTIONS = new Map<string, { max: number; reason: string }>([
   [
     'src/user-console/runtime.tsx',
     {
-      max: 3100,
-      reason: 'User console runtime still carries the route-level shell; token reset dialogs/actions have been split out as the next extraction step.',
+      max: 3140,
+      reason: 'User console runtime still carries the route-level shell while the new landing overview orchestration finishes splitting into dedicated hooks and sections.',
     },
   ],
   [

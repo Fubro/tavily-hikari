@@ -1,7 +1,17 @@
 import { useEffect, useLayoutEffect, useMemo, useState } from 'react'
 import type { Meta, StoryObj } from '@storybook/react-vite'
 
-import type { Announcement, Profile, RechargeConfig, RechargeOrder, RequestRate, RequestRateScope, UserDashboard, UserTokenSummary } from './api'
+import type {
+  Announcement,
+  Profile,
+  RechargeConfig,
+  RechargeOrder,
+  RequestRate,
+  RequestRateScope,
+  UserDashboard,
+  UserDashboardOverview,
+  UserTokenSummary,
+} from './api'
 import UserConsole from './UserConsole'
 import {
   DropdownMenu,
@@ -90,6 +100,47 @@ const dashboardSample: UserDashboard = {
     currentMonthStart: 1_762_041_600,
     currentEntitlementCredits: 3000,
     effectiveUntilMonthStart: 1_767_225_600,
+  },
+}
+
+function createOverviewPoints(values: Array<number | null>, limit: number) {
+  return values.map((value, index) => ({
+    bucketStart: 1_762_041_600 + index * 300,
+    displayBucketStart: null,
+    value,
+    limitValue: limit,
+  }))
+}
+
+const dashboardOverviewSample: UserDashboardOverview = {
+  summary: dashboardSample,
+  progress: {
+    requestRate: {
+      used: dashboardSample.requestRate.used,
+      limit: dashboardSample.requestRate.limit,
+      points: createOverviewPoints([8, 10, 9, 15, 14, 16, 21, 23, 29, 35, 42, 58], dashboardSample.requestRate.limit),
+    },
+    quotaHourly: {
+      used: dashboardSample.quotaHourlyUsed,
+      limit: dashboardSample.quotaHourlyLimit,
+      points: createOverviewPoints([7, 12, 18, 24, 31, 40, 52, 63, 72, 82, null, null], dashboardSample.quotaHourlyLimit),
+    },
+    quotaDaily: {
+      used: dashboardSample.quotaDailyUsed,
+      limit: dashboardSample.quotaDailyLimit,
+      points: createOverviewPoints(
+        [11, 19, 28, 36, 49, 63, 78, 92, 108, 126, 145, 169, 194, 228, 264, 302, 356, null, null, null, null, null, null, null],
+        dashboardSample.quotaDailyLimit,
+      ),
+    },
+    quotaMonthly: {
+      used: dashboardSample.quotaMonthlyUsed,
+      limit: dashboardSample.quotaMonthlyLimit,
+      points: createOverviewPoints(
+        [130, 248, 364, 508, 672, 821, 983, 1_156, 1_344, 1_525, 1_711, 1_904, 2_118, 2_347, 2_589, 2_846, 3_124, 3_411, 3_762, 4_120, null, null, null, null, null, null, null, null, null, null],
+        dashboardSample.quotaMonthlyLimit,
+      ),
+    },
   },
 }
 
@@ -505,6 +556,10 @@ function installUserConsoleFetchMock(state: UserConsoleStoryState): () => void {
 
     if (url.pathname === '/api/user/dashboard') {
       return jsonResponse(dashboardSample)
+    }
+
+    if (url.pathname === '/api/user/dashboard/overview') {
+      return jsonResponse(dashboardOverviewSample)
     }
 
     if (url.pathname === '/api/user/recharge/config') {

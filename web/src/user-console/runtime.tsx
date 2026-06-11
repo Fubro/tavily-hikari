@@ -13,6 +13,7 @@ import ManualCopyBubble from '../components/ManualCopyBubble'
 import UserConsoleHeader from '../components/UserConsoleHeader'
 import HaStatusBanner from '../components/HaStatusBanner'
 import DashboardQuotaGrid from './DashboardQuotaGrid'
+import UserDashboardOverview from './UserDashboardOverview'
 import TokenListActions from './TokenListActions'
 import RechargePanel from './RechargePanel'
 import { DEFAULT_RECHARGE_UNIT_CREDITS, normalizeRechargeSelection } from './rechargeControls'
@@ -28,13 +29,24 @@ import { UserConsoleAnnouncementsSection } from './Announcements'
 import DebugInfoSharingToggle from './DebugInfoSharingToggle'
 import { useDebugInfoSharing } from './useDebugInfoSharing'
 import { useUserConsoleAnnouncements } from './useAnnouncements'
+import { useLandingOverviewLive } from './useLandingOverviewLive'
 
 import {
   createBrowserTodayWindow,
-  fetchVersion,
   fetchProfile,
   fetchPublicHaStatus,
+  fetchVersion,
+  fetchUserDashboardOverview,
+  fetchUserRechargeConfig,
+  fetchUserRechargeOrders,
+  createUserRechargeOrder,
+  fetchUserTokenDetail,
+  buildUserTokenEventsUrl,
+  fetchUserTokenLogs,
+  fetchUserTokenSecret,
+  fetchUserTokens,
   millisecondsUntilNextBrowserDayBoundary,
+  postUserLogout,
   probeApiTavilyCrawl,
   probeApiTavilyExtract,
   probeApiTavilyMap,
@@ -46,24 +58,15 @@ import {
   probeMcpPing,
   probeMcpToolsCall,
   probeMcpToolsList,
-  fetchUserDashboard,
-  fetchUserRechargeConfig,
-  fetchUserRechargeOrders,
-  createUserRechargeOrder,
-  fetchUserTokenDetail,
-  buildUserTokenEventsUrl,
-  fetchUserTokenLogs,
-  fetchUserTokenSecret,
-  fetchUserTokens,
-  postUserLogout,
-  rotateUserTokenSecret,
   parseUserTokenEventSnapshot,
+  rotateUserTokenSecret,
   type Profile,
   type PublicTokenLog,
   type RechargeConfig,
   type RechargeOrder,
   type UserTokenEventSnapshot,
   type UserDashboard,
+  type UserDashboardOverview as UserDashboardOverviewData,
   type UserTokenSummary,
   type VersionInfo,
   type HaStatus,
@@ -1138,6 +1141,7 @@ export default function UserConsole(): JSX.Element {
 
   const [profile, setProfile] = useState<Profile | null>(null)
   const [dashboard, setDashboard] = useState<UserDashboard | null>(null)
+  const [dashboardOverview, setDashboardOverview] = useState<UserDashboardOverviewData | null>(null)
   const [haStatus, setHaStatus] = useState<HaStatus | null>(null)
   const [tokens, setTokens] = useState<UserTokenSummary[]>([])
   const [rechargeConfig, setRechargeConfig] = useState<RechargeConfig | null>(null)
@@ -1195,6 +1199,7 @@ export default function UserConsole(): JSX.Element {
   const tokenSecretWarmAbortRef = useRef<Map<string, AbortController>>(new Map())
   const tokenSecretRequestRef = useRef<Map<string, Promise<string>>>(new Map())
   const tokenSecretRequestAbortRef = useRef<Map<string, AbortController>>(new Map())
+  const stopLandingOverviewLiveRef = useRef<() => void>(() => undefined)
   const probeRunIdRef = useRef(0)
   const tokenSecretRunIdRef = useRef(0)
   const guideTokenRunIdRef = useRef(0)
@@ -1229,6 +1234,7 @@ export default function UserConsole(): JSX.Element {
 
   const clearConsoleData = useCallback(() => {
     setDashboard(null)
+    setDashboardOverview(null)
     setTokens([])
     setRechargeConfig(null)
     setRechargeOrders([])
@@ -1255,6 +1261,7 @@ export default function UserConsole(): JSX.Element {
     detailLoadAbortRef.current?.abort()
     baseLoadAbortRef.current = null
     detailLoadAbortRef.current = null
+    stopLandingOverviewLiveRef.current()
     detailEventsRef.current?.close()
     detailEventsRef.current = null
     setDetailLogsPushIssue(null)
@@ -1341,6 +1348,18 @@ export default function UserConsole(): JSX.Element {
     return false
   }, [clearSensitiveConsoleState])
 
+  const stopLandingOverviewLive = useLandingOverviewLive({
+    consoleAvailability,
+    route,
+    todayWindow,
+    abortActiveConsoleLoads,
+    redirectAfterLogoutIfNeeded,
+    setDashboard,
+    setDashboardOverview,
+    setError,
+  })
+  stopLandingOverviewLiveRef.current = stopLandingOverviewLive
+
   useEffect(() => {
     const syncRoute = () => {
       const nextPathname = window.location.pathname || ''
@@ -1389,15 +1408,16 @@ export default function UserConsole(): JSX.Element {
         return
       }
 
-      const [nextDashboard, nextTokens, nextRechargeConfig, nextRechargeOrders, nextHaStatus] = await Promise.all([
-        fetchUserDashboard(todayWindow, signal),
+      const [nextOverview, nextTokens, nextRechargeConfig, nextRechargeOrders, nextHaStatus] = await Promise.all([
+        fetchUserDashboardOverview(todayWindow, signal),
         fetchUserTokens(todayWindow, signal),
         fetchUserRechargeConfig(signal).catch(() => null),
         fetchUserRechargeOrders(signal).catch(() => []),
         fetchPublicHaStatus(signal).catch(() => null),
       ])
       if (signal.aborted || baseLoadRunIdRef.current !== runId) return
-      setDashboard(nextDashboard)
+      setDashboard(nextOverview.summary)
+      setDashboardOverview(nextOverview)
       setHaStatus(nextHaStatus)
       setTokens(nextTokens)
       setRechargeConfig(nextRechargeConfig)
@@ -1441,6 +1461,14 @@ export default function UserConsole(): JSX.Element {
       }
     }
   }, [reloadBase])
+
+  useEffect(() => {
+    if (!dashboard) return
+    setDashboardOverview((current) => {
+      if (!current || current.summary === dashboard) return current
+      return { ...current, summary: dashboard }
+    })
+  }, [dashboard])
 
   useEffect(() => {
     const controller = new AbortController()
@@ -2540,7 +2568,7 @@ export default function UserConsole(): JSX.Element {
   return (
     <main
       ref={pageRef}
-      className={`app-shell public-home viewport-${viewportMode} content-${contentMode}${
+      className={`app-shell public-home user-console-shell viewport-${viewportMode} content-${contentMode}${
         isCompactLayout ? ' is-compact-layout' : ''
       }`}
     >
@@ -2604,21 +2632,12 @@ export default function UserConsole(): JSX.Element {
                 <p className="panel-description">{text.dashboard.description}</p>
               </div>
             </header>
-            <div className="access-stats">
-              <div className="access-stat"><div className="access-stat-title">{text.dashboard.dailySuccess}</div><p><RollingNumber value={loading ? null : dashboard?.dailySuccess ?? 0} /></p></div>
-              <div className="access-stat"><div className="access-stat-title">{text.dashboard.dailyFailure}</div><p><RollingNumber value={loading ? null : dashboard?.dailyFailure ?? 0} /></p></div>
-              <div className="access-stat"><div className="access-stat-title">{text.dashboard.monthlySuccessUtc}</div><p><RollingNumber value={loading ? null : dashboard?.monthlySuccess ?? 0} /></p></div>
-            </div>
-            <DashboardQuotaGrid
+            <UserDashboardOverview
               text={text.dashboard}
-              rateLabel={formatRequestRateSummary(resolveRequestRate(dashboard, 'user'), language)}
-              rate={resolveRequestRate(dashboard, 'user')}
-              hourlyUsed={dashboard?.quotaHourlyUsed ?? 0}
-              hourlyLimit={dashboard?.quotaHourlyLimit ?? 0}
-              dailyUsed={dashboard?.quotaDailyUsed ?? 0}
-              dailyLimit={dashboard?.quotaDailyLimit ?? 0}
-              monthlyUsed={dashboard?.quotaMonthlyUsed ?? 0}
-              monthlyLimit={dashboard?.quotaMonthlyLimit ?? 0}
+              overview={dashboardOverview}
+              loading={loading}
+              language={language}
+              requestRateLabel={formatRequestRateSummary(resolveRequestRate(dashboard, 'user'), language)}
               formatNumber={formatNumber}
             />
             <DebugInfoSharingToggle
