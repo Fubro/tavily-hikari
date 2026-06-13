@@ -2463,10 +2463,12 @@ impl KeyStore {
         let SummaryWindowBounds {
             today_start,
             today_end,
+            today_period_end,
             yesterday_start,
             yesterday_end,
             month_start,
             month_quota_charge_start,
+            month_period_end,
             previous_month_start,
             previous_month_end,
         } = bounds;
@@ -2732,10 +2734,12 @@ impl KeyStore {
             },
             today_start,
             today_end,
+            today_period_end,
             yesterday_start,
             yesterday_end,
             month_start,
             month_end: today_end,
+            month_period_end,
             previous_month_start,
             previous_month_end,
         })

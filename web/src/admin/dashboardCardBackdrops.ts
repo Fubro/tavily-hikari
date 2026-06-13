@@ -4,7 +4,7 @@ import type {
   SummaryWindowMetrics,
   SummaryWindowsResponse,
 } from '../api'
-import { buildHourlyRangeSlots } from './dashboardHourlyCharts'
+import { buildHourlyRangeSlots, getHourlyBucketsInRange } from './dashboardHourlyCharts'
 
 export type DashboardBackdropMetricKey =
   | 'total'
@@ -114,6 +114,97 @@ export function buildHourlyBackdropSeries(
     return comparisonBucket ? getBackdropMetricValue(comparisonBucket, metricKey) : null
   })
   return { current, comparison }
+}
+
+interface DashboardBackdropRange {
+  rangeStart: number
+  rangeEnd: number
+}
+
+interface DashboardPeriodBackdropSeriesOptions {
+  hourlyRequestWindow: DashboardHourlyRequestWindow
+  currentValueRange: DashboardBackdropRange
+  currentDisplayRange: DashboardBackdropRange
+  comparisonValueRange?: DashboardBackdropRange
+  comparisonDisplayRange?: DashboardBackdropRange
+  displayBucketSeconds: number
+  metricKey?: DashboardBackdropMetricKey
+}
+
+function buildPeriodRangeValues(
+  hourlyRequestWindow: DashboardHourlyRequestWindow,
+  valueRange: DashboardBackdropRange,
+  displayRange: DashboardBackdropRange,
+  metricKey: DashboardBackdropMetricKey,
+  displayBucketSeconds: number,
+): Array<number | null> {
+  if (
+    !Number.isFinite(valueRange.rangeStart)
+    || !Number.isFinite(valueRange.rangeEnd)
+    || valueRange.rangeEnd <= valueRange.rangeStart
+    || !Number.isFinite(displayRange.rangeStart)
+    || !Number.isFinite(displayRange.rangeEnd)
+    || displayRange.rangeEnd <= displayRange.rangeStart
+    || !Number.isFinite(displayBucketSeconds)
+    || displayBucketSeconds <= 0
+  ) {
+    return []
+  }
+
+  const values: Array<number | null> = []
+  for (let slotStart = displayRange.rangeStart; slotStart < displayRange.rangeEnd; slotStart += displayBucketSeconds) {
+    const slotEnd = Math.min(slotStart + displayBucketSeconds, displayRange.rangeEnd)
+    if (slotEnd <= valueRange.rangeStart || slotStart >= valueRange.rangeEnd) {
+      values.push(null)
+      continue
+    }
+
+    const bucketsInSlot = getHourlyBucketsInRange(
+      hourlyRequestWindow,
+      Math.max(slotStart, valueRange.rangeStart),
+      Math.min(slotEnd, valueRange.rangeEnd),
+    )
+    if (bucketsInSlot.length === 0) {
+      values.push(null)
+      continue
+    }
+
+    let slotTotal = 0
+    let hasVisibleBucket = false
+    for (const bucket of bucketsInSlot) {
+      slotTotal += getBackdropMetricValue(bucket, metricKey)
+      hasVisibleBucket = true
+    }
+    values.push(hasVisibleBucket ? slotTotal : null)
+  }
+  return values
+}
+
+export function buildPeriodBackdropSeries(
+  options: DashboardPeriodBackdropSeriesOptions,
+): { current: Array<number | null>; comparison: Array<number | null> } {
+  const metricKey = options.metricKey ?? 'total'
+  const current = buildPeriodRangeValues(
+    options.hourlyRequestWindow,
+    options.currentValueRange,
+    options.currentDisplayRange,
+    metricKey,
+    options.displayBucketSeconds,
+  )
+  const comparison = options.comparisonValueRange && options.comparisonDisplayRange
+    ? buildPeriodRangeValues(
+      options.hourlyRequestWindow,
+      options.comparisonValueRange,
+      options.comparisonDisplayRange,
+      metricKey,
+      options.displayBucketSeconds,
+    )
+    : []
+  const slotCount = Math.max(current.length, comparison.length)
+  return {
+    current: Array.from({ length: slotCount }, (_, index) => current[index] ?? null),
+    comparison: Array.from({ length: slotCount }, (_, index) => comparison[index] ?? null),
+  }
 }
 
 function getBackdropMetricValue(

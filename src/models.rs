@@ -1336,10 +1336,12 @@ pub struct SummaryWindows {
     pub month: SummaryWindowMetrics,
     pub today_start: i64,
     pub today_end: i64,
+    pub today_period_end: i64,
     pub yesterday_start: i64,
     pub yesterday_end: i64,
     pub month_start: i64,
     pub month_end: i64,
+    pub month_period_end: i64,
     pub previous_month_start: i64,
     pub previous_month_end: i64,
 }
@@ -1348,10 +1350,12 @@ pub struct SummaryWindows {
 pub(crate) struct SummaryWindowBounds {
     pub today_start: i64,
     pub today_end: i64,
+    pub today_period_end: i64,
     pub yesterday_start: i64,
     pub yesterday_end: i64,
     pub month_start: i64,
     pub month_quota_charge_start: i64,
+    pub month_period_end: i64,
     pub previous_month_start: i64,
     pub previous_month_end: i64,
 }

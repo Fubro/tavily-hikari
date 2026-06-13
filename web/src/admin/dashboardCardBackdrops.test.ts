@@ -1,7 +1,11 @@
 import { describe, expect, it } from 'bun:test'
 
 import { buildDashboardHourlyRequestWindowFixture } from './dashboardHourlyCharts'
-import { buildBackdropBaseline, buildHourlyBackdropSeries } from './dashboardCardBackdrops'
+import {
+  buildBackdropBaseline,
+  buildHourlyBackdropSeries,
+  buildPeriodBackdropSeries,
+} from './dashboardCardBackdrops'
 
 describe('dashboardCardBackdrops helpers', () => {
   it('uses explicit comparison window bounds instead of a fixed 24h offset', () => {
@@ -61,5 +65,76 @@ describe('dashboardCardBackdrops helpers', () => {
 
   it('keeps a month-to-date baseline when retained buckets cover only part of the month', () => {
     expect(buildBackdropBaseline(150, [null, 12, null, 8])).toBe(130)
+  })
+
+  it('keeps the today backdrop on the full natural-day axis with future slots empty', () => {
+    const currentHourStart = Date.UTC(2026, 3, 7, 13, 0, 0) / 1000
+    const window = buildDashboardHourlyRequestWindowFixture({
+      currentHourStart,
+      retainedBuckets: 49,
+      mapBucket: ({ index, bucketStart, bucket }) => ({
+        total: bucketStart >= Date.UTC(2026, 3, 7, 0, 0, 0) / 1000 && bucketStart <= currentHourStart
+          ? index + 1
+          : bucket.total,
+      }),
+    })
+
+    const todayStart = Date.UTC(2026, 3, 7, 0, 0, 0) / 1000
+    const todayEnd = Date.UTC(2026, 3, 7, 13, 11, 20) / 1000
+    const todayPeriodEnd = Date.UTC(2026, 3, 8, 0, 0, 0) / 1000
+    const yesterdayStart = Date.UTC(2026, 3, 6, 0, 0, 0) / 1000
+    const yesterdayPeriodEnd = todayStart
+
+    const { current, comparison } = buildPeriodBackdropSeries({
+      hourlyRequestWindow: window,
+      currentValueRange: { rangeStart: todayStart, rangeEnd: todayEnd },
+      currentDisplayRange: { rangeStart: todayStart, rangeEnd: todayPeriodEnd },
+      comparisonValueRange: { rangeStart: yesterdayStart, rangeEnd: yesterdayPeriodEnd },
+      comparisonDisplayRange: { rangeStart: yesterdayStart, rangeEnd: yesterdayPeriodEnd },
+      displayBucketSeconds: 3600,
+      metricKey: 'total',
+    })
+
+    expect(current).toHaveLength(24)
+    expect(comparison).toHaveLength(24)
+    expect(current.slice(14).every((value) => value == null)).toBe(true)
+    expect(comparison.every((value) => value == null || typeof value === 'number')).toBe(true)
+    expect(current[13]).not.toBeNull()
+    expect(comparison[13]).not.toBeNull()
+  })
+
+  it('keeps the month backdrop on the full natural-month axis with future days empty', () => {
+    const currentHourStart = Date.UTC(2026, 3, 7, 13, 0, 0) / 1000
+    const window = buildDashboardHourlyRequestWindowFixture({
+      currentHourStart,
+      retainedBuckets: 49,
+      mapBucket: ({ bucketStart, bucket }) => ({
+        total: bucketStart >= Date.UTC(2026, 3, 1, 0, 0, 0) / 1000 && bucketStart <= currentHourStart
+          ? bucket.total + 1
+          : bucket.total,
+      }),
+    })
+
+    const monthStart = Date.UTC(2026, 3, 1, 0, 0, 0) / 1000
+    const monthEnd = Date.UTC(2026, 3, 7, 13, 11, 20) / 1000
+    const monthPeriodEnd = Date.UTC(2026, 4, 1, 0, 0, 0) / 1000
+    const previousMonthStart = Date.UTC(2026, 2, 1, 0, 0, 0) / 1000
+    const previousMonthEnd = monthStart
+
+    const { current, comparison } = buildPeriodBackdropSeries({
+      hourlyRequestWindow: window,
+      currentValueRange: { rangeStart: monthStart, rangeEnd: monthEnd },
+      currentDisplayRange: { rangeStart: monthStart, rangeEnd: monthPeriodEnd },
+      comparisonValueRange: { rangeStart: previousMonthStart, rangeEnd: previousMonthEnd },
+      comparisonDisplayRange: { rangeStart: previousMonthStart, rangeEnd: previousMonthEnd },
+      displayBucketSeconds: 24 * 3600,
+      metricKey: 'total',
+    })
+
+    expect(current).toHaveLength(31)
+    expect(comparison).toHaveLength(31)
+    expect(current.slice(7).every((value) => value == null)).toBe(true)
+    expect(comparison.slice(0, 5).every((value) => value == null)).toBe(true)
+    expect(current[4]).not.toBeNull()
   })
 })

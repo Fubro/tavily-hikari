@@ -63,8 +63,10 @@ export interface SummaryWindowsResponse {
   yesterday: SummaryWindowMetrics
   month: SummaryWindowMetrics
   today_start: number; today_end: number
+  today_period_end?: number
   yesterday_start: number; yesterday_end: number
   month_start: number; month_end: number
+  month_period_end?: number
   previous_month_start?: number; previous_month_end?: number
 }
 

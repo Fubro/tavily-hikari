@@ -548,9 +548,11 @@ impl TavilyProxy {
         let today_start = start_of_local_day_utc_ts(now);
         let yesterday_start = previous_local_day_start_utc_ts(now);
         let month_start = start_of_local_month_utc_ts(now);
+        let month_period_end = crate::shift_local_month_start_utc_ts(month_start, 1);
         let previous_month_start = previous_local_month_start_utc_ts(now);
         let month_quota_charge_start = start_of_month(now.with_timezone(&Utc)).timestamp();
         let today_end = now.with_timezone(&Utc).timestamp().saturating_add(1);
+        let today_period_end = next_local_day_start_utc_ts(today_start);
         let today_elapsed = today_end.saturating_sub(today_start);
         let yesterday_end = yesterday_start.saturating_add(today_elapsed);
 
@@ -558,10 +560,12 @@ impl TavilyProxy {
             .fetch_summary_windows(SummaryWindowBounds {
                 today_start,
                 today_end,
+                today_period_end,
                 yesterday_start,
                 yesterday_end,
                 month_start,
                 month_quota_charge_start,
+                month_period_end,
                 previous_month_start,
                 previous_month_end: month_start,
             })

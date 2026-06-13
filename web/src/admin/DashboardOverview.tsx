@@ -34,7 +34,7 @@ import {
   type DashboardTypeSeriesId,
 } from './dashboardHourlyCharts'
 import {
-  buildHourlyBackdropSeries,
+  buildPeriodBackdropSeries,
   buildMonthBackdropBaseline,
   getBackdropMetricKey,
   getPreviousMonthRange,
@@ -596,25 +596,41 @@ export default function DashboardOverview({
     month: readChartColorVar('--info', 'hsl(199 89% 48%)'),
   }
   const comparisonRangeStart = summaryWindowValues.yesterday_start
-  const comparisonRangeEnd = summaryWindowValues.yesterday_end
+  const comparisonRangeEnd = summaryWindowValues.today_start
+  const todayPeriodEnd = summaryWindowValues.today_period_end ?? summaryWindowValues.today_end
   const previousMonthRange = getPreviousMonthRange(summaryWindowValues)
   const monthComparisonRangeStart = previousMonthRange.rangeStart
   const monthComparisonRangeEnd = previousMonthRange.rangeEnd
+  const monthPeriodEnd = summaryWindowValues.month_period_end ?? summaryWindowValues.month_end
   const todayBackdrop = useMemo(
-    () => buildHourlyBackdropSeries(
+    () => buildPeriodBackdropSeries({
       hourlyRequestWindow,
-      summaryWindowValues.today_start,
-      summaryWindowValues.today_end,
-      'total',
-      comparisonRangeStart,
-      comparisonRangeEnd,
-    ),
+      currentValueRange: {
+        rangeStart: summaryWindowValues.today_start,
+        rangeEnd: summaryWindowValues.today_end,
+      },
+      currentDisplayRange: {
+        rangeStart: summaryWindowValues.today_start,
+        rangeEnd: todayPeriodEnd,
+      },
+      comparisonValueRange: {
+        rangeStart: comparisonRangeStart,
+        rangeEnd: comparisonRangeEnd,
+      },
+      comparisonDisplayRange: {
+        rangeStart: comparisonRangeStart,
+        rangeEnd: comparisonRangeEnd,
+      },
+      displayBucketSeconds: 3600,
+      metricKey: 'total',
+    }),
     [
       comparisonRangeEnd,
       comparisonRangeStart,
       hourlyRequestWindow,
       summaryWindowValues.today_end,
       summaryWindowValues.today_start,
+      todayPeriodEnd,
     ],
   )
   const todayCardBackdrops = useMemo<DashboardCardBackdropMap>(() => (
@@ -625,74 +641,152 @@ export default function DashboardOverview({
         comparisonColor: backdropColors.yesterday,
       },
       valuableSuccess: {
-        ...buildHourlyBackdropSeries(
+        ...buildPeriodBackdropSeries({
           hourlyRequestWindow,
-          summaryWindowValues.today_start,
-          summaryWindowValues.today_end,
-          'valuableSuccess',
-          comparisonRangeStart,
-          comparisonRangeEnd,
-        ),
+          currentValueRange: {
+            rangeStart: summaryWindowValues.today_start,
+            rangeEnd: summaryWindowValues.today_end,
+          },
+          currentDisplayRange: {
+            rangeStart: summaryWindowValues.today_start,
+            rangeEnd: todayPeriodEnd,
+          },
+          comparisonValueRange: {
+            rangeStart: comparisonRangeStart,
+            rangeEnd: comparisonRangeEnd,
+          },
+          comparisonDisplayRange: {
+            rangeStart: comparisonRangeStart,
+            rangeEnd: comparisonRangeEnd,
+          },
+          displayBucketSeconds: 3600,
+          metricKey: 'valuableSuccess',
+        }),
         color: backdropColors.today,
         comparisonColor: backdropColors.yesterday,
       },
       valuableFailure: {
-        ...buildHourlyBackdropSeries(
+        ...buildPeriodBackdropSeries({
           hourlyRequestWindow,
-          summaryWindowValues.today_start,
-          summaryWindowValues.today_end,
-          'valuableFailure',
-          comparisonRangeStart,
-          comparisonRangeEnd,
-        ),
+          currentValueRange: {
+            rangeStart: summaryWindowValues.today_start,
+            rangeEnd: summaryWindowValues.today_end,
+          },
+          currentDisplayRange: {
+            rangeStart: summaryWindowValues.today_start,
+            rangeEnd: todayPeriodEnd,
+          },
+          comparisonValueRange: {
+            rangeStart: comparisonRangeStart,
+            rangeEnd: comparisonRangeEnd,
+          },
+          comparisonDisplayRange: {
+            rangeStart: comparisonRangeStart,
+            rangeEnd: comparisonRangeEnd,
+          },
+          displayBucketSeconds: 3600,
+          metricKey: 'valuableFailure',
+        }),
         color: readChartColorVar('--destructive', 'hsl(0 84% 60%)'),
         comparisonColor: backdropColors.yesterday,
       },
       otherSuccess: {
-        ...buildHourlyBackdropSeries(
+        ...buildPeriodBackdropSeries({
           hourlyRequestWindow,
-          summaryWindowValues.today_start,
-          summaryWindowValues.today_end,
-          'otherSuccess',
-          comparisonRangeStart,
-          comparisonRangeEnd,
-        ),
+          currentValueRange: {
+            rangeStart: summaryWindowValues.today_start,
+            rangeEnd: summaryWindowValues.today_end,
+          },
+          currentDisplayRange: {
+            rangeStart: summaryWindowValues.today_start,
+            rangeEnd: todayPeriodEnd,
+          },
+          comparisonValueRange: {
+            rangeStart: comparisonRangeStart,
+            rangeEnd: comparisonRangeEnd,
+          },
+          comparisonDisplayRange: {
+            rangeStart: comparisonRangeStart,
+            rangeEnd: comparisonRangeEnd,
+          },
+          displayBucketSeconds: 3600,
+          metricKey: 'otherSuccess',
+        }),
         color: readChartColorVar('--success', 'hsl(160 84% 39%)'),
         comparisonColor: backdropColors.yesterday,
       },
       otherFailure: {
-        ...buildHourlyBackdropSeries(
+        ...buildPeriodBackdropSeries({
           hourlyRequestWindow,
-          summaryWindowValues.today_start,
-          summaryWindowValues.today_end,
-          'otherFailure',
-          comparisonRangeStart,
-          comparisonRangeEnd,
-        ),
+          currentValueRange: {
+            rangeStart: summaryWindowValues.today_start,
+            rangeEnd: summaryWindowValues.today_end,
+          },
+          currentDisplayRange: {
+            rangeStart: summaryWindowValues.today_start,
+            rangeEnd: todayPeriodEnd,
+          },
+          comparisonValueRange: {
+            rangeStart: comparisonRangeStart,
+            rangeEnd: comparisonRangeEnd,
+          },
+          comparisonDisplayRange: {
+            rangeStart: comparisonRangeStart,
+            rangeEnd: comparisonRangeEnd,
+          },
+          displayBucketSeconds: 3600,
+          metricKey: 'otherFailure',
+        }),
         color: readChartColorVar('--warning', 'hsl(38 92% 50%)'),
         comparisonColor: backdropColors.yesterday,
       },
       unknown: {
-        ...buildHourlyBackdropSeries(
+        ...buildPeriodBackdropSeries({
           hourlyRequestWindow,
-          summaryWindowValues.today_start,
-          summaryWindowValues.today_end,
-          'unknown',
-          comparisonRangeStart,
-          comparisonRangeEnd,
-        ),
+          currentValueRange: {
+            rangeStart: summaryWindowValues.today_start,
+            rangeEnd: summaryWindowValues.today_end,
+          },
+          currentDisplayRange: {
+            rangeStart: summaryWindowValues.today_start,
+            rangeEnd: todayPeriodEnd,
+          },
+          comparisonValueRange: {
+            rangeStart: comparisonRangeStart,
+            rangeEnd: comparisonRangeEnd,
+          },
+          comparisonDisplayRange: {
+            rangeStart: comparisonRangeStart,
+            rangeEnd: comparisonRangeEnd,
+          },
+          displayBucketSeconds: 3600,
+          metricKey: 'unknown',
+        }),
         color: readChartColorVar('--muted-foreground', 'hsl(215 16% 47%)'),
         comparisonColor: backdropColors.yesterday,
       },
       upstreamExhausted: {
-        ...buildHourlyBackdropSeries(
+        ...buildPeriodBackdropSeries({
           hourlyRequestWindow,
-          summaryWindowValues.today_start,
-          summaryWindowValues.today_end,
-          'upstreamExhausted',
-          comparisonRangeStart,
-          comparisonRangeEnd,
-        ),
+          currentValueRange: {
+            rangeStart: summaryWindowValues.today_start,
+            rangeEnd: summaryWindowValues.today_end,
+          },
+          currentDisplayRange: {
+            rangeStart: summaryWindowValues.today_start,
+            rangeEnd: todayPeriodEnd,
+          },
+          comparisonValueRange: {
+            rangeStart: comparisonRangeStart,
+            rangeEnd: comparisonRangeEnd,
+          },
+          comparisonDisplayRange: {
+            rangeStart: comparisonRangeStart,
+            rangeEnd: comparisonRangeEnd,
+          },
+          displayBucketSeconds: 3600,
+          metricKey: 'upstreamExhausted',
+        }),
         color: readChartColorVar('--info', 'hsl(199 89% 48%)'),
         comparisonColor: backdropColors.yesterday,
       },
@@ -703,20 +797,31 @@ export default function DashboardOverview({
     comparisonRangeEnd,
     comparisonRangeStart,
     hourlyRequestWindow,
-    summaryWindowValues.today_end,
-    summaryWindowValues.today_start,
     todayBackdrop,
   ])
   const monthBackdrop = useMemo(
     () => {
-      const backdrop = buildHourlyBackdropSeries(
+      const backdrop = buildPeriodBackdropSeries({
         hourlyRequestWindow,
-        summaryWindowValues.month_start,
-        summaryWindowValues.month_end,
-        'total',
-        monthComparisonRangeStart,
-        monthComparisonRangeEnd,
-      )
+        currentValueRange: {
+          rangeStart: summaryWindowValues.month_start,
+          rangeEnd: summaryWindowValues.month_end,
+        },
+        currentDisplayRange: {
+          rangeStart: summaryWindowValues.month_start,
+          rangeEnd: monthPeriodEnd,
+        },
+        comparisonValueRange: {
+          rangeStart: monthComparisonRangeStart,
+          rangeEnd: monthComparisonRangeEnd,
+        },
+        comparisonDisplayRange: {
+          rangeStart: monthComparisonRangeStart,
+          rangeEnd: monthComparisonRangeEnd,
+        },
+        displayBucketSeconds: 24 * 3600,
+        metricKey: 'total',
+      })
       return {
         ...backdrop,
         baseline: buildMonthBackdropBaseline(summaryWindowValues.month, 'total', backdrop.current),
@@ -729,6 +834,7 @@ export default function DashboardOverview({
       summaryWindowValues.month_end,
       summaryWindowValues.month,
       summaryWindowValues.month_start,
+      monthPeriodEnd,
     ],
   )
   const monthCardBackdrops = useMemo<DashboardCardBackdropMap>(() => {
@@ -736,14 +842,27 @@ export default function DashboardOverview({
       metricKey: DashboardBackdropMetricKey,
       color = backdropColors.month,
     ): DashboardCardBackdropSeries => {
-      const backdrop = buildHourlyBackdropSeries(
+      const backdrop = buildPeriodBackdropSeries({
         hourlyRequestWindow,
-        summaryWindowValues.month_start,
-        summaryWindowValues.month_end,
+        currentValueRange: {
+          rangeStart: summaryWindowValues.month_start,
+          rangeEnd: summaryWindowValues.month_end,
+        },
+        currentDisplayRange: {
+          rangeStart: summaryWindowValues.month_start,
+          rangeEnd: monthPeriodEnd,
+        },
+        comparisonValueRange: {
+          rangeStart: monthComparisonRangeStart,
+          rangeEnd: monthComparisonRangeEnd,
+        },
+        comparisonDisplayRange: {
+          rangeStart: monthComparisonRangeStart,
+          rangeEnd: monthComparisonRangeEnd,
+        },
+        displayBucketSeconds: 24 * 3600,
         metricKey,
-        monthComparisonRangeStart,
-        monthComparisonRangeEnd,
-      )
+      })
       return {
         ...backdrop,
         baseline: buildMonthBackdropBaseline(summaryWindowValues.month, metricKey, backdrop.current),
@@ -772,8 +891,7 @@ export default function DashboardOverview({
     monthComparisonRangeStart,
     monthBackdrop,
     summaryWindowValues.month,
-    summaryWindowValues.month_end,
-    summaryWindowValues.month_start,
+    monthPeriodEnd,
   ])
   const alertGroupCount = overviewReady && recentAlerts.totalEvents > 0 ? 1 : 0
   const priorityCount = riskItems.length + alertGroupCount

@@ -366,10 +366,12 @@ const summaryWindows: SummaryWindowsResponse = {
   },
   today_start: Date.UTC(2026, 3, 7, 0, 0, 0) / 1000,
   today_end: Date.UTC(2026, 3, 7, 12, 0, 0) / 1000 + 1,
+  today_period_end: Date.UTC(2026, 3, 8, 0, 0, 0) / 1000,
   yesterday_start: Date.UTC(2026, 3, 6, 0, 0, 0) / 1000,
   yesterday_end: Date.UTC(2026, 3, 6, 12, 0, 0) / 1000 + 1,
   month_start: Date.UTC(2026, 3, 1, 0, 0, 0) / 1000,
   month_end: Date.UTC(2026, 3, 7, 12, 0, 0) / 1000 + 1,
+  month_period_end: Date.UTC(2026, 4, 1, 0, 0, 0) / 1000,
   previous_month_start: Date.UTC(2026, 2, 1, 0, 0, 0) / 1000,
   previous_month_end: Date.UTC(2026, 3, 1, 0, 0, 0) / 1000,
 }

@@ -184,10 +184,12 @@ async fn summary_windows_month_bucket_fallback_skips_unaligned_first_local_day_b
         .fetch_summary_windows(SummaryWindowBounds {
             today_start: start_of_local_day_utc_ts(now),
             today_end: now.with_timezone(&Utc).timestamp().saturating_add(1),
+            today_period_end: next_local_day_start_utc_ts(start_of_local_day_utc_ts(now)),
             yesterday_start: previous_local_day_start_utc_ts(now),
             yesterday_end: start_of_local_day_utc_ts(now),
             month_start,
             month_quota_charge_start: month_start,
+            month_period_end: crate::shift_local_month_start_utc_ts(month_start, 1),
             previous_month_start: month_start.saturating_sub(31 * 24 * 60 * 60),
             previous_month_end: month_start,
         })
@@ -238,10 +240,12 @@ async fn summary_windows_month_reads_dashboard_rollup_day_buckets_for_historical
         .fetch_summary_windows(SummaryWindowBounds {
             today_start: start_of_local_day_utc_ts(now),
             today_end: now.with_timezone(&Utc).timestamp().saturating_add(1),
+            today_period_end: next_local_day_start_utc_ts(start_of_local_day_utc_ts(now)),
             yesterday_start: previous_local_day_start_utc_ts(now),
             yesterday_end: start_of_local_day_utc_ts(now),
             month_start,
             month_quota_charge_start: month_start,
+            month_period_end: crate::shift_local_month_start_utc_ts(month_start, 1),
             previous_month_start: month_start.saturating_sub(31 * 24 * 60 * 60),
             previous_month_end: month_start,
         })

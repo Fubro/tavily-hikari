@@ -43,6 +43,8 @@
 - `今日` 指标卡必须同时显示当前值；其中 `总请求数` 与 `上游 Key 耗尽` 的“较昨日同刻”继续按数量差值展示，`成功` 与 `错误` 改为分别比较成功率/错误率的百分点差。
 - `成功` 的“较昨日同刻”按 `success_count / total_requests` 计算；`错误` 按 `error_count / total_requests` 计算；两者都保留当前次数主值与 `今日占比` 副标题。
 - `今日` 的 `上游 Key 耗尽` 卡固定使用总览专用标签，并显示 `今日新增` 副标题；其主值与比较值都基于窗口内由系统自动标记 exhausted 的唯一 `key_id` 数量，而不是请求次数。
+- 摘要卡背景图必须展示对应完整周期的轴：`今日` 背景图覆盖服务端本地自然日完整 24 小时，`本月` 背景图覆盖服务端本地自然月完整日历周期；当前时刻之后的当前周期槽位必须保留为空（`null`），不得填 `0`、不得裁掉未来空间。
+- 背景图的“完整周期显示轴”与主值 / delta 的“same-time 窗口”是两回事：主值和 delta 仍按现有截至当前时刻的统计窗口计算，背景图只负责把完整周期铺满。
 - 当 `yesterday.total_requests = 0` 且 `today.total_requests > 0` 时，`成功` / `错误` 不伪造百分点差，改为“昨日无基线”兜底文案并使用中性态。
 - 当 `today.total_requests = 0` 且 `yesterday.total_requests = 0` 时，`成功` / `错误` 的“较昨日同刻”显示 `0.0` 个百分点（或对应语言单位）并保持 `flat`。
 - `本月` 指标卡只显示月累计值与本月占比，不显示昨日比较；其中 `上游 Key 耗尽` 卡固定显示 `本月新增`，不再显示请求占比副标题。
@@ -70,6 +72,9 @@
 ![管理仪表盘摘要区成果截图](./assets/dashboard-summary-result.png)
 
 ## Visual Evidence
+
+- source_type: `storybook_canvas`; story_id_or_title: `Admin/Components/DashboardOverview/ZhDarkEvidence`; state: `full-period background charts`; evidence_note: 验证今日/本月摘要卡背景 chart 覆盖完整自然日/自然月周期，当前时刻之后保持为空槽而不是 0，并且背景轴不影响主值与 delta 的 same-time 统计口径。
+  ![管理仪表盘：完整周期背景 chart 证据](./assets/admin-dashboardoverview-summary-only.png)
 
 - source_type: `storybook_canvas`; story_id_or_title: `Admin/Components/DashboardOverview/ZhDarkEvidence`; state: `upstream exhausted lifecycle cards`; evidence_note: 验证今日/本月耗尽卡均展示 `上游 Key 耗尽`，并分别使用 `今日新增` / `本月新增` 副标题；耗尽卡不再复用请求级占比文案。
   ![管理仪表盘：上游 Key 耗尽新口径](./assets/dashboard-upstream-exhausted-key-cards.png)

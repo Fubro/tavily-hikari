@@ -843,10 +843,12 @@ function demoSummaryWindows(
     },
     today_start: todayStart,
     today_end: currentHourStart + 1,
+    today_period_end: todayStart + 24 * 3_600,
     yesterday_start: todayStart - 24 * 3_600,
     yesterday_end: currentHourStart + 1 - 24 * 3_600,
     month_start: todayStart - 14 * 24 * 3_600,
     month_end: currentHourStart + 1,
+    month_period_end: todayStart - 14 * 24 * 3_600 + 31 * 24 * 3_600,
     previous_month_start: todayStart - 45 * 24 * 3_600,
     previous_month_end: todayStart - 14 * 24 * 3_600,
   }
