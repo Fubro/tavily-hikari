@@ -572,6 +572,13 @@ impl TavilyProxy {
             .await
     }
 
+    pub async fn dashboard_month_series(
+        &self,
+        summary_windows: &SummaryWindows,
+    ) -> Result<DashboardMonthSeries, ProxyError> {
+        self.key_store.fetch_dashboard_month_series(summary_windows).await
+    }
+
     /// Public metrics: successful requests today and this month.
     pub async fn success_breakdown(
         &self,

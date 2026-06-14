@@ -194,6 +194,7 @@ import {
   fetchSummary,
   fetchVersion,
   type ApiKeyStats,
+  type DashboardMonthSeries,
   type DashboardSnapshotEvent,
   type DashboardHourlyRequestWindow,
   type DashboardSiteStatusSnapshot,
@@ -405,6 +406,13 @@ function createEmptyDashboardHourlyRequestWindow(): DashboardHourlyRequestWindow
     visibleBuckets: 25,
     retainedBuckets: 49,
     buckets: [],
+  }
+}
+
+function createEmptyDashboardMonthSeries(): DashboardMonthSeries {
+  return {
+    current: [],
+    comparison: [],
   }
 }
 const ADMIN_UNBOUND_TOKEN_USAGE_DEFAULT_SORT_FIELD: AdminUnboundTokenUsageSortField = 'lastUsedAt'
@@ -1654,6 +1662,7 @@ function AdminDashboard(): JSX.Element {
   const errorStrings = adminStrings.errors
   const [summary, setSummary] = useState<Summary | null>(null)
   const [dashboardSummaryWindows, setDashboardSummaryWindows] = useState<SummaryWindowsResponse | null>(null)
+  const [dashboardMonthSeries, setDashboardMonthSeries] = useState<DashboardMonthSeries>(() => createEmptyDashboardMonthSeries())
   const [dashboardSiteStatusSnapshot, setDashboardSiteStatusSnapshot] = useState<DashboardSiteStatusState | null>(null)
   const [keys, setKeys] = useState<ApiKeyStats[]>([])
   const [dashboardKeys, setDashboardKeys] = useState<ApiKeyStats[]>([])
@@ -2650,6 +2659,7 @@ function AdminDashboard(): JSX.Element {
         if (!overviewStale) {
           setSummary(overview.summary)
           setDashboardSummaryWindows(overview.summaryWindows)
+          setDashboardMonthSeries(overview.monthSeries)
           setDashboardSiteStatusSnapshot(overview.siteStatus)
           setDashboardTokens(overview.disabledTokens)
           setDashboardTokenCoverage(overview.tokenCoverage)
@@ -2673,6 +2683,7 @@ function AdminDashboard(): JSX.Element {
         }
         setSummary(null)
         setDashboardSummaryWindows(null)
+        setDashboardMonthSeries(createEmptyDashboardMonthSeries())
         setDashboardSiteStatusSnapshot(null)
         setDashboardTokens([])
         setDashboardTokenCoverage('error')
@@ -4153,6 +4164,7 @@ function AdminDashboard(): JSX.Element {
           if (routeRef.current.name === 'module' && routeRef.current.module === 'dashboard') {
             dashboardOverviewVersionRef.current += 1
             setDashboardSummaryWindows(data.summaryWindows)
+            setDashboardMonthSeries(data.monthSeries)
             setDashboardSiteStatusSnapshot(data.siteStatus)
             setDashboardTokens(data.disabledTokens)
             setDashboardTokenCoverage(data.tokenCoverage)
@@ -10266,6 +10278,7 @@ function AdminDashboard(): JSX.Element {
           statusMetrics={statusMetrics}
           summaryWindows={dashboardSummaryWindows}
           hourlyRequestWindow={dashboardHourlyRequestWindow}
+          monthSeries={dashboardMonthSeries}
           chartPersistenceKey={DASHBOARD_HOURLY_CHART_PERSISTENCE_KEY}
           tokenCoverage={dashboardTokenCoverage}
           tokens={dashboardTokens}

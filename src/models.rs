@@ -369,6 +369,9 @@ pub fn resolve_client_ip_info(
 
 #[cfg(test)]
 mod client_ip_tests;
+mod dashboard_month_series;
+
+pub use dashboard_month_series::{DashboardMonthSeries, DashboardMonthSeriesPoint};
 
 #[derive(Debug)]
 pub(crate) struct ApiKeyLease {
