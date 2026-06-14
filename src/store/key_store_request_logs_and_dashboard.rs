@@ -2478,6 +2478,89 @@ impl KeyStore {
         ranges
     }
 
+    async fn fetch_dashboard_month_lifecycle_daily_counts_tx(
+        tx: &mut Transaction<'_, Sqlite>,
+        range_start: i64,
+        range_end: i64,
+    ) -> Result<
+        (
+            std::collections::HashMap<i64, i64>,
+            std::collections::HashMap<i64, i64>,
+            std::collections::HashMap<i64, i64>,
+        ),
+        ProxyError,
+    > {
+        if range_end <= range_start {
+            return Ok((
+                std::collections::HashMap::new(),
+                std::collections::HashMap::new(),
+                std::collections::HashMap::new(),
+            ));
+        }
+
+        let count_local_days = |timestamps: Vec<i64>| -> std::collections::HashMap<i64, i64> {
+            let mut counts = std::collections::HashMap::new();
+            for created_at in timestamps {
+                *counts
+                    .entry(local_day_bucket_start_utc_ts(created_at))
+                    .or_insert(0) += 1;
+            }
+            counts
+        };
+
+        let new_keys_created_at = sqlx::query_scalar::<_, i64>(
+            r#"
+            SELECT created_at
+            FROM api_keys
+            WHERE created_at >= ?
+              AND created_at < ?
+            "#,
+        )
+        .bind(range_start)
+        .bind(range_end)
+        .fetch_all(&mut **tx)
+        .await?;
+
+        let new_quarantines_created_at = sqlx::query_scalar::<_, i64>(
+            r#"
+            SELECT created_at
+            FROM api_key_quarantines
+            WHERE created_at >= ?
+              AND created_at < ?
+            "#,
+        )
+        .bind(range_start)
+        .bind(range_end)
+        .fetch_all(&mut **tx)
+        .await?;
+
+        let upstream_exhausted_first_created_at = sqlx::query_scalar::<_, i64>(
+            r#"
+            SELECT MIN(created_at) AS first_created_at
+            FROM api_key_maintenance_records
+            WHERE source = ?
+              AND operation_code = ?
+              AND reason_code = ?
+              AND created_at >= ?
+              AND created_at < ?
+            GROUP BY key_id
+            "#,
+        )
+        .bind(MAINTENANCE_SOURCE_SYSTEM)
+        .bind(MAINTENANCE_OP_AUTO_MARK_EXHAUSTED)
+        .bind(OUTCOME_QUOTA_EXHAUSTED)
+        .bind(range_start)
+        .bind(range_end)
+        .fetch_all(&mut **tx)
+        .await?;
+
+        Ok((
+            count_local_days(upstream_exhausted_first_created_at),
+            count_local_days(new_keys_created_at),
+            count_local_days(new_quarantines_created_at),
+        ))
+    }
+
     async fn fetch_dashboard_month_series_points_tx(
         tx: &mut Transaction<'_, Sqlite>,
         range_start: i64,
@@ -2491,6 +2574,16 @@ impl KeyStore {
         let mut points = Vec::new();
         let mut running_total = SummaryWindowMetrics::default();
         let current_local_day_start = local_day_bucket_start_utc_ts(now_cutoff.saturating_sub(1));
+        let lifecycle_end = range_end.min(now_cutoff);
+        let (
+            upstream_exhausted_by_day,
+            new_keys_by_day,
+            new_quarantines_by_day,
+        ) = Self::fetch_dashboard_month_lifecycle_daily_counts_tx(tx, range_start, lifecycle_end)
+            .await?;
+        let mut running_upstream_exhausted = 0;
+        let mut running_new_keys = 0;
+        let mut running_new_quarantines = 0;
 
         for (bucket_start, bucket_end) in
             Self::collect_bucket_ranges(range_start, range_end, next_local_day_start_utc_ts)
@@ -2520,6 +2613,15 @@ impl KeyStore {
                     .await?
                 };
                 add_summary_window_metrics(&mut running_total, &bucket_metrics);
+                running_upstream_exhausted += upstream_exhausted_by_day
+                    .get(&bucket_start)
+                    .copied()
+                    .unwrap_or_default();
+                running_new_keys += new_keys_by_day.get(&bucket_start).copied().unwrap_or_default();
+                running_new_quarantines += new_quarantines_by_day
+                    .get(&bucket_start)
+                    .copied()
+                    .unwrap_or_default();
                 DashboardMonthSeriesPoint {
                     bucket_start,
                     display_bucket_start: Some(bucket_start),
@@ -2529,9 +2631,9 @@ impl KeyStore {
                     other_success: Some(running_total.other_success_count),
                     other_failure: Some(running_total.other_failure_count),
                     unknown: Some(running_total.unknown_count),
-                    upstream_exhausted: Some(running_total.upstream_exhausted_key_count),
-                    new_keys: Some(running_total.new_keys),
-                    new_quarantines: Some(running_total.new_quarantines),
+                    upstream_exhausted: Some(running_upstream_exhausted),
+                    new_keys: Some(running_new_keys),
+                    new_quarantines: Some(running_new_quarantines),
                 }
             };
             points.push(point);

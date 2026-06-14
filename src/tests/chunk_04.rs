@@ -932,7 +932,8 @@ async fn dashboard_month_series_uses_full_natural_month_axis_and_previous_month_
     let current_month_start = summary_windows.month_start;
     let previous_month_start = summary_windows.previous_month_start;
     let previous_month_end = summary_windows.previous_month_end;
-    let current_month_day_start = current_month_start + 24 * 3600;
+    let current_month_day_start = next_local_day_start_utc_ts(current_month_start);
+    let previous_month_day_start = next_local_day_start_utc_ts(previous_month_start);
     let current_day_start = local_day_bucket_start_utc_ts(evaluation_time.timestamp());
 
     insert_dashboard_summary_rollup_day_bucket(
@@ -965,13 +966,109 @@ async fn dashboard_month_series_uses_full_natural_month_axis_and_previous_month_
     .await;
     insert_dashboard_summary_rollup_day_bucket(
         &proxy,
-        previous_month_start + 24 * 3600,
+        previous_month_day_start,
         8,
         6,
         1,
         1,
     )
     .await;
+
+    sqlx::query(
+        r#"
+        INSERT INTO api_keys (id, api_key, status, created_at) VALUES
+            ('month-series-current-day-1', 'tvly-month-series-current-day-1', 'active', ?),
+            ('month-series-current-day-2', 'tvly-month-series-current-day-2', 'active', ?),
+            ('month-series-current-day-3', 'tvly-month-series-current-day-3', 'active', ?),
+            ('month-series-previous-day-1', 'tvly-month-series-previous-day-1', 'active', ?),
+            ('month-series-previous-day-2', 'tvly-month-series-previous-day-2', 'active', ?)
+        "#,
+    )
+    .bind(current_month_start + 30)
+    .bind(current_month_day_start + 30)
+    .bind(current_day_start + 30)
+    .bind(previous_month_start + 30)
+    .bind(previous_month_day_start + 30)
+    .execute(&proxy.key_store.pool)
+    .await
+    .expect("insert lifecycle test api keys");
+
+    sqlx::query(
+        r#"
+        INSERT INTO api_key_quarantines (
+            id,
+            key_id,
+            source,
+            reason_code,
+            reason_summary,
+            reason_detail,
+            created_at,
+            cleared_at
+        ) VALUES
+            ('month-series-quarantine-current-1', 'month-series-current-day-1', 'system', 'quota_exhausted', 'quota exhausted', 'current month quarantine', ?, NULL),
+            ('month-series-quarantine-current-2', 'month-series-current-day-2', 'system', 'quota_exhausted', 'quota exhausted', 'current day quarantine', ?, NULL),
+            ('month-series-quarantine-previous-1', 'month-series-previous-day-1', 'system', 'quota_exhausted', 'quota exhausted', 'previous month quarantine', ?, NULL)
+        "#,
+    )
+    .bind(current_month_start + 45)
+    .bind(current_day_start + 45)
+    .bind(previous_month_start + 45)
+    .execute(&proxy.key_store.pool)
+    .await
+    .expect("insert lifecycle quarantines");
+
+    sqlx::query(
+        r#"
+        INSERT INTO api_key_maintenance_records (
+            id,
+            key_id,
+            source,
+            operation_code,
+            operation_summary,
+            reason_code,
+            reason_summary,
+            reason_detail,
+            request_log_id,
+            auth_token_log_id,
+            auth_token_id,
+            actor_user_id,
+            actor_display_name,
+            status_before,
+            status_after,
+            quarantine_before,
+            quarantine_after,
+            created_at
+        ) VALUES
+            ('month-series-maint-current-1', 'month-series-current-day-1', ?, ?, 'auto mark exhausted', ?, 'quota exhausted', NULL, NULL, NULL, NULL, NULL, NULL, 'active', 'exhausted', 0, 0, ?),
+            ('month-series-maint-current-1-repeat', 'month-series-current-day-1', ?, ?, 'auto mark exhausted', ?, 'quota exhausted', NULL, NULL, NULL, NULL, NULL, NULL, 'active', 'exhausted', 0, 0, ?),
+            ('month-series-maint-current-2', 'month-series-current-day-2', ?, ?, 'auto mark exhausted', ?, 'quota exhausted', NULL, NULL, NULL, NULL, NULL, NULL, 'active', 'exhausted', 0, 0, ?),
+            ('month-series-maint-previous-1', 'month-series-previous-day-1', ?, ?, 'auto mark exhausted', ?, 'quota exhausted', NULL, NULL, NULL, NULL, NULL, NULL, 'active', 'exhausted', 0, 0, ?),
+            ('month-series-maint-previous-2', 'month-series-previous-day-2', ?, ?, 'auto mark exhausted', ?, 'quota exhausted', NULL, NULL, NULL, NULL, NULL, NULL, 'active', 'exhausted', 0, 0, ?)
+        "#,
+    )
+    .bind(MAINTENANCE_SOURCE_SYSTEM)
+    .bind(MAINTENANCE_OP_AUTO_MARK_EXHAUSTED)
+    .bind(OUTCOME_QUOTA_EXHAUSTED)
+    .bind(current_month_start + 60)
+    .bind(MAINTENANCE_SOURCE_SYSTEM)
+    .bind(MAINTENANCE_OP_AUTO_MARK_EXHAUSTED)
+    .bind(OUTCOME_QUOTA_EXHAUSTED)
+    .bind(current_month_day_start + 60)
+    .bind(MAINTENANCE_SOURCE_SYSTEM)
+    .bind(MAINTENANCE_OP_AUTO_MARK_EXHAUSTED)
+    .bind(OUTCOME_QUOTA_EXHAUSTED)
+    .bind(current_day_start + 60)
+    .bind(MAINTENANCE_SOURCE_SYSTEM)
+    .bind(MAINTENANCE_OP_AUTO_MARK_EXHAUSTED)
+    .bind(OUTCOME_QUOTA_EXHAUSTED)
+    .bind(previous_month_start + 60)
+    .bind(MAINTENANCE_SOURCE_SYSTEM)
+    .bind(MAINTENANCE_OP_AUTO_MARK_EXHAUSTED)
+    .bind(OUTCOME_QUOTA_EXHAUSTED)
+    .bind(previous_month_day_start + 60)
+    .execute(&proxy.key_store.pool)
+    .await
+    .expect("insert lifecycle maintenance records");
 
     insert_dashboard_hourly_log(
         &proxy,
@@ -1010,23 +1107,50 @@ async fn dashboard_month_series_uses_full_natural_month_axis_and_previous_month_
         .await
         .expect("dashboard month series");
 
-    let current_month_days =
-        ((summary_windows.month_period_end - summary_windows.month_start) / 86_400) as usize;
-    let previous_month_days =
-        ((previous_month_end - previous_month_start) / 86_400) as usize;
+    let current_month_days = KeyStore::collect_bucket_ranges(
+        summary_windows.month_start,
+        summary_windows.month_period_end,
+        next_local_day_start_utc_ts,
+    )
+    .len();
+    let previous_month_days = KeyStore::collect_bucket_ranges(
+        previous_month_start,
+        previous_month_end,
+        next_local_day_start_utc_ts,
+    )
+    .len();
     assert_eq!(month_series.current.len(), current_month_days);
     assert_eq!(month_series.comparison.len(), previous_month_days);
 
     assert_eq!(month_series.current[0].total, Some(12));
     assert_eq!(month_series.current[1].total, Some(30));
-    let current_day_index = ((current_day_start - current_month_start) / 86_400) as usize;
+    let current_day_index = month_series
+        .current
+        .iter()
+        .position(|point| point.bucket_start == current_day_start)
+        .expect("current day point");
     assert_eq!(month_series.current[current_day_index].total, Some(32));
+    assert_eq!(month_series.current[0].upstream_exhausted, Some(1));
+    assert_eq!(month_series.current[1].upstream_exhausted, Some(1));
+    assert_eq!(month_series.current[current_day_index].upstream_exhausted, Some(2));
+    assert_eq!(month_series.current[0].new_keys, Some(1));
+    assert_eq!(month_series.current[1].new_keys, Some(2));
+    assert_eq!(month_series.current[current_day_index].new_keys, Some(3));
+    assert_eq!(month_series.current[0].new_quarantines, Some(1));
+    assert_eq!(month_series.current[1].new_quarantines, Some(1));
+    assert_eq!(month_series.current[current_day_index].new_quarantines, Some(2));
     assert!(month_series.current[(current_day_index + 1).min(month_series.current.len() - 1)]
         .total
         .is_none());
 
     assert_eq!(month_series.comparison[0].total, Some(10));
     assert_eq!(month_series.comparison[1].total, Some(18));
+    assert_eq!(month_series.comparison[0].upstream_exhausted, Some(1));
+    assert_eq!(month_series.comparison[1].upstream_exhausted, Some(2));
+    assert_eq!(month_series.comparison[0].new_keys, Some(1));
+    assert_eq!(month_series.comparison[1].new_keys, Some(2));
+    assert_eq!(month_series.comparison[0].new_quarantines, Some(1));
+    assert_eq!(month_series.comparison[1].new_quarantines, Some(1));
     assert!(month_series
         .comparison
         .iter()
