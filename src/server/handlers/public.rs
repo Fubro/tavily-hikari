@@ -980,7 +980,7 @@ async fn build_dashboard_overview_payload(
     let summary = state.proxy.summary().await?;
     let summary_windows = state.proxy.summary_windows().await?;
     let hourly_request_window = state.proxy.dashboard_hourly_request_window().await?;
-    let month_series = state.proxy.dashboard_month_series().await?;
+    let month_series = state.proxy.dashboard_month_series(&summary_windows).await?;
     let forward_proxy = state.proxy.get_forward_proxy_dashboard_summary().await?;
     let exhausted_keys = state
         .proxy
@@ -1081,6 +1081,12 @@ async fn compute_signatures(
 ) -> Result<(Option<SummarySig>, Option<i64>), ()> {
     const DASHBOARD_HOURLY_BUCKET_SECS: i64 = 3600;
     let summary = state.proxy.summary().await.map_err(|_| ())?;
+    let summary_windows = state.proxy.summary_windows().await.map_err(|_| ())?;
+    let month_series = state
+        .proxy
+        .dashboard_month_series(&summary_windows)
+        .await
+        .map_err(|_| ())?;
     let tavily_hikari::SummaryWindows {
         today,
         yesterday,
@@ -1089,8 +1095,7 @@ async fn compute_signatures(
         yesterday_start,
         month_start,
         ..
-    } = state.proxy.summary_windows().await.map_err(|_| ())?;
-    let month_series = state.proxy.dashboard_month_series().await.map_err(|_| ())?;
+    } = summary_windows;
     let forward_proxy = state
         .proxy
         .get_forward_proxy_dashboard_summary()
