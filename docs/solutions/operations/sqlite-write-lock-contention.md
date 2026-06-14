@@ -105,6 +105,10 @@ brief contention visible as HTTP 500s or failed background bookkeeping.
 - If a legacy DB is large enough that inline sidecar migration would blow the startup budget, do
   not force that copy in the readiness path. Keep `observability` attached to the core DB for that
   startup/maintenance session, and let offline GC or later explicit migration handle the backlog.
+- That large-legacy compatibility path should not also collapse the SQLite pool to a single
+  connection. Doing both at once makes owner-facing summary flushes and early scheduler enqueues
+  contend for one slot, so `/health` may go green while `/api/summary` still returns transient
+  500s.
 - When both `main.request_logs` and `observability.request_logs` can coexist temporarily, schema
   probes must target the attached schema explicitly. Generic `pragma_table_info('request_logs')`
   lookups can resolve against the wrong DB and trigger duplicate-column repairs.

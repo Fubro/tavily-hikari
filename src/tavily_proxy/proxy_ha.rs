@@ -117,6 +117,7 @@ impl TavilyProxy {
                             &pending.node_id,
                             pending.role,
                             pending.edgeone_origin.as_deref(),
+                            pending.source_settings.as_ref(),
                             pending.message.as_deref(),
                         )
                         .await
@@ -144,12 +145,17 @@ impl TavilyProxy {
         node_id: &str,
         role: HaNodeRole,
         edgeone_origin: Option<&str>,
+        source_settings: Option<&HaSourceSettingsView>,
         message: Option<&str>,
     ) -> Result<(), ProxyError> {
         self.ha_state_coalescer
-            .enqueue_node_state(node_id, role, edgeone_origin, message)
+            .enqueue_node_state(node_id, role, edgeone_origin, source_settings, message)
             .await;
         Ok(())
+    }
+
+    pub async fn get_ha_source_settings(&self) -> Result<Option<HaSourceSettings>, ProxyError> {
+        self.key_store.get_ha_source_settings().await
     }
 
     pub async fn get_persisted_ha_node_role(&self) -> Result<Option<HaNodeRole>, ProxyError> {

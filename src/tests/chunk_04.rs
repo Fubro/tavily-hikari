@@ -576,6 +576,20 @@ async fn large_legacy_single_db_request_logs_stay_in_core_database_for_startup()
         "large legacy databases should keep observability attached to the core file on startup"
     );
 
+    let first_pool_connection = proxy
+        .key_store
+        .pool
+        .acquire()
+        .await
+        .expect("acquire first large-legacy pool connection");
+    let second_pool_connection = tokio::time::timeout(
+        std::time::Duration::from_secs(2),
+        proxy.key_store.pool.acquire(),
+    )
+    .await
+    .expect("large legacy compatibility should keep the default sqlite pool capacity")
+    .expect("acquire second large-legacy pool connection");
+
     let main_request_logs_exists = sqlx::query_scalar::<_, i64>(
         "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'request_logs' LIMIT 1",
     )
@@ -594,6 +608,8 @@ async fn large_legacy_single_db_request_logs_stay_in_core_database_for_startup()
         .expect("count observable request logs");
     assert_eq!(observed_rows, 1);
 
+    drop(second_pool_connection);
+    drop(first_pool_connection);
     drop(proxy);
     let _ = std::fs::remove_file(&db_path);
     let _ = std::fs::remove_file(db_path.with_extension("db-shm"));

@@ -141,6 +141,7 @@ struct PendingHaNodeState {
     node_id: String,
     role: HaNodeRole,
     edgeone_origin: Option<String>,
+    source_settings: Option<HaSourceSettingsView>,
     message: Option<String>,
 }
 
@@ -186,6 +187,7 @@ impl HaStateCoalescer {
         node_id: &str,
         role: HaNodeRole,
         edgeone_origin: Option<&str>,
+        source_settings: Option<&HaSourceSettingsView>,
         message: Option<&str>,
     ) {
         {
@@ -194,6 +196,7 @@ impl HaStateCoalescer {
                 node_id: node_id.to_string(),
                 role,
                 edgeone_origin: edgeone_origin.map(str::to_string),
+                source_settings: source_settings.cloned(),
                 message: message.map(str::to_string),
             });
         }

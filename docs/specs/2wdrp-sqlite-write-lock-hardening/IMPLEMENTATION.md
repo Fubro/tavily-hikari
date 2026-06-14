@@ -116,7 +116,10 @@
   `request_logs` into the sidecar during startup, but large legacy DBs now stay on a temporary
   single-DB compatibility path when the inline copy would exceed the startup budget. In that mode,
   `observability` is attached back to the core file for startup and offline `request_logs_gc_once`,
-  and no sibling sidecar file is created until a later explicit migration path is available.
+  and no sibling sidecar file is created until a later explicit migration path is available. That
+  compatibility path must still keep the normal SQLite pool capacity; collapsing the pool to one
+  connection makes `/api/summary` flushes and early scheduler enqueue paths fight for the same slot
+  and can leave owner-facing reads returning transient 500s after `/health` is already green.
 - Server/admin test helpers now mirror that sidecar layout instead of opening only the core DB
   file. SQLite schema assertions for `request_logs` and the other observability tables now probe
   the attached schema explicitly, which keeps migration and admin-route coverage aligned with the

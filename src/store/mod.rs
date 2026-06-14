@@ -301,19 +301,9 @@ async fn resolve_observability_attach_plan(
     )
     .await
     .map_err(ProxyError::Database)?;
-    let max_connections = if uses_legacy_single_db_observability_compatibility(
-        core_database_path,
-        observability_database_path,
-        target_path.as_deref(),
-    ) {
-        1
-    } else {
-        default_max_connections
-    };
-
     Ok(ObservabilityAttachPlan {
         target_path,
-        max_connections,
+        max_connections: default_max_connections,
     })
 }
 
@@ -396,20 +386,6 @@ pub(crate) fn sqlite_paths_match(lhs: &str, rhs: &str) -> bool {
         (Ok(lhs), Ok(rhs)) => lhs == rhs,
         _ => lhs == rhs,
     }
-}
-
-fn uses_legacy_single_db_observability_compatibility(
-    core_database_path: &str,
-    configured_observability_database_path: &str,
-    attached_database_path: Option<&str>,
-) -> bool {
-    attached_database_path.is_some_and(|attached_database_path| {
-        sqlite_paths_match(core_database_path, attached_database_path)
-            && !sqlite_paths_match(
-                configured_observability_database_path,
-                attached_database_path,
-            )
-    })
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
