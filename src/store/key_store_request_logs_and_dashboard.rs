@@ -380,6 +380,7 @@ impl KeyStore {
 
             let mut state = self.request_stats_coalescer.state.lock().await;
             state.flushing = false;
+            state.flush_deadline = None;
             if let Err(err) = result {
                 for (key, counts) in pending_dashboard_rollups {
                     state.pending_dashboard_rollups.entry(key).or_default().add(counts);
@@ -400,6 +401,7 @@ impl KeyStore {
                 for (key, delta) in pending_request_log_catalog {
                     *state.pending_request_log_catalog.entry(key).or_default() += delta;
                 }
+                RequestStatsCoalescer::mark_flush_deadline_if_pending(&mut state);
                 self.request_stats_coalescer.flushed.notify_waiters();
                 return Err(err);
             }

@@ -157,6 +157,7 @@ struct PendingHaSyncWatermark {
 struct HaStateCoalescerState {
     pending_node_state: Option<PendingHaNodeState>,
     pending_sync_watermarks: HashMap<String, PendingHaSyncWatermark>,
+    flush_deadline: Option<Instant>,
     flushing: bool,
     shutdown: bool,
 }
@@ -182,6 +183,16 @@ impl HaStateCoalescer {
     const MAX_PENDING_KEYS: usize = 100;
     const FLUSH_INTERVAL: Duration = Duration::from_secs(1);
 
+    fn pending_key_count(state: &HaStateCoalescerState) -> usize {
+        usize::from(state.pending_node_state.is_some()) + state.pending_sync_watermarks.len()
+    }
+
+    fn mark_flush_deadline_if_pending(state: &mut HaStateCoalescerState) {
+        if Self::pending_key_count(state) > 0 && state.flush_deadline.is_none() {
+            state.flush_deadline = Some(Instant::now() + Self::FLUSH_INTERVAL);
+        }
+    }
+
     async fn enqueue_node_state(
         &self,
         node_id: &str,
@@ -199,6 +210,7 @@ impl HaStateCoalescer {
                 source_settings: source_settings.cloned(),
                 message: message.map(str::to_string),
             });
+            Self::mark_flush_deadline_if_pending(&mut state);
         }
         self.wake.notify_one();
     }
@@ -222,6 +234,7 @@ impl HaStateCoalescer {
                     detail: detail.map(str::to_string),
                 },
             );
+            Self::mark_flush_deadline_if_pending(&mut state);
         }
         self.wake.notify_one();
     }

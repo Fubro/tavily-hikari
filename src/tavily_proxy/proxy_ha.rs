@@ -4,26 +4,27 @@ impl TavilyProxy {
         let coalescer = self.key_store.request_stats_coalescer.clone();
         tokio::spawn(async move {
             loop {
-                let should_flush_now = {
+                let (should_flush_now, wait_duration) = {
                     let state = coalescer.state.lock().await;
-                    state.shutdown
-                        || !state.pending_dashboard_rollups.is_empty()
-                        || !state.pending_api_key_usage.is_empty()
-                        || !state.pending_auth_token_activity.is_empty()
-                        || !state.pending_account_request_rollups.is_empty()
-                        || !state.pending_request_log_catalog.is_empty()
-                        || state.pending_dashboard_rollups.len()
-                            + state.pending_api_key_usage.len()
-                            + state.pending_auth_token_activity.len()
-                            + state.pending_account_request_rollups.len()
-                            + state.pending_request_log_catalog.len()
-                            >= RequestStatsCoalescer::MAX_PENDING_KEYS
+                    let pending_key_count = RequestStatsCoalescer::pending_key_count(&state);
+                    let should_flush_now = state.shutdown
+                        || pending_key_count >= RequestStatsCoalescer::MAX_PENDING_KEYS
+                        || state
+                            .flush_deadline
+                            .map(|deadline| Instant::now() >= deadline)
+                            .unwrap_or(false);
+                    let wait_duration = state
+                        .flush_deadline
+                        .map(|deadline| deadline.saturating_duration_since(Instant::now()))
+                        .unwrap_or(RequestStatsCoalescer::FLUSH_INTERVAL);
+                    (should_flush_now, wait_duration)
                 };
                 if !should_flush_now {
                     tokio::select! {
                         _ = coalescer.wake.notified() => {}
-                        _ = tokio::time::sleep(RequestStatsCoalescer::FLUSH_INTERVAL) => {}
+                        _ = tokio::time::sleep(wait_duration) => {}
                     }
+                    continue;
                 }
 
                 let shutdown_after_flush = {
@@ -66,17 +67,27 @@ impl TavilyProxy {
         let coalescer = self.ha_state_coalescer.clone();
         tokio::spawn(async move {
             loop {
-                let should_flush_now = {
+                let (should_flush_now, wait_duration) = {
                     let state = coalescer.state.lock().await;
-                    state.shutdown
-                        || state.pending_node_state.is_some()
-                        || state.pending_sync_watermarks.len() >= HaStateCoalescer::MAX_PENDING_KEYS
+                    let pending_key_count = HaStateCoalescer::pending_key_count(&state);
+                    let should_flush_now = state.shutdown
+                        || pending_key_count >= HaStateCoalescer::MAX_PENDING_KEYS
+                        || state
+                            .flush_deadline
+                            .map(|deadline| Instant::now() >= deadline)
+                            .unwrap_or(false);
+                    let wait_duration = state
+                        .flush_deadline
+                        .map(|deadline| deadline.saturating_duration_since(Instant::now()))
+                        .unwrap_or(HaStateCoalescer::FLUSH_INTERVAL);
+                    (should_flush_now, wait_duration)
                 };
                 if !should_flush_now {
                     tokio::select! {
                         _ = coalescer.wake.notified() => {}
-                        _ = tokio::time::sleep(HaStateCoalescer::FLUSH_INTERVAL) => {}
+                        _ = tokio::time::sleep(wait_duration) => {}
                     }
+                    continue;
                 }
 
                 let (pending_node_state, pending_sync_watermarks, shutdown_after_flush) = {
@@ -128,6 +139,7 @@ impl TavilyProxy {
                 {
                     let mut state = coalescer.state.lock().await;
                     state.flushing = false;
+                    state.flush_deadline = None;
                     coalescer.flushed.notify_waiters();
                     if shutdown_after_flush
                         && state.pending_node_state.is_none()

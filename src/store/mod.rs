@@ -1754,6 +1754,7 @@ pub(crate) struct RequestStatsCoalescerState {
     pub(crate) pending_auth_token_activity: HashMap<String, AuthTokenActivityDelta>,
     pub(crate) pending_account_request_rollups: HashMap<(String, i64), i64>,
     pub(crate) pending_request_log_catalog: HashMap<RequestLogCatalogRollupKey, i64>,
+    pub(crate) flush_deadline: Option<Instant>,
     pub(crate) flushing: bool,
     pub(crate) shutdown: bool,
 }
@@ -1778,6 +1779,20 @@ impl Default for RequestStatsCoalescer {
 impl RequestStatsCoalescer {
     pub(crate) const MAX_PENDING_KEYS: usize = 100;
     pub(crate) const FLUSH_INTERVAL: Duration = Duration::from_secs(1);
+
+    pub(crate) fn pending_key_count(state: &RequestStatsCoalescerState) -> usize {
+        state.pending_dashboard_rollups.len()
+            + state.pending_api_key_usage.len()
+            + state.pending_auth_token_activity.len()
+            + state.pending_account_request_rollups.len()
+            + state.pending_request_log_catalog.len()
+    }
+
+    fn mark_flush_deadline_if_pending(state: &mut RequestStatsCoalescerState) {
+        if Self::pending_key_count(state) > 0 && state.flush_deadline.is_none() {
+            state.flush_deadline = Some(Instant::now() + Self::FLUSH_INTERVAL);
+        }
+    }
 
     pub(crate) async fn enqueue_request_log_rollups(
         &self,
@@ -1831,6 +1846,7 @@ impl RequestStatsCoalescer {
                     .entry(request_log_catalog_key)
                     .or_default() += 1;
             }
+            Self::mark_flush_deadline_if_pending(&mut state);
         }
         self.wake.notify_one();
     }
@@ -1849,6 +1865,7 @@ impl RequestStatsCoalescer {
                 request_user_id,
                 created_at,
             );
+            Self::mark_flush_deadline_if_pending(&mut state);
         }
         self.wake.notify_one();
     }
@@ -1891,6 +1908,7 @@ impl RequestStatsCoalescer {
                     .or_default()
                     .local_estimated_credits += credits;
             }
+            Self::mark_flush_deadline_if_pending(&mut state);
         }
         self.wake.notify_one();
     }

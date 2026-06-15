@@ -564,6 +564,75 @@ async fn request_stats_coalescer_flushes_summary_and_key_metrics_on_read() {
 }
 
 #[tokio::test]
+async fn request_stats_coalescer_waits_for_window_before_background_flush() {
+    let db_path = temp_db_path("request-stats-coalescer-windowed-flush");
+    let db_str = db_path.to_string_lossy().to_string();
+    let proxy = TavilyProxy::with_endpoint(
+        vec!["tvly-request-stats-coalescer-window".to_string()],
+        DEFAULT_UPSTREAM,
+        &db_str,
+    )
+    .await
+    .expect("proxy created");
+
+    let key_id = proxy
+        .list_api_key_metrics()
+        .await
+        .expect("list key metrics")
+        .into_iter()
+        .next()
+        .expect("seeded key")
+        .id;
+    let now_ts = Utc::now().timestamp();
+
+    proxy
+        .key_store
+        .enqueue_request_stats_rollup_for_test(Some(&key_id), now_ts, OUTCOME_SUCCESS)
+        .await;
+
+    tokio::time::sleep(Duration::from_millis(100)).await;
+
+    let stored_total: Option<i64> = sqlx::query_scalar(
+        r#"
+        SELECT total_requests
+        FROM api_key_usage_buckets
+        WHERE api_key_id = ?
+        ORDER BY bucket_start DESC
+        LIMIT 1
+        "#,
+    )
+    .bind(&key_id)
+    .fetch_optional(&proxy.key_store.pool)
+    .await
+    .expect("query usage buckets before flush window");
+    assert!(
+        stored_total.is_none(),
+        "background worker should not flush request stats before the coalescing window elapses"
+    );
+
+    tokio::time::sleep(RequestStatsCoalescer::FLUSH_INTERVAL + Duration::from_millis(150)).await;
+
+    let stored_total: Option<i64> = sqlx::query_scalar(
+        r#"
+        SELECT total_requests
+        FROM api_key_usage_buckets
+        WHERE api_key_id = ?
+        ORDER BY bucket_start DESC
+        LIMIT 1
+        "#,
+    )
+    .bind(&key_id)
+    .fetch_optional(&proxy.key_store.pool)
+    .await
+    .expect("query usage buckets after flush window");
+    assert_eq!(stored_total, Some(1));
+
+    let _ = std::fs::remove_file(&db_path);
+    let _ = std::fs::remove_file(db_path.with_extension("db-shm"));
+    let _ = std::fs::remove_file(db_path.with_extension("db-wal"));
+}
+
+#[tokio::test]
 async fn summary_windows_month_bucket_fallback_skips_unaligned_first_local_day_bucket() {
     let db_path = temp_db_path("summary-windows-month-bucket-fallback");
     let db_str = db_path.to_string_lossy().to_string();
