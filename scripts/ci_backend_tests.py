@@ -2,6 +2,7 @@
 
 import argparse
 import concurrent.futures
+import hashlib
 import json
 import os
 import shutil
@@ -101,6 +102,22 @@ def parse_requested_targets(cargo_args):
             continue
         idx += 1
     return expected
+
+
+def artifact_target_dir_name(target_id):
+    safe = []
+    for char in target_id:
+        if char.isalnum() or char in "._-":
+            safe.append(char)
+        else:
+            safe.append("-")
+    slug = "".join(safe).strip("._-")
+    if not slug:
+        slug = "target"
+    if slug == target_id:
+        return slug
+    digest = hashlib.sha1(target_id.encode("utf-8")).hexdigest()[:8]
+    return f"{slug}-{digest}"
 
 
 def target_matches_requested(target_name, target_kind, requested):
@@ -383,7 +400,7 @@ def build_artifacts(output_dir):
     for target_id, executable_entries in built_executables_by_target.items():
         if not executable_entries:
             raise SystemExit(f"no test executables produced for coverage target {target_id}")
-        target_dir = output_dir / target_id
+        target_dir = output_dir / artifact_target_dir_name(target_id)
         target_dir.mkdir(parents=True, exist_ok=True)
         metadata = {}
         for executable in executable_entries:
@@ -401,9 +418,13 @@ def build_artifacts(output_dir):
 
 
 def load_prebuilt_executables(artifact_root, coverage_target):
-    target_dir = Path(artifact_root) / coverage_target
+    target_dir = Path(artifact_root) / artifact_target_dir_name(coverage_target)
     if not target_dir.exists():
-        raise SystemExit(f"missing prebuilt executables for coverage target {coverage_target}")
+        legacy_dir = Path(artifact_root) / coverage_target
+        if legacy_dir.exists():
+            target_dir = legacy_dir
+        else:
+            raise SystemExit(f"missing prebuilt executables for coverage target {coverage_target}")
 
     metadata = {}
     metadata_path = target_dir / "tests.json"
