@@ -411,6 +411,12 @@ def run_all_tests_with_env(executable_path, test_threads, extra_env=None):
     subprocess.run(cmd, cwd=ROOT, check=True, env=extra_env)
 
 
+def ensure_executable(path):
+    path = Path(path)
+    path.chmod(path.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+    return path
+
+
 def build_artifacts(output_dir):
     targets, _ = load_manifest()
     output_dir = Path(output_dir)
@@ -465,9 +471,7 @@ def build_artifacts(output_dir):
             source = Path(executable["path"])
             destination = target_dir / source.name
             shutil.copy2(source, destination)
-            destination.chmod(
-                destination.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH
-            )
+            ensure_executable(destination)
             executable_tests = executable.get("tests")
             if executable_tests is not None:
                 metadata[destination.name] = executable_tests
@@ -481,9 +485,7 @@ def build_artifacts(output_dir):
             destination = target_dir / source.name
             if not destination.exists():
                 shutil.copy2(source, destination)
-                destination.chmod(
-                    destination.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH
-                )
+                ensure_executable(destination)
             support_binary_metadata[env_name] = destination.name
         with (target_dir / "tests.json").open("w", encoding="utf-8") as fh:
             json.dump(metadata, fh, sort_keys=True)
@@ -525,10 +527,11 @@ def load_prebuilt_executables(artifact_root, coverage_target):
 
     normalized = []
     for path in executables:
-        path.chmod(path.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+        ensure_executable(path)
         normalized.append({"name": path.name, "path": str(path), "tests": metadata.get(path.name)})
     resolved_support_binaries = {
-        env_name: str(target_dir / file_name) for env_name, file_name in support_binaries.items()
+        env_name: str(ensure_executable(target_dir / file_name))
+        for env_name, file_name in support_binaries.items()
     }
     return normalized, resolved_support_binaries
 
