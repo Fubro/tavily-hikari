@@ -742,7 +742,7 @@ impl KeyStore {
         note: Option<&str>,
         preferred_token_id: Option<&str>,
     ) -> Result<AuthTokenSecret, ProxyError> {
-        let retry_deadline = Instant::now() + Duration::from_secs(5);
+        let retry_deadline = self.backend_time.deadline_after(Duration::from_secs(5));
         let mut retry_attempt = 0usize;
         let preferred_token_id = preferred_token_id
             .map(str::trim)
@@ -755,7 +755,25 @@ impl KeyStore {
         {
             for _ in 0..4 {
                 let now = self.backend_time.now_ts();
-                let mut tx = self.pool.begin().await?;
+                let mut tx = match self.pool.begin().await {
+                    Ok(tx) => tx,
+                    Err(err) => {
+                        let err = ProxyError::Database(err);
+                        if sleep_before_sqlite_transient_write_retry(
+                            &self.backend_time,
+                            "ensure user token binding preferred begin",
+                            retry_attempt,
+                            retry_deadline,
+                            &err,
+                        )
+                        .await
+                        {
+                            retry_attempt += 1;
+                            continue;
+                        }
+                        return Err(err);
+                    }
+                };
 
                 let owner = sqlx::query_as::<_, (String,)>(
                     r#"SELECT user_id

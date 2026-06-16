@@ -9,8 +9,9 @@ pub(crate) async fn rebase_current_month_business_quota_with_pool<F>(
 where
     F: FnOnce() -> chrono::DateTime<Utc>,
 {
+    let now = now();
     let mut conn = begin_immediate_sqlite_connection_for_monthly_quota_rebase(pool).await?;
-    let windows = BillingLedgerWindows::from_now(now());
+    let windows = monthly_quota_rebase_windows(now);
     let previous_rebase_month_start = get_meta_i64_executor(&mut *conn, meta_key).await?;
 
     let result = rebase_current_month_business_quota_locked(
@@ -34,8 +35,9 @@ pub(crate) async fn maybe_rebase_current_month_business_quota_with_pool<F>(
 where
     F: FnOnce() -> chrono::DateTime<Utc>,
 {
+    let now = now();
     let mut conn = begin_immediate_sqlite_connection_for_monthly_quota_rebase(pool).await?;
-    let windows = BillingLedgerWindows::from_now(now());
+    let windows = monthly_quota_rebase_windows(now);
     let previous_rebase_month_start = get_meta_i64_executor(&mut *conn, meta_key).await?;
     if previous_rebase_month_start == Some(windows.month_window_start) {
         sqlx::query("COMMIT").execute(&mut *conn).await?;
@@ -175,4 +177,9 @@ async fn finish_monthly_quota_rebase_transaction(
     }
 
     Ok(report)
+}
+
+fn monthly_quota_rebase_windows(now: chrono::DateTime<Utc>) -> BillingLedgerWindows {
+    let locked_now = BackendTime::system().now_utc();
+    BillingLedgerWindows::from_now(if locked_now > now { locked_now } else { now })
 }
