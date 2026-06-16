@@ -65,8 +65,8 @@ afterEach(() => {
   document.body.innerHTML = ''
 })
 
-function getPortalText(): string {
-  return document.body.textContent ?? ''
+function getPortalText(portalRoot: HTMLElement): string {
+  return portalRoot.textContent ?? ''
 }
 
 function createDeferred<T>() {
@@ -77,6 +77,18 @@ function createDeferred<T>() {
     reject = rej
   })
   return { promise, resolve, reject }
+}
+
+function createDialogHarness(): {
+  container: HTMLDivElement
+  portalRoot: HTMLDivElement
+  root: ReturnType<typeof createRoot>
+} {
+  const container = document.createElement('div')
+  const portalRoot = document.createElement('div')
+  portalRoot.setAttribute('data-test-portal-root', 'ha-source-settings')
+  document.body.append(container, portalRoot)
+  return { container, portalRoot, root: createRoot(container) }
 }
 
 describe('HaSourceSettingsDialog interactions', () => {
@@ -96,9 +108,7 @@ describe('HaSourceSettingsDialog interactions', () => {
       },
     }
 
-    const container = document.createElement('div')
-    document.body.appendChild(container)
-    const root = createRoot(container)
+    const { portalRoot, root } = createDialogHarness()
 
     await act(async () => {
       root.render(
@@ -108,6 +118,7 @@ describe('HaSourceSettingsDialog interactions', () => {
           strings={strings}
           onOpenChange={() => undefined}
           onSaved={() => undefined}
+          dialogPortalContainer={portalRoot}
           submitSourceSettings={async () => {
             submitCalled = true
             return baseStatus
@@ -117,7 +128,7 @@ describe('HaSourceSettingsDialog interactions', () => {
     })
     await flushEffects()
 
-    const saveButton = Array.from(document.querySelectorAll<HTMLButtonElement>('button')).find(
+    const saveButton = Array.from(portalRoot.querySelectorAll<HTMLButtonElement>('button')).find(
       (button) => button.textContent?.trim() === strings.sourceSave,
     )
     expect(saveButton).not.toBeNull()
@@ -127,13 +138,13 @@ describe('HaSourceSettingsDialog interactions', () => {
     })
     await flushEffects()
 
-    const hostInput = document.querySelector<HTMLInputElement>('input[placeholder="203.0.113.9"]')
+    const hostInput = portalRoot.querySelector<HTMLInputElement>('input[placeholder="203.0.113.9"]')
     expect(hostInput).not.toBeNull()
     expect(document.activeElement).toBe(hostInput)
     expect(hostInput?.getAttribute('aria-describedby')).toBe('ha-source-direct-host-error')
-    expect(getPortalText()).toContain(strings.sourceInvalidDirectHost)
-    expect(getPortalText()).not.toContain(strings.sourceSaveFailedTitle)
-    expect(document.body.querySelector('.alert.alert-error')).toBeNull()
+    expect(getPortalText(portalRoot)).toContain(strings.sourceInvalidDirectHost)
+    expect(getPortalText(portalRoot)).not.toContain(strings.sourceSaveFailedTitle)
+    expect(portalRoot.querySelector('.alert.alert-error')).toBeNull()
     expect(submitCalled).toBe(false)
 
     await act(async () => root.unmount())
@@ -148,9 +159,7 @@ describe('HaSourceSettingsDialog interactions', () => {
       throw error
     }
 
-    const container = document.createElement('div')
-    document.body.appendChild(container)
-    const root = createRoot(container)
+    const { portalRoot, root } = createDialogHarness()
 
     await act(async () => {
       root.render(
@@ -160,13 +169,14 @@ describe('HaSourceSettingsDialog interactions', () => {
           strings={strings}
           onOpenChange={() => undefined}
           onSaved={() => undefined}
+          dialogPortalContainer={portalRoot}
           submitSourceSettings={submitSourceSettings}
         />,
       )
     })
     await flushEffects()
 
-    const applyButton = Array.from(document.querySelectorAll<HTMLButtonElement>('button')).find(
+    const applyButton = Array.from(portalRoot.querySelectorAll<HTMLButtonElement>('button')).find(
       (button) => button.textContent?.trim() === strings.sourceSaveAndApply,
     )
     expect(applyButton).not.toBeNull()
@@ -176,7 +186,7 @@ describe('HaSourceSettingsDialog interactions', () => {
     })
     await flushEffects()
 
-    const alert = document.body.querySelector('.alert.alert-error')
+    const alert = portalRoot.querySelector('.alert.alert-error')
     expect(alert).not.toBeNull()
     expect(document.activeElement).toBe(alert)
     expect(alert?.textContent).toContain(strings.sourceApplyFailedTitle)
@@ -210,9 +220,7 @@ describe('HaSourceSettingsDialog interactions', () => {
       throw error
     }
 
-    const container = document.createElement('div')
-    document.body.appendChild(container)
-    const root = createRoot(container)
+    const { portalRoot, root } = createDialogHarness()
 
     await act(async () => {
       root.render(
@@ -242,13 +250,14 @@ describe('HaSourceSettingsDialog interactions', () => {
           strings={strings}
           onOpenChange={() => undefined}
           onSaved={() => undefined}
+          dialogPortalContainer={portalRoot}
           submitSourceSettings={submitSourceSettings}
         />,
       )
     })
     await flushEffects()
 
-    const saveButton = Array.from(document.querySelectorAll<HTMLButtonElement>('button')).find(
+    const saveButton = Array.from(portalRoot.querySelectorAll<HTMLButtonElement>('button')).find(
       (button) => button.textContent?.trim() === strings.sourceSave,
     )
     expect(saveButton).not.toBeNull()
@@ -259,10 +268,10 @@ describe('HaSourceSettingsDialog interactions', () => {
     await flushEffects()
 
     expect(callCount).toBe(1)
-    expect(getPortalText()).toContain(strings.sourceSaveFailedTitle)
-    expect(getPortalText()).toContain(strings.sourceSubmitFailedOriginGroupDescription)
+    expect(getPortalText(portalRoot)).toContain(strings.sourceSaveFailedTitle)
+    expect(getPortalText(portalRoot)).toContain(strings.sourceSubmitFailedOriginGroupDescription)
 
-    const directSourceToggle = Array.from(document.querySelectorAll<HTMLButtonElement>('button')).find(
+    const directSourceToggle = Array.from(portalRoot.querySelectorAll<HTMLButtonElement>('button')).find(
       (button) => button.textContent?.trim() === strings.sourceKindDirect,
     )
     expect(directSourceToggle).not.toBeNull()
@@ -272,7 +281,7 @@ describe('HaSourceSettingsDialog interactions', () => {
     })
     await flushEffects()
 
-    expect(getPortalText()).not.toContain(strings.sourceSaveFailedTitle)
+    expect(getPortalText(portalRoot)).not.toContain(strings.sourceSaveFailedTitle)
 
     await act(async () => root.unmount())
   })
@@ -281,9 +290,7 @@ describe('HaSourceSettingsDialog interactions', () => {
     const deferred = createDeferred<HaStatus>()
     const submitSourceSettings = async (): Promise<HaStatus> => deferred.promise
 
-    const container = document.createElement('div')
-    document.body.appendChild(container)
-    const root = createRoot(container)
+    const { portalRoot, root } = createDialogHarness()
 
     await act(async () => {
       root.render(
@@ -293,13 +300,14 @@ describe('HaSourceSettingsDialog interactions', () => {
           strings={strings}
           onOpenChange={() => undefined}
           onSaved={() => undefined}
+          dialogPortalContainer={portalRoot}
           submitSourceSettings={submitSourceSettings}
         />,
       )
     })
     await flushEffects()
 
-    const applyButton = Array.from(document.querySelectorAll<HTMLButtonElement>('button')).find(
+    const applyButton = Array.from(portalRoot.querySelectorAll<HTMLButtonElement>('button')).find(
       (button) => button.textContent?.trim() === strings.sourceSaveAndApply,
     )
     expect(applyButton).not.toBeNull()
@@ -309,15 +317,14 @@ describe('HaSourceSettingsDialog interactions', () => {
     })
     await flushEffects()
 
-    const directSourceToggle = Array.from(document.querySelectorAll<HTMLButtonElement>('button')).find(
+    const directSourceToggle = Array.from(portalRoot.querySelectorAll<HTMLButtonElement>('button')).find(
       (button) => button.textContent?.trim() === strings.sourceKindDirect,
     )
     expect(directSourceToggle?.disabled).toBe(true)
 
-    const schemeTrigger = Array.from(document.querySelectorAll<HTMLElement>('[role="combobox"]')).find(
-      (trigger) => trigger.textContent?.includes('HTTPS'),
-    )
-    expect(schemeTrigger?.getAttribute('data-disabled')).toBe('')
+    const schemeTrigger = portalRoot.querySelector<HTMLButtonElement>('button[role="combobox"]')
+    expect(schemeTrigger).not.toBeNull()
+    expect(schemeTrigger?.disabled).toBe(true)
     expect(applyButton?.disabled).toBe(true)
 
     await act(async () => {
@@ -337,9 +344,7 @@ describe('HaSourceSettingsDialog interactions', () => {
       return deferred.promise
     }
 
-    const container = document.createElement('div')
-    document.body.appendChild(container)
-    const root = createRoot(container)
+    const { portalRoot, root } = createDialogHarness()
 
     await act(async () => {
       root.render(
@@ -369,13 +374,14 @@ describe('HaSourceSettingsDialog interactions', () => {
           strings={strings}
           onOpenChange={() => undefined}
           onSaved={() => undefined}
+          dialogPortalContainer={portalRoot}
           submitSourceSettings={submitSourceSettings as never}
         />,
       )
     })
     await flushEffects()
 
-    const saveButton = Array.from(document.querySelectorAll<HTMLButtonElement>('button')).find(
+    const saveButton = Array.from(portalRoot.querySelectorAll<HTMLButtonElement>('button')).find(
       (button) => button.textContent?.trim() === strings.sourceSave,
     )
     expect(saveButton).not.toBeNull()
@@ -395,7 +401,7 @@ describe('HaSourceSettingsDialog interactions', () => {
     })
     await flushEffects()
 
-    expect(getPortalText()).toContain(strings.sourceSubmitFailedOriginGroupDescription)
+    expect(getPortalText(portalRoot)).toContain(strings.sourceSubmitFailedOriginGroupDescription)
 
     await act(async () => root.unmount())
   })

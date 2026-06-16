@@ -90,6 +90,7 @@ interface HaSourceSettingsDialogProps {
   onOpenChange: (open: boolean) => void
   onSaved: (status: HaStatus) => void
   submitSourceSettings?: typeof updateAdminHaSourceSettings
+  dialogPortalContainer?: HTMLElement | null
 }
 
 function focusInput(ref: React.RefObject<HTMLInputElement | null>): void {
@@ -103,6 +104,7 @@ export default function HaSourceSettingsDialog({
   onOpenChange,
   onSaved,
   submitSourceSettings = updateAdminHaSourceSettings,
+  dialogPortalContainer,
 }: HaSourceSettingsDialogProps): JSX.Element {
   const submitFailureRef = useRef<HTMLDivElement | null>(null)
   const directHostInputRef = useRef<HTMLInputElement | null>(null)
@@ -239,7 +241,7 @@ export default function HaSourceSettingsDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-2xl">
+      <DialogContent className="max-w-2xl" portalContainer={dialogPortalContainer}>
         <DialogHeader>
           <DialogTitle>{strings.sourceDialogTitle}</DialogTitle>
           <DialogDescription>{strings.sourceDialogDescription}</DialogDescription>
