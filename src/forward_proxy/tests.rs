@@ -171,6 +171,7 @@ rule-providers:
         let key_store = crate::store::KeyStore {
             database_path: db_path.to_string_lossy().into_owned(),
             observability_database_path: None,
+            _observability_lock: None,
             pool: pool.clone(),
             backend_time: crate::BackendTime::system(),
             token_binding_cache: tokio::sync::RwLock::new(std::collections::HashMap::new()),

@@ -2364,6 +2364,7 @@ async fn request_kind_database_migration_retries_after_transient_write_lock() {
     let store = KeyStore {
         database_path: db_path.to_string_lossy().into_owned(),
         observability_database_path: sqlite_test_layout(&db_str).observability_database_path,
+        _observability_lock: None,
         pool,
         backend_time: BackendTime::system(),
         token_binding_cache: RwLock::new(std::collections::HashMap::new()),

@@ -5,6 +5,78 @@ use crate::*;
 use sqlx::Connection;
 use sqlx::Row;
 use sqlx::SqliteConnection;
+use std::fs::{File, OpenOptions};
+use std::os::fd::AsRawFd;
+
+pub(crate) struct ObservabilityOfflineGuard {
+    _lock_file: File,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ObservabilityOfflineProbe {
+    pub sibling_lock_path: String,
+    pub service_lock_held_exclusively: bool,
+    pub sqlite_write_probe_ok: bool,
+}
+
+pub(crate) fn sqlite_lock_sidecar_path(database_path: &str) -> String {
+    sqlite_sidecar_path(database_path, "observability-migrate.lock")
+}
+
+fn flock_nonblocking(file: &File, operation: libc::c_int) -> std::io::Result<()> {
+    let rc = unsafe { libc::flock(file.as_raw_fd(), operation | libc::LOCK_NB) };
+    if rc == 0 {
+        Ok(())
+    } else {
+        Err(std::io::Error::last_os_error())
+    }
+}
+
+fn open_observability_lock_file(lock_path: &str, create_if_missing: bool) -> std::io::Result<File> {
+    let mut options = OpenOptions::new();
+    options.read(true).write(true);
+    if create_if_missing {
+        options.create(true).truncate(false);
+    }
+    options.open(lock_path)
+}
+
+pub(crate) fn acquire_observability_service_shared_lock(
+    database_path: &str,
+) -> Result<File, ProxyError> {
+    let lock_path = sqlite_lock_sidecar_path(database_path);
+    let file = open_observability_lock_file(&lock_path, true).map_err(|err| {
+        ProxyError::Other(format!(
+            "failed to open observability service lock file {lock_path}: {err}"
+        ))
+    })?;
+    flock_nonblocking(&file, libc::LOCK_SH).map_err(|err| {
+        ProxyError::Other(format!(
+            "failed to acquire shared observability service lock {lock_path}: {err}"
+        ))
+    })?;
+    Ok(file)
+}
+
+pub(crate) fn acquire_observability_offline_guard(
+    database_path: &str,
+) -> Result<ObservabilityOfflineGuard, ProxyError> {
+    let lock_path = sqlite_lock_sidecar_path(database_path);
+    let lock_file = open_observability_lock_file(&lock_path, true).map_err(|err| {
+        ProxyError::Other(format!(
+            "failed to open observability offline lock file {lock_path}: {err}"
+        ))
+    })?;
+    flock_nonblocking(&lock_file, libc::LOCK_EX).map_err(|err| {
+        ProxyError::Other(format!(
+            "offline migration requires the service to be stopped; could not acquire exclusive observability service lock {lock_path}: {err}"
+        ))
+    })?;
+    Ok(ObservabilityOfflineGuard {
+        _lock_file: lock_file,
+    })
+}
 
 pub(crate) fn is_transient_sqlite_write_error(err: &ProxyError) -> bool {
     let ProxyError::Database(db_err) = err else {
@@ -309,6 +381,42 @@ async fn resolve_observability_attach_plan(
     })
 }
 
+pub(crate) async fn open_sqlite_pool_forced_observability(
+    core_database_path: &str,
+    observability_database_path: Option<&str>,
+    create_if_missing: bool,
+    read_only: bool,
+    max_connections: u32,
+) -> Result<SqlitePool, ProxyError> {
+    let mut options = SqliteConnectOptions::new()
+        .filename(core_database_path)
+        .create_if_missing(create_if_missing)
+        .read_only(read_only)
+        .busy_timeout(Duration::from_secs(5));
+    if !read_only {
+        options = options.journal_mode(SqliteJournalMode::Wal);
+    }
+
+    let mut pool_options = SqlitePoolOptions::new()
+        .min_connections(1)
+        .max_connections(max_connections);
+    if let Some(observability_database_path) = observability_database_path {
+        let observability_database_path = observability_database_path.to_string();
+        pool_options = pool_options.after_connect(move |conn, _meta| {
+            let observability_database_path = observability_database_path.clone();
+            Box::pin(async move {
+                attach_observability_database(conn, &observability_database_path).await?;
+                Ok(())
+            })
+        });
+    }
+
+    pool_options
+        .connect_with(options)
+        .await
+        .map_err(ProxyError::Database)
+}
+
 async fn select_observability_attach_path(
     conn: &mut sqlx::SqliteConnection,
     core_database_path: &str,
@@ -316,19 +424,36 @@ async fn select_observability_attach_path(
     create_if_missing: bool,
     read_only: bool,
 ) -> Result<Option<String>, sqlx::Error> {
-    let sidecar_exists = std::path::Path::new(observability_database_path).exists();
     let legacy_request_logs_exists = connection_main_table_exists(conn, "request_logs").await?;
+    Ok(planned_observability_attach_path(
+        core_database_path,
+        Some(observability_database_path),
+        legacy_request_logs_exists,
+        create_if_missing,
+        read_only,
+    ))
+}
+
+pub(crate) fn planned_observability_attach_path(
+    core_database_path: &str,
+    observability_database_path: Option<&str>,
+    legacy_request_logs_exists: bool,
+    create_if_missing: bool,
+    read_only: bool,
+) -> Option<String> {
+    let observability_database_path = observability_database_path?;
+    let sidecar_exists = std::path::Path::new(observability_database_path).exists();
     if legacy_request_logs_exists
         && (read_only || !legacy_request_logs_inline_sidecar_migration_allowed(core_database_path))
     {
-        return Ok(Some(core_database_path.to_string()));
+        return Some(core_database_path.to_string());
     }
 
     if !read_only || create_if_missing || sidecar_exists {
-        return Ok(Some(observability_database_path.to_string()));
+        return Some(observability_database_path.to_string());
     }
 
-    Ok(None)
+    None
 }
 
 async fn connection_main_table_exists(
@@ -354,6 +479,86 @@ fn legacy_request_logs_inline_sidecar_migration_allowed(database_path: &str) -> 
             false
         }
     }
+}
+
+pub(crate) fn core_database_file_size(database_path: &str) -> Result<u64, ProxyError> {
+    std::fs::metadata(database_path)
+        .map(|metadata| metadata.len())
+        .map_err(|err| {
+            ProxyError::Other(format!(
+                "failed to stat core database {database_path}: {err}"
+            ))
+        })
+}
+
+pub(crate) fn available_disk_bytes_for_path(path: &str) -> Result<u64, ProxyError> {
+    let output = std::process::Command::new("df")
+        .arg("-k")
+        .arg(path)
+        .output()
+        .map_err(|err| ProxyError::Other(format!("failed to execute df for {path}: {err}")))?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(ProxyError::Other(format!(
+            "df -k {path} failed with status {}: {}",
+            output.status,
+            stderr.trim()
+        )));
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let line = stdout
+        .lines()
+        .rev()
+        .find(|line| !line.trim().is_empty())
+        .ok_or_else(|| ProxyError::Other(format!("df output for {path} was empty")))?;
+    let available_kib = line
+        .split_whitespace()
+        .nth(3)
+        .ok_or_else(|| ProxyError::Other(format!("unable to parse df output for {path}: {line}")))?
+        .parse::<u64>()
+        .map_err(|err| {
+            ProxyError::Other(format!(
+                "unable to parse df available bytes for {path}: {err}"
+            ))
+        })?;
+    Ok(available_kib.saturating_mul(1024))
+}
+
+pub(crate) async fn probe_observability_offline_state(
+    database_path: &str,
+) -> Result<ObservabilityOfflineProbe, ProxyError> {
+    let sibling_lock_path = sqlite_lock_sidecar_path(database_path);
+    let service_lock_held_exclusively = match open_observability_lock_file(
+        &sibling_lock_path,
+        false,
+    ) {
+        Ok(lock_file) => match flock_nonblocking(&lock_file, libc::LOCK_EX) {
+            Ok(()) => true,
+            Err(err) if err.kind() == std::io::ErrorKind::WouldBlock => false,
+            Err(err) => {
+                return Err(ProxyError::Other(format!(
+                    "failed to probe observability offline lock file {sibling_lock_path}: {err}"
+                )));
+            }
+        },
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => true,
+        Err(err) => {
+            return Err(ProxyError::Other(format!(
+                "failed to open observability offline probe lock file {sibling_lock_path}: {err}"
+            )));
+        }
+    };
+    let sqlite_write_probe_ok = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(database_path)
+        .is_ok();
+    Ok(ObservabilityOfflineProbe {
+        sibling_lock_path,
+        service_lock_held_exclusively,
+        sqlite_write_probe_ok,
+    })
 }
 
 async fn attach_observability_database(
@@ -2005,6 +2210,7 @@ impl RequestStatsCoalescer {
 pub(crate) struct KeyStore {
     pub(crate) database_path: String,
     pub(crate) observability_database_path: Option<String>,
+    pub(crate) _observability_lock: Option<File>,
     pub(crate) pool: SqlitePool,
     pub(crate) backend_time: BackendTime,
     pub(crate) token_binding_cache: RwLock<HashMap<String, TokenBindingCacheEntry>>,
@@ -2023,6 +2229,7 @@ pub(crate) struct KeyStore {
 }
 
 include!("key_store_bootstrap.rs");
+include!("key_store_observability_sidecar.rs");
 include!("key_store_request_logs_gc.rs");
 include!("key_store_migrations_a.rs");
 include!("key_store_migrations_b.rs");

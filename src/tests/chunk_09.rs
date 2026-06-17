@@ -78,6 +78,7 @@ async fn quota_subject_lock_retries_transient_sqlite_write_lock() {
     let store = KeyStore {
         database_path: db_path.to_string_lossy().into_owned(),
         observability_database_path: None,
+        _observability_lock: None,
         pool,
         backend_time: BackendTime::system(),
         token_binding_cache: RwLock::new(std::collections::HashMap::new()),

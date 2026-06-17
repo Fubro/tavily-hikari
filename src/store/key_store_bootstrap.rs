@@ -500,103 +500,6 @@ impl KeyStore {
         Ok(())
     }
 
-    async fn rebuild_request_log_soft_reference_tables_if_needed(
-        &self,
-    ) -> Result<(), ProxyError> {
-        if self
-            .table_has_foreign_key_to("auth_token_logs", "request_logs")
-            .await?
-        {
-            self.rebuild_auth_token_logs_table(
-                AuthTokenLogsRebuildMode::DropLegacyRequestKindColumns,
-            )
-            .await?;
-            self.ensure_auth_token_logs_indexes().await?;
-        }
-        if self
-            .table_has_foreign_key_to("billing_ledger", "request_logs")
-            .await?
-        {
-            self.rebuild_billing_ledger_without_request_log_foreign_key()
-                .await?;
-        }
-        if self
-            .table_has_foreign_key_to("api_key_maintenance_records", "request_logs")
-            .await?
-        {
-            self.rebuild_api_key_maintenance_records_without_request_log_foreign_key()
-                .await?;
-        }
-        if self
-            .table_has_foreign_key_to("api_key_transient_backoffs", "request_logs")
-            .await?
-        {
-            self.rebuild_api_key_transient_backoffs_without_request_log_foreign_key()
-                .await?;
-        }
-        Ok(())
-    }
-
-    async fn migrate_legacy_observability_tables_to_sidecar(&self) -> Result<(), ProxyError> {
-        let Some(observability_database_path) = self.observability_database_path.as_deref() else {
-            return Ok(());
-        };
-        if sqlite_paths_match(&self.database_path, observability_database_path) {
-            return Ok(());
-        }
-
-        let legacy_request_logs = self.main_table_exists("request_logs").await?;
-        let legacy_api_key_usage_buckets = self.main_table_exists("api_key_usage_buckets").await?;
-        let legacy_dashboard_rollups = self
-            .main_table_exists("dashboard_request_rollup_buckets")
-            .await?;
-        let legacy_catalog_rollups = self
-            .main_table_exists("request_log_catalog_rollups")
-            .await?;
-
-        if legacy_request_logs {
-            self.rebuild_request_log_soft_reference_tables_if_needed()
-                .await?;
-            self.copy_legacy_request_logs_into_observability().await?;
-            let mut conn = self.pool.acquire().await?;
-            self.ensure_request_logs_rebuild_references_valid(
-                &mut conn,
-                "request_logs schema migration produced invalid preserved references",
-            )
-            .await?;
-            drop(conn);
-            sqlx::query("DROP TABLE request_logs")
-                .execute(&self.pool)
-                .await?;
-        }
-
-        if legacy_api_key_usage_buckets {
-            sqlx::query("DROP TABLE api_key_usage_buckets")
-                .execute(&self.pool)
-                .await?;
-            self.set_meta_i64(META_KEY_API_KEY_USAGE_BUCKETS_V1_DONE, 0)
-                .await?;
-            self.set_meta_i64(META_KEY_API_KEY_USAGE_BUCKETS_REQUEST_VALUE_V2_DONE, 0)
-                .await?;
-        }
-        if legacy_dashboard_rollups {
-            sqlx::query("DROP TABLE dashboard_request_rollup_buckets")
-                .execute(&self.pool)
-                .await?;
-            self.set_meta_i64(META_KEY_DASHBOARD_REQUEST_ROLLUP_BUCKETS_V1_DONE, 0)
-                .await?;
-        }
-        if legacy_catalog_rollups {
-            sqlx::query("DROP TABLE request_log_catalog_rollups")
-                .execute(&self.pool)
-                .await?;
-            self.set_meta_i64(META_KEY_REQUEST_LOG_CATALOG_ROLLUP_V1_DONE, 0)
-                .await?;
-        }
-
-        Ok(())
-    }
-
     fn uses_legacy_single_db_observability_compatibility(&self) -> bool {
         let Some(observability_database_path) = self.observability_database_path.as_deref() else {
             return false;
@@ -638,6 +541,8 @@ impl KeyStore {
         #[cfg(test)]
         let _schema_init_guard = Self::acquire_test_schema_init_guard().await;
         let layout = SqliteDatabaseLayout::from_database_path(database_path);
+        let observability_lock =
+            acquire_observability_service_shared_lock(&layout.core_database_path)?;
         let pool = open_sqlite_pool_with_observability(
             &layout.core_database_path,
             layout.observability_database_path.as_deref(),
@@ -658,6 +563,7 @@ impl KeyStore {
         let store = Self {
             database_path: layout.core_database_path.clone(),
             observability_database_path,
+            _observability_lock: Some(observability_lock),
             pool,
             backend_time,
             token_binding_cache: RwLock::new(HashMap::new()),
@@ -688,6 +594,8 @@ impl KeyStore {
         #[cfg(test)]
         let _schema_init_guard = Self::acquire_test_schema_init_guard().await;
         let layout = SqliteDatabaseLayout::from_database_path(database_path);
+        let observability_lock =
+            acquire_observability_service_shared_lock(&layout.core_database_path)?;
         let pool = open_sqlite_pool_with_observability(
             &layout.core_database_path,
             layout.observability_database_path.as_deref(),
@@ -708,6 +616,7 @@ impl KeyStore {
         let store = Self {
             database_path: layout.core_database_path.clone(),
             observability_database_path,
+            _observability_lock: Some(observability_lock),
             pool,
             backend_time,
             token_binding_cache: RwLock::new(HashMap::new()),

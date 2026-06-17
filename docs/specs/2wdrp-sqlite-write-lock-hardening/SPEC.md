@@ -4,7 +4,7 @@
 
 - Lifecycle: active
 - Created: 2026-05-07
-- Last: 2026-06-11
+- Last: 2026-06-17
 
 ## Background
 
@@ -136,9 +136,31 @@ source when a usable persisted runtime already exists.
   migration when that copy would exceed the startup budget. In that case, observability must remain
   attached to the core DB for startup and offline `request_logs_gc_once`, while smaller legacy DBs
   still migrate into the sibling sidecar automatically.
+- Large legacy single-DB samples must now support an explicit offline cutover command:
+  `observability_sidecar_migrate --db-path <path> [--batch-size 5000] [--dry-run] [--json]`.
+  The command must require operators to stop the service first, must force the sibling sidecar
+  attach path instead of reusing the large-legacy startup fallback, and must copy only
+  `request_logs` into the sidecar while rebuilding or self-healing the derived observability tables
+  in the new layout.
+- The explicit sidecar migration contract must be resumable and idempotent. Re-running the command
+  after a partial copy must preserve existing `observability.request_logs` rows by `id`, continue
+  copying any missing `main.request_logs` rows in bounded batches, keep soft `request_log_id`
+  references valid, then delete the legacy `main.request_logs`. For each legacy rollup/bucket table
+  drop, the corresponding rebuild markers must be reset in the same transactional cutover step so
+  an interruption cannot leave sidecar rebuild metadata falsely marked complete after the legacy
+  table is already gone.
 - Sidecar-aware schema self-heal paths must probe the attached `observability` schema explicitly.
   When both `main.request_logs` and `observability.request_logs` exist during migration or repair,
   column-existence checks must not accidentally read the wrong schema and issue duplicate `ALTER TABLE` statements.
+- Shared-testbox validation for this path must remain isolated under `/srv/codex/**`, use a unique
+  Compose project and run directory, avoid global Docker cleanup, and only remove this owner’s
+  inactive workspaces or runs after confirming they are not referenced by any live
+  `com.docker.compose.project`.
+- The production cutover procedure for the 101 deployment is a short maintenance-window, local-host
+  migration. Operators must stop the service, export a pre-cutover cold backup of the core DB to
+  codex-testbox as the rollback anchor, run the offline migration on 101 itself, restart and
+  validate, and if anything fails restore the pre-cutover core DB and delete the sibling sidecar
+  before bringing the service back.
 
 ## Acceptance
 
@@ -181,8 +203,37 @@ source when a usable persisted runtime already exists.
 - A large legacy SQLite DB whose `request_logs` inline sidecar migration would exceed the startup
   budget still starts successfully, keeps `observability.request_logs` attached to the core file,
   and does not create a sibling sidecar file during that startup path.
+- `observability_sidecar_migrate --dry-run` reports the core path, sibling sidecar path, sibling
+  `observability-migrate.lock` path, whether the service lock is exclusively available, the
+  best-effort SQLite write probe result, current attach target, legacy-table presence, fallback
+  status, file sizes, and available disk space without creating or attaching a new sidecar file.
+  That startup attach probe must match normal startup semantics for existing DBs; only missing or
+  mistyped `--db-path` values are allowed to fail before any file creation.
+  The write-probe field is best-effort only and must not make `--dry-run` fail on a read-only
+  snapshot.
+  A missing or mistyped `--db-path` must fail before creating either the core DB file or the
+  sibling sidecar file or the sibling `observability-migrate.lock`.
+- After `observability_sidecar_migrate` completes on a large legacy sample, the sibling
+  `*-observability.db` exists, `main.request_logs` is gone, `observability.request_logs` preserves
+  the original `id` coverage, child `request_log_id` / `source_request_log_id` references remain
+  valid, and legacy `api_key_usage_buckets`, `dashboard_request_rollup_buckets`, and
+  `request_log_catalog_rollups` are removed from `main` with their rebuild markers reset. The
+  catalog retention meta must stay aligned with the current retention setting so the first normal
+  startup after cutover does not trigger an avoidable extra catalog rebuild.
+- The explicit migration path must refuse to run while another process still holds the sibling
+  `observability-migrate.lock`; success no longer relies on WAL-mode `BEGIN EXCLUSIVE` semantics to
+  infer that the live service has stopped.
+- Re-running `observability_sidecar_migrate` after a partial or finished copy must not duplicate
+  sidecar `request_logs` rows and must report whether it resumed an earlier copy or found the DB
+  already migrated.
 - `request_logs_gc_once` can run against that same large legacy single-DB layout without forcing a
   startup-time sidecar split first.
+- The current branch must be able to reproduce that explicit migration path on shared testbox from a
+  production-shaped cold snapshot, then start normally and pass `/health`, `/api/version`,
+  `/api/tavily/search`, `/mcp`, and request-log read-path smoke checks against the migrated data.
+- The 101 cutover runbook must be executable as written against the current deployment topology:
+  `docker compose` project `ai`, service `tavily-hikari`, volume mount `/srv/app/data -> /var/lib/docker/volumes/ai-tavily-hikari-data/_data`, `sqlite3` available on host, and rollback
+  anchor uploaded to codex-testbox before the local migration mutates the core DB.
 - Existing billing tests continue to prove locked billing subject stability, pending billing
   replay, and account/token quota attribution.
 - Existing MCP/API routing behavior remains unchanged, including research result GET key pinning.

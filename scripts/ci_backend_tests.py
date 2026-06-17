@@ -121,6 +121,9 @@ def artifact_target_dir_name(target_id):
 
 
 SUPPORT_BINARIES_BY_TARGET = {
+    "lib": {
+        "OBSERVABILITY_LOCK_HOLDER_BIN": "observability_lock_holder",
+    },
     "integration:mcp_billing_regression": {
         "TAVILY_HIKARI_TEST_BIN": "tavily-hikari",
     },
