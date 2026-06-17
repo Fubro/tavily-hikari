@@ -27,3 +27,5 @@ logs/
 downloads/
 data/
 .tmp/
+__pycache__/
+*.py[cod]
