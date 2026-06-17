@@ -296,3 +296,6 @@
   live server and GC paths hold it shared, while the explicit migration command must acquire it
   exclusively before mutating the legacy core DB. The remaining SQLite write probe stays in the
   JSON/plain report as a diagnostic signal, not as the primary proof that the live service exited.
+- The explicit migration entrypoint rejects a missing or mistyped `--db-path` before it probes
+  disk space, opens SQLite, or creates the sibling `observability-migrate.lock`, so typoed paths
+  do not leave behind empty core, sidecar, or lock files.

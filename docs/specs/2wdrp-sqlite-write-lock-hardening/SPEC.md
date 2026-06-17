@@ -212,7 +212,7 @@ source when a usable persisted runtime already exists.
   The write-probe field is best-effort only and must not make `--dry-run` fail on a read-only
   snapshot.
   A missing or mistyped `--db-path` must fail before creating either the core DB file or the
-  sibling sidecar file.
+  sibling sidecar file or the sibling `observability-migrate.lock`.
 - After `observability_sidecar_migrate` completes on a large legacy sample, the sibling
   `*-observability.db` exists, `main.request_logs` is gone, `observability.request_logs` preserves
   the original `id` coverage, child `request_log_id` / `source_request_log_id` references remain

@@ -355,6 +355,12 @@ impl KeyStore {
             .observability_database_path
             .clone()
             .ok_or_else(|| ProxyError::Other("observability sidecar path is unavailable".to_string()))?;
+        if !std::path::Path::new(&layout.core_database_path).exists() {
+            return Err(ProxyError::Other(format!(
+                "missing core database {}",
+                layout.core_database_path
+            )));
+        }
         let offline_probe = probe_observability_offline_state(&layout.core_database_path).await?;
         if !dry_run && !offline_probe.service_lock_held_exclusively {
             return Err(ProxyError::Other(format!(

@@ -751,6 +751,7 @@ async fn observability_sidecar_migrate_rejects_missing_db_path_without_creating_
         .observability_database_path
         .clone()
         .expect("sidecar path");
+    let lock_path = sqlite_lock_sidecar_path(&db_str);
 
     assert!(!db_path.exists(), "fixture should start with no core db");
     assert!(
@@ -762,7 +763,7 @@ async fn observability_sidecar_migrate_rejects_missing_db_path_without_creating_
         .await
         .expect_err("dry-run must reject a missing core db path");
     assert!(
-        dry_run_err.to_string().contains("unable to open database file"),
+        dry_run_err.to_string().contains("missing core database"),
         "unexpected dry-run missing-db error: {dry_run_err}"
     );
     assert!(!db_path.exists(), "dry-run must not create a core db");
@@ -770,18 +771,26 @@ async fn observability_sidecar_migrate_rejects_missing_db_path_without_creating_
         !std::path::Path::new(&observability_path).exists(),
         "dry-run must not create a sidecar db"
     );
+    assert!(
+        !std::path::Path::new(&lock_path).exists(),
+        "dry-run must not create an offline lock file"
+    );
 
     let run_err = run_observability_sidecar_migrate(&db_str, 2, false)
         .await
         .expect_err("migration must reject a missing core db path");
     assert!(
-        run_err.to_string().contains("unable to open database file"),
+        run_err.to_string().contains("missing core database"),
         "unexpected missing-db migration error: {run_err}"
     );
     assert!(!db_path.exists(), "migration must not create a core db");
     assert!(
         !std::path::Path::new(&observability_path).exists(),
         "migration must not create a sidecar db"
+    );
+    assert!(
+        !std::path::Path::new(&lock_path).exists(),
+        "migration must not create an offline lock file"
     );
 }
 
