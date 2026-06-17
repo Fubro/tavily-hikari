@@ -483,6 +483,8 @@ impl TavilyProxy {
         let token_quota = TokenQuota::new(key_store.clone(), backend_time.clone());
         let token_request_limit =
             TokenRequestLimit::new(key_store.clone(), backend_time.clone());
+        let user_business_calls_1h_window =
+            UserBusinessCalls1hWindow::new(key_store.clone(), backend_time.clone());
         let system_settings = key_store.get_system_settings().await?;
         token_request_limit.set_request_limit(system_settings.request_rate_limit);
         let forward_proxy_clients = forward_proxy::ForwardProxyClientPool::new()?;
@@ -510,6 +512,7 @@ impl TavilyProxy {
                 .unwrap_or_else(|| "https://api.country.is".to_string()),
             token_quota,
             token_request_limit,
+            user_business_calls_1h_window,
             research_request_affinity: Arc::new(Mutex::new(TokenAffinityState::new(
                 RESEARCH_REQUEST_AFFINITY_TTL_SECS,
             ))),
@@ -531,6 +534,7 @@ impl TavilyProxy {
         };
         proxy.spawn_ha_state_coalescer();
         proxy.spawn_request_stats_coalescer();
+        proxy.user_business_calls_1h_window.backfill_recent().await?;
         eprintln!("forward-proxy startup: initializing runtime graph");
         let runtime_init_started = Instant::now();
         proxy.initialize_forward_proxy_runtime().await?;

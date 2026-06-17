@@ -1800,6 +1800,7 @@ export interface AdminUserSummary {
   apiKeyCount: number
   tags: AdminUserTagBinding[]
   requestRate: RequestRate
+  businessCalls1h: BusinessCalls1hSummary
   hourlyAnyUsed: number
   hourlyAnyLimit: number
   quotaHourlyUsed: number
@@ -1889,6 +1890,13 @@ export interface AdminUserDetail extends AdminUserSummary {
   recentIpTimeline7d: AdminUserIpTimelineEntry[]
 }
 
+export interface BusinessCalls1hSummary {
+  successCount: number
+  failureCount: number
+  totalCount: number
+  windowMinutes: number
+}
+
 export interface AdminUserRechargeAudit {
   currentMonthEntitlementCredits: number
   effectiveUntilMonthStart: number | null
@@ -1923,18 +1931,43 @@ export interface AdminUserRechargeEntitlementAudit {
 
 export type AdminUserIpTimelineEntry = { ipAddress: string; firstSeenAt: number; lastSeenAt: number; requestCount: number }
 
-export type AdminUserUsageSeriesKey = 'rate5m' | 'quota1h' | 'quota24h' | 'quotaMonth'
+export type AdminUserUsageSeriesKey = 'rate5m' | 'quota1h' | 'quota24h' | 'quotaMonth' | 'businessCalls1h'
 
-export interface AdminUserUsageSeriesPoint {
+export interface AdminUserUsageSeriesQuotaPoint {
   bucketStart: number
   displayBucketStart?: number | null
   value: number | null
   limitValue: number | null
 }
 
-export interface AdminUserUsageSeries {
+export interface AdminUserBusinessCalls1hBarsPoint {
+  success: number | null
+  failure: number | null
+}
+
+export interface AdminUserBusinessCalls1hPoint {
+  bucketStart: number
+  displayBucketStart?: number | null
+  bars: AdminUserBusinessCalls1hBarsPoint
+  pressure: number | null
+  limitValue: number | null
+}
+
+export type AdminUserUsageSeries =
+  | {
+      kind: 'quotaLike'
+      limit: number
+      points: AdminUserUsageSeriesQuotaPoint[]
+    }
+  | {
+      kind: 'businessCalls1h'
+      limit: number
+      points: AdminUserBusinessCalls1hPoint[]
+    }
+
+export interface AdminUserUsageSeriesLegacy {
   limit: number
-  points: AdminUserUsageSeriesPoint[]
+  points: AdminUserUsageSeriesQuotaPoint[]
 }
 
 export interface UpdateUserQuotaPayload {
@@ -2991,7 +3024,10 @@ export function fetchAdminUserUsageSeries(
 ): Promise<AdminUserUsageSeries> {
   const encoded = encodeURIComponent(id)
   const params = new URLSearchParams({ series })
-  return requestJson(`/api/users/${encoded}/usage-series?${params.toString()}`, { signal })
+  return requestJson<AdminUserUsageSeries | AdminUserUsageSeriesLegacy>(
+    `/api/users/${encoded}/usage-series?${params.toString()}`,
+    { signal },
+  ).then((payload) => ('kind' in payload ? payload : { kind: 'quotaLike', limit: payload.limit, points: payload.points }))
 }
 
 export async function updateAdminUserQuota(id: string, payload: UpdateUserQuotaPayload): Promise<void> {

@@ -66,7 +66,9 @@ fn build_admin_user_usage_series_points(
                     .map(|local_dt| local_dt.naive_local().and_utc().timestamp())
                     .or(Some(bucket_start)),
                 AdminUserUsageSeriesKind::QuotaMonth => Some(bucket_start),
-                AdminUserUsageSeriesKind::Rate5m | AdminUserUsageSeriesKind::Quota1h => None,
+                AdminUserUsageSeriesKind::Rate5m
+                | AdminUserUsageSeriesKind::Quota1h
+                | AdminUserUsageSeriesKind::BusinessCalls1h => None,
             };
             AdminUserUsageSeriesPoint {
                 bucket_start,
@@ -186,6 +188,7 @@ impl TavilyProxy {
                     Some(AccountQuotaLimitSnapshotField::Monthly),
                 )
             }
+            AdminUserUsageSeriesKind::BusinessCalls1h => unreachable!(),
         };
 
         let coverage_start = self.key_store.get_meta_i64(coverage_key).await?;
@@ -245,6 +248,16 @@ impl TavilyProxy {
                 user_created_at,
                 limit_values,
             ),
+        })
+    }
+
+    pub async fn admin_user_business_calls_1h_series(
+        &self,
+        user_id: &str,
+    ) -> Result<AdminUserBusinessCalls1hSeries, ProxyError> {
+        Ok(AdminUserBusinessCalls1hSeries {
+            limit: 0,
+            points: self.user_business_calls_1h_window.usage_series(user_id).await,
         })
     }
 }

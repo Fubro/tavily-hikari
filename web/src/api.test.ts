@@ -482,7 +482,7 @@ describe('admin user tag api helpers', () => {
 
   it('formats the admin user usage series URL with the selected series key', async () => {
     const fetchMock = mock(() =>
-      Promise.resolve(new Response(JSON.stringify({ limit: 100, points: [] }), {
+      Promise.resolve(new Response(JSON.stringify({ kind: 'quotaLike', limit: 100, points: [] }), {
         status: 200,
         headers: { 'Content-Type': 'application/json' },
       })),

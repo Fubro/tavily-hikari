@@ -533,6 +533,20 @@ function formatSuccessRateStackValue(
   }
 }
 
+function formatBusinessCalls1hStackValue(
+  success: number,
+  failure: number,
+  language: 'en' | 'zh',
+): AdminTableStackedValue {
+  return {
+    primary: formatNumber(success + failure),
+    secondary:
+      language === 'zh'
+        ? `成 ${formatNumber(success)} / 败 ${formatNumber(failure)}`
+        : `S ${formatNumber(success)} / F ${formatNumber(failure)}`,
+  }
+}
+
 function formatCompactSuccessRateValue(success: number, failure: number, language: 'en' | 'zh'): string {
   const total = success + failure
   const rate = formatPercent(success, total)
@@ -8657,6 +8671,17 @@ function AdminDashboard(): JSX.Element {
                   <dd>{formatNumber(detail.tokenCount)}</dd>
                 </div>
                 <div>
+                  <dt>{usersStrings.usage.table.businessOneHour}</dt>
+                  <dd>
+                    {formatNumber(detail.businessCalls1h.totalCount)}
+                    <span className="admin-table-value-secondary" style={{ display: 'block' }}>
+                      {language === 'zh'
+                        ? `成 ${formatNumber(detail.businessCalls1h.successCount)} / 败 ${formatNumber(detail.businessCalls1h.failureCount)}`
+                        : `S ${formatNumber(detail.businessCalls1h.successCount)} / F ${formatNumber(detail.businessCalls1h.failureCount)}`}
+                    </span>
+                  </dd>
+                </div>
+                <div>
                   <dt>{usersStrings.usage.table.ipCount24h}</dt>
                   <dd className={ipCountPrimaryClassName(detail.recentIpCount24h, globalIpLimit) ? 'admin-table-value-primary-danger' : undefined}>
                     {formatNumber(detail.recentIpCount24h)}
@@ -9033,7 +9058,7 @@ function AdminDashboard(): JSX.Element {
             {users.length === 0 ? (
               <tbody>
                 <tr>
-                  <td colSpan={11}>
+                  <td colSpan={12}>
                     <div className="empty-state alert">{usersStrings.empty.none}</div>
                   </td>
                 </tr>
@@ -9058,6 +9083,7 @@ function AdminDashboard(): JSX.Element {
                       activeOrder={effectiveUsersSortOrder}
                       onToggle={toggleUsersSort}
                     />
+                    <th>{usersStrings.usage.table.businessOneHour}</th>
                     <AdminUsersSortableHeader
                       label={usersStrings.usage.table.daily}
                       field="quotaDailyUsed"
@@ -9143,6 +9169,15 @@ function AdminDashboard(): JSX.Element {
                         <AdminTableValueStack {...formatQuotaStackValue(item.quotaHourlyUsed, item.quotaHourlyLimit)} />
                       </td>
                       <td className="admin-users-compact-cell">
+                        <AdminTableValueStack
+                          {...formatBusinessCalls1hStackValue(
+                            item.businessCalls1h.successCount,
+                            item.businessCalls1h.failureCount,
+                            language,
+                          )}
+                        />
+                      </td>
+                      <td className="admin-users-compact-cell">
                         <AdminTableValueStack {...formatQuotaStackValue(item.quotaDailyUsed, item.quotaDailyLimit)} />
                       </td>
                       <td className="admin-users-compact-cell">
@@ -9225,6 +9260,16 @@ function AdminDashboard(): JSX.Element {
                   <div className="admin-mobile-kv">
                     <span>{usersStrings.usage.table.hourly}</span>
                     <strong>{formatQuotaUsagePair(item.quotaHourlyUsed, item.quotaHourlyLimit)}</strong>
+                  </div>
+                  <div className="admin-mobile-kv">
+                    <span>{usersStrings.usage.table.businessOneHour}</span>
+                    <strong>
+                      {formatNumber(item.businessCalls1h.totalCount)} ·
+                      {' '}
+                      {language === 'zh'
+                        ? `成 ${formatNumber(item.businessCalls1h.successCount)} / 败 ${formatNumber(item.businessCalls1h.failureCount)}`
+                        : `S ${formatNumber(item.businessCalls1h.successCount)} / F ${formatNumber(item.businessCalls1h.failureCount)}`}
+                    </strong>
                   </div>
                   <div className="admin-mobile-kv">
                     <span>{usersStrings.usage.table.daily}</span>

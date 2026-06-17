@@ -7,7 +7,7 @@ import { createRoot, type Root } from 'react-dom/client'
 import type { AdminUserUsageSeries, AdminUserUsageSeriesKey } from '../api'
 import { ZH } from '../i18n/translations/zh'
 import { ThemeProvider, useTheme } from '../theme'
-import { UserDetailSharedUsagePanel } from './UserDetailSharedUsagePanel'
+import { UserDetailSharedUsagePanel, isBusinessCalls1hStacked } from './UserDetailSharedUsagePanel'
 
 function deferred<T>() {
   let resolve!: (value: T) => void
@@ -66,6 +66,7 @@ function createAbortableLoader() {
 
 function buildEmptySeries(limit: number): AdminUserUsageSeries {
   return {
+    kind: 'quotaLike',
     limit,
     points: [{ bucketStart: 1_776_200_400, value: null, limitValue: null }],
   }
@@ -126,6 +127,7 @@ describe('UserDetailSharedUsagePanel tab presentation', () => {
     expect(labels).toEqual([
       ZH.admin.users.detail.sharedUsageTabs.fiveMinute,
       ZH.admin.users.detail.sharedUsageTabs.oneHour,
+      ZH.admin.users.detail.sharedUsageTabs.businessOneHour,
       ZH.admin.users.detail.sharedUsageTabs.daily,
       ZH.admin.users.detail.sharedUsageTabs.monthly,
       ZH.admin.users.detail.sharedUsageTabs.ip,
@@ -213,6 +215,7 @@ describe('UserDetailSharedUsagePanel loading behavior', () => {
   it('keeps missing historical limit snapshots out of the always-visible copy', async () => {
     const { container, root } = await mountPanel({
       loadSeries: async () => ({
+        kind: 'quotaLike',
         limit: 120,
         points: [{ bucketStart: 1_776_200_400, value: 36, limitValue: null }],
       }),
@@ -353,5 +356,13 @@ describe('UserDetailSharedUsagePanel theme behavior', () => {
     await act(async () => {
       root.unmount()
     })
+  })
+})
+
+describe('UserDetailSharedUsagePanel business chart config', () => {
+  it('treats the business 1h chart as stacked on both axes', () => {
+    expect(isBusinessCalls1hStacked('businessCalls1h')).toBe(true)
+    expect(isBusinessCalls1hStacked('quota1h')).toBe(false)
+    expect(isBusinessCalls1hStacked('rate5m')).toBe(false)
   })
 })

@@ -1561,6 +1561,7 @@ pub struct AdminUserQuotaDetails {
 pub struct UserDashboardSummary {
     pub debug_info_shared: bool,
     pub request_rate: RequestRateView,
+    pub business_calls_1h: BusinessCalls1hSummary,
     pub hourly_any_used: i64,
     pub hourly_any_limit: i64,
     pub quota_hourly_used: i64,
@@ -1575,6 +1576,14 @@ pub struct UserDashboardSummary {
     pub monthly_failure: i64,
     pub last_activity: Option<i64>,
     pub recharge: LinuxDoCreditRechargeSummary,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct BusinessCalls1hSummary {
+    pub success_count: i64,
+    pub failure_count: i64,
+    pub total_count: i64,
+    pub window_minutes: i64,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -1601,6 +1610,7 @@ pub enum AdminUserUsageSeriesKind {
     Quota1h,
     Quota24h,
     QuotaMonth,
+    BusinessCalls1h,
 }
 
 impl AdminUserUsageSeriesKind {
@@ -1610,6 +1620,7 @@ impl AdminUserUsageSeriesKind {
             "quota1h" => Some(Self::Quota1h),
             "quota24h" => Some(Self::Quota24h),
             "quotaMonth" => Some(Self::QuotaMonth),
+            "businessCalls1h" => Some(Self::BusinessCalls1h),
             _ => None,
         }
     }
@@ -1624,9 +1635,30 @@ pub struct AdminUserUsageSeriesPoint {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AdminUserBusinessCalls1hBarsPoint {
+    pub success: Option<i64>,
+    pub failure: Option<i64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AdminUserBusinessCalls1hPoint {
+    pub bucket_start: i64,
+    pub display_bucket_start: Option<i64>,
+    pub bars: AdminUserBusinessCalls1hBarsPoint,
+    pub pressure: Option<i64>,
+    pub limit_value: Option<i64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AdminUserUsageSeries {
     pub limit: i64,
     pub points: Vec<AdminUserUsageSeriesPoint>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AdminUserBusinessCalls1hSeries {
+    pub limit: i64,
+    pub points: Vec<AdminUserBusinessCalls1hPoint>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

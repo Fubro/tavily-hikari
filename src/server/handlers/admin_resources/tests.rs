@@ -17,6 +17,10 @@ mod admin_resources_tests {
         tavily_hikari::UserDashboardSummary {
             debug_info_shared: false,
             request_rate: default_request_rate_view(tavily_hikari::RequestRateScope::User),
+            business_calls_1h: tavily_hikari::BusinessCalls1hSummary {
+                window_minutes: 60,
+                ..tavily_hikari::BusinessCalls1hSummary::default()
+            },
             hourly_any_used: 0,
             hourly_any_limit: 0,
             quota_hourly_used: 0,

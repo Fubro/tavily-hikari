@@ -767,6 +767,7 @@ export interface AdminTranslationsShape {
         status: string
         hourlyAny: string
         hourly: string
+        businessOneHour: string
         daily: string
         monthly: string
         monthlyBroken: string
@@ -800,9 +801,13 @@ export interface AdminTranslationsShape {
       sharedUsagePartialHint: string
       sharedUsageLegendUsed: string
       sharedUsageLegendLimit: string
+      sharedUsageLegendSuccess: string
+      sharedUsageLegendFailure: string
+      sharedUsageLegendPressure: string
       sharedUsageTabs: {
         oneHour: string
         fiveMinute: string
+        businessOneHour: string
         daily: string
         monthly: string
         ip: string

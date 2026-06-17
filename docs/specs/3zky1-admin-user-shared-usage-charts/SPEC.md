@@ -1,4 +1,4 @@
-# Admin 用户详情共享额度趋势与 Token 列表语义纠偏（#3zky1）
+# Admin 用户共享额度趋势、业务调用 rolling 1h 与 Token 列表语义纠偏（#3zky1）
 
 ## 状态
 
@@ -10,6 +10,7 @@
 
 - 当前 `/admin/users/:id` 的 token 列表把账户共享额度直接展示在 token 行内，容易让运营误以为这些额度属于单个 token。
 - 用户详情页缺少账户级共享额度的趋势视图，无法快速判断 5 分钟限流、1 小时额度、24 小时额度与月度额度的消耗节奏。
+- 运营还缺少一套真实 user 维度的“业务调用 rolling 1h”口径，无法在 `/admin/users/usage` 与 `/admin/users/:id` 之间稳定核对某个账户最近 1 小时实际上游的业务调用压力。
 - 现有临时 bucket 与即时扫日志不适合支撑最近 7 天 / 12 个月的稳定图表，因此需要持久化 rollup 读模型。
 - 图表上限线若直接复用“当前额度”，会把账户历史额度变更抹平，无法正确解释历史 bucket 的真实阈值。
 
@@ -17,7 +18,10 @@
 
 - 在用户详情页新增独立的“共享额度趋势”面板，位于有效额度拆解之后、token 列表之前。
 - 共享趋势使用 `5m / 1h / 24h / 月` 四个 tab，默认仍激活 `1h`，并按需加载数据。
+- 在 `/admin/users/usage` 新增只读 `业务 1h` 列，在 `/admin/users/:id` 新增同口径摘要。
+- 在用户详情共享趋势面板新增 `业务 1h` tab，展示 5 分钟 success/failure 堆叠柱与 rolling 1h pressure 折线。
 - 后端新增用户级共享额度趋势接口 `GET /api/users/:id/usage-series`，返回稳定 bucket 序列、当前 limit 与按 bucket 回放的历史 `limitValue`。
+- 后端新增真实 `businessCalls1h` 真相源：以 `request_logs` 原始事件为基础，按 user 维度维护最近 25h 的单实例内存滑动窗口，并在启动时 bounded 回填最近 25h 符合条件的实际上游业务调用。
 - 新增持久化 rollup 表 `account_usage_rollup_buckets`，分别承载账户共享请求频率与业务 credits 聚合。
 - 新增额度历史快照表，按时间回放请求限流与账户有效额度。
 - 用户详情 token 列表只展示 token 自有字段，移除账户共享额度字段，新增 `累计请求` 与 `创建时间`。
@@ -26,15 +30,19 @@
 ## Non-goals
 
 - 不修改 token 详情页自身的额度趋势接口或展示口径。
+- 不修改 `/admin/users` 管理总览布局；本轮集合页范围固定为 `/admin/users/usage`。
 - 不伪造不可考的更早额度历史；在无法确认的时间段内，limit 线显示缺口（`null`）而不是平铺当前值。
 - 不伪造超出可追溯窗口的月度历史；历史缺口使用 `null` 呈现无数据。
+- 不把 `quota_exhausted`、本地 pre-upstream block 或其他未实际上游的请求计入业务调用 success/failure。
 
 ## 范围
 
 ### In scope
 
 - 后端持久化 rollup 表、bounded rebuild、retention cleanup 与用户详情趋势接口。
+- 后端 user 维度业务调用 rolling 1h 内存窗口、25h bounded 回填、`/api/users` 与 `/api/users/:id` 新摘要字段，以及 `businessCalls1h` usage series。
 - 用户详情页新增共享额度趋势卡片、tabs 懒加载缓存、limit 虚线与空/错/部分历史态。
+- `/admin/users/usage` 新增只读 `业务 1h` 列与对应 mobile 卡片文案。
 - 用户详情 token 列表的字段调整、i18n 文案更新、Storybook 画布与截图证据。
 
 ### Out of scope
@@ -109,9 +117,16 @@
   - `quota1h`
   - `quota24h`
   - `quotaMonth`
+  - `businessCalls1h`
 - 响应：
-  - `limit: number`
-  - `points: Array<{ bucketStart: number, value: number | null, limitValue: number | null }>`
+  - quota-like series:
+    - `kind: "quotaLike"`
+    - `limit: number`
+    - `points: Array<{ bucketStart: number, value: number | null, limitValue: number | null }>`
+  - `businessCalls1h`:
+    - `kind: "businessCalls1h"`
+    - `limit: 0`
+    - `points: Array<{ bucketStart: number, bars: { success: number | null, failure: number | null }, pressure: number | null, limitValue: null }>`
 
 ### 统计窗口
 
@@ -119,12 +134,18 @@
 - `quota1h`：最近 72 小时，按小时 bucket；`limit` 为当前账户 `effectiveQuota.hourlyLimit`，`points[].limitValue` 使用 `changed_at < bucket_end` 的最新小时额度快照。
 - `quota24h`：最近 7 天，按本地日 bucket；`limit` 为当前账户 `effectiveQuota.dailyLimit`，`points[].limitValue` 使用 `changed_at < bucket_end` 的最新日额度快照。
 - `quotaMonth`：最近 12 个月，按 UTC 月 bucket；`limit` 为当前账户 `effectiveQuota.monthlyLimit`，`points[].limitValue` 使用 `changed_at < bucket_end` 的最新月额度快照。
+- `businessCalls1h`：最近 24 小时、每 5 分钟采样，共 288 个点；`bars.success / bars.failure` 表示该 5 分钟自然桶内实际上游业务调用次数；`pressure` 表示该采样点向前 60 分钟窗口的总调用压力（`success + failure`）；`limitValue` 固定为 `null`，不伪造阈值线。
 - 若 bucket 无聚合值：
   - `bucketStart >= coverage_start` => 返回 `0`
   - `bucketStart < coverage_start` => 返回 `null`
 - 若 bucket 无可追溯的历史 limit 快照：
   - `limitValue` 返回 `null`
   - 前端应显示缺口而不是平铺当前上限
+
+- “业务调用”语义固定为：`request_user_id IS NOT NULL`、`counts_business_quota = 1`、`upstream_operation IS NOT NULL`。
+- `success` 仅指 `result_status = success`。
+- `failure` 指已经实际上游、但 `result_status != success && result_status != quota_exhausted` 的业务调用。
+- `quota_exhausted` 与所有 pre-upstream blocked 请求完全排除，不进入 success/failure，也不进入 pressure。
 
 ### `GET /api/users/:id`
 
@@ -144,11 +165,17 @@
 
 - 用户详情页新增“共享额度趋势”区块，放在用户级额度/拆解之后、token 列表之前。
 - tabs 文案简写：`5m / 1h / 24h / 月`，默认 `1h`。
+- 在 tabs 中新增 `业务 1h`，但默认激活仍保持 `1h`。
 - 首屏只请求 `quota1h`；其他 tab 首次点开才请求，二次切回复用缓存。
 - 图表使用现有 `SegmentedTabs` + `chart.js`：
   - 主数据使用柱状图
   - limit 使用独立虚线 dataset，数据源为 `points[].limitValue`
+- `业务 1h` 图表例外：
+  - success / failure 使用同一根柱子的上下堆叠段
+  - pressure 使用独立折线 dataset
+  - 不绘制 limit 虚线
 - 月度历史缺口显示为无数据提示，不伪装成 `0`。
+- `/admin/users/usage` 新增 `业务 1h` 列，只展示 `totalCount` 与 `success/failure` 摘要，不提供排序。
 - token 列表说明文案需明确：这里只展示 token 自己的状态、时间与成功统计，共享额度请看上方趋势图。
 - token 列表右上角提供“添加令牌”按钮；每行操作区提供删除按钮，但当用户仅剩 1 个 token 时必须禁用删除。
 
@@ -356,3 +383,51 @@
 - evidence_note: 月度图保留不可追溯历史缺口，并在卡片内明确提示“空白不是 0”；缺口同时覆盖业务消耗与历史 limit 快照都不可考的 bucket，满足 `quotaMonth` 的 `null` bucket 呈现要求；已检查空白裁剪，无需额外裁切；证据绑定 `e9f9df93e4b7a0f0493769d2979c8bfa8707599f`。
 
 ![月度额度历史缺口](./assets/user-detail-shared-usage-monthly-gap.png)
+
+### Users Usage 业务 1h 列
+
+- asset: `docs/specs/3zky1-admin-user-shared-usage-charts/assets/users-usage-business-1h-column.png`
+- source_type: `storybook_canvas`
+- story_id_or_title: `admin-pages--users-usage`
+- target_program: `mock-only`
+- capture_scope: `browser-viewport`
+- requested_viewport: `1440x1600`
+- viewport_strategy: `devtools-emulate`
+- submission_gate: `approved`
+- PR: include
+- evidence_note:
+  `/admin/users/usage` 已新增 `业务 1h` 列，按 `success + failure` 展示最近 rolling 1h 总量，并在次级文案中显示 `S/F` 拆分；本 Storybook surface 已补齐与 runtime 同口径的列渲染，避免列表验收面与真实页面漂移。空白裁剪脚本返回 `ambiguous_border`，因此按原图保留；证据绑定当前实现提交。
+
+![Users Usage 业务 1h 列](./assets/users-usage-business-1h-column.png)
+
+### 用户详情业务 1h 摘要
+
+- asset: `docs/specs/3zky1-admin-user-shared-usage-charts/assets/user-detail-business-calls-1h-tab.png`
+- source_type: `storybook_canvas`
+- story_id_or_title: `admin-pages--user-detail-business-calls-1-h`
+- target_program: `mock-only`
+- capture_scope: `browser-viewport`
+- requested_viewport: `1440x1600`
+- viewport_strategy: `devtools-emulate`
+- submission_gate: `approved`
+- PR: include
+- evidence_note:
+  用户详情身份摘要区已新增 `业务 1h` 指标卡，显示当前 rolling 1h `totalCount`，并在次级文案中展示 `S/F` 拆分；该 Storybook 详情 surface 也已补齐与 runtime 一致的摘要渲染。空白裁剪脚本返回 `ambiguous_border`，因此按原图保留；证据绑定当前实现提交。
+
+![用户详情业务 1h 摘要](./assets/user-detail-business-calls-1h-tab.png)
+
+### 用户详情业务 1h 图表
+
+- asset: `docs/specs/3zky1-admin-user-shared-usage-charts/assets/user-detail-business-calls-1h-chart.png`
+- source_type: `storybook_canvas`
+- story_id_or_title: `admin-pages--user-detail-business-calls-1-h`
+- target_program: `mock-only`
+- capture_scope: `browser-viewport`
+- requested_viewport: `1440x1600`
+- viewport_strategy: `devtools-emulate`
+- submission_gate: `pending-owner-approval`
+- PR: include
+- evidence_note:
+  `Shared Usage Trends` 的 `Biz 1h` 图表证据已按面板级范围刷新，用于确认 5 分钟 `success/failure` 柱段保持同桶堆叠，而 `pressure` 继续作为独立折线显示；图例仍明确区分 `Success / Failure / Pressure`，与 `series=businessCalls1h` 的返回形状一致。由于整页渐变边框会让空白裁剪脚本判定为 `ambiguous_border`，最终证据改为受控 viewport 截图后的面板级裁图。
+
+![用户详情业务 1h 图表](./assets/user-detail-business-calls-1h-chart.png)

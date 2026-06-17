@@ -84,6 +84,7 @@ export const UserDetailSingleTokenGuard = { ...RuntimeStories.UserDetailSingleTo
 export const UserDetailCompact = { ...RuntimeStories.UserDetailCompact }
 export const UserDetailSharedUsageTooltip = { ...RuntimeStories.UserDetailSharedUsageTooltip }
 export const UserDetailMonthlyGap = { ...RuntimeStories.UserDetailMonthlyGap }
+export const UserDetailBusinessCalls1h = { ...RuntimeStories.UserDetailBusinessCalls1h }
 export const UserDetailIpUsage = { ...RuntimeStories.UserDetailIpUsage }
 export const Alerts = { ...RuntimeStories.Alerts }
 export const Announcements = { ...RuntimeStories.Announcements }

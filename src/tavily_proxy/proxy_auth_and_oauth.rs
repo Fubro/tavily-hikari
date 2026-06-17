@@ -572,6 +572,10 @@ impl TavilyProxy {
         Ok(summaries.remove(user_id).unwrap_or(UserDashboardSummary {
             debug_info_shared: false,
             request_rate: self.default_request_rate_view(RequestRateScope::User),
+            business_calls_1h: BusinessCalls1hSummary {
+                window_minutes: 60,
+                ..BusinessCalls1hSummary::default()
+            },
             hourly_any_used: 0,
             hourly_any_limit: 0,
             quota_hourly_used: 0,
@@ -616,6 +620,10 @@ impl TavilyProxy {
             .token_request_limit
             .snapshot_for_users(&deduped_user_ids)
             .await?;
+        let business_calls_1h = self
+            .user_business_calls_1h_window
+            .snapshot_for_users(&deduped_user_ids)
+            .await;
         let minute_bucket = now.timestamp() - (now.timestamp() % SECS_PER_MINUTE);
         let hour_window_start = minute_bucket - 59 * SECS_PER_MINUTE;
         let hourly_totals = self
@@ -689,6 +697,12 @@ impl TavilyProxy {
                     UserDashboardSummary {
                         debug_info_shared: debug_info_shared.get(&user_id).copied().unwrap_or(false),
                         request_rate: request_rate.request_rate(),
+                        business_calls_1h: business_calls_1h.get(&user_id).cloned().unwrap_or(
+                            BusinessCalls1hSummary {
+                                window_minutes: 60,
+                                ..BusinessCalls1hSummary::default()
+                            },
+                        ),
                         hourly_any_used: request_rate.hourly_used,
                         hourly_any_limit: request_rate.hourly_limit,
                         quota_hourly_used: hourly_totals.get(&user_id).copied().unwrap_or(0),

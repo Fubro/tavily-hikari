@@ -4,6 +4,7 @@ use crate::models::*;
 use crate::store::*;
 use crate::*;
 use sha2::{Digest, Sha256};
+use sqlx::Row;
 use std::collections::VecDeque;
 use std::sync::{
     OnceLock,
@@ -33,8 +34,23 @@ struct TokenRequestLimit {
 }
 
 #[derive(Clone, Debug)]
+struct UserBusinessCalls1hWindow {
+    store: Arc<KeyStore>,
+    backend: UserBusinessCalls1hBackend,
+    window_minutes: i64,
+    rolling_window_secs: i64,
+    retention_secs: i64,
+    backend_time: BackendTime,
+}
+
+#[derive(Clone, Debug)]
 enum RequestRateLimitBackend {
     Memory(Arc<MemoryRequestRateLimitBackend>),
+}
+
+#[derive(Clone, Debug)]
+enum UserBusinessCalls1hBackend {
+    Memory(Arc<MemoryUserBusinessCalls1hBackend>),
 }
 
 #[derive(Clone, Debug, Default)]
@@ -43,8 +59,19 @@ struct MemoryRequestRateLimitBackend {
 }
 
 #[derive(Clone, Debug, Default)]
+struct MemoryUserBusinessCalls1hBackend {
+    state: Arc<Mutex<MemoryUserBusinessCalls1hState>>,
+}
+
+#[derive(Clone, Debug, Default)]
 struct MemoryRequestRateLimitState {
     entries: HashMap<String, VecDeque<i64>>,
+    next_gc_at: i64,
+}
+
+#[derive(Clone, Debug, Default)]
+struct MemoryUserBusinessCalls1hState {
+    entries: HashMap<String, VecDeque<UserBusinessCallEvent>>,
     next_gc_at: i64,
 }
 
@@ -52,6 +79,31 @@ struct MemoryRequestRateLimitState {
 struct RequestRateSubject {
     key: String,
     scope: RequestRateScope,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct UserBusinessCallEvent {
+    created_at: i64,
+    outcome: UserBusinessCallOutcome,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum UserBusinessCallOutcome {
+    Success,
+    Failure,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+struct UserBusinessCallCounts {
+    success_count: i64,
+    failure_count: i64,
+}
+
+#[derive(Clone, Debug)]
+struct UserBusinessCalls1hBackfillRow {
+    user_id: String,
+    created_at: i64,
+    outcome: UserBusinessCallOutcome,
 }
 
 impl RequestRateSubject {
@@ -349,6 +401,7 @@ pub struct TavilyProxy {
     pub(crate) api_key_geo_origin: String,
     token_quota: TokenQuota,
     token_request_limit: TokenRequestLimit,
+    user_business_calls_1h_window: UserBusinessCalls1hWindow,
     pub(crate) research_request_affinity: Arc<Mutex<TokenAffinityState>>,
     pub(crate) research_request_owner_affinity: Arc<Mutex<TokenAffinityState>>,
     summary_windows_cache: Arc<Mutex<SummaryWindowsCacheState>>,
@@ -1267,6 +1320,215 @@ impl TokenRequestLimit {
     }
 }
 
+impl UserBusinessCallCounts {
+    fn total_count(&self) -> i64 {
+        self.success_count + self.failure_count
+    }
+
+    fn record(&mut self, outcome: UserBusinessCallOutcome) {
+        match outcome {
+            UserBusinessCallOutcome::Success => self.success_count += 1,
+            UserBusinessCallOutcome::Failure => self.failure_count += 1,
+        }
+    }
+}
+
+impl UserBusinessCalls1hWindow {
+    const WINDOW_MINUTES: i64 = 60;
+    const ROLLING_WINDOW_SECS: i64 = SECS_PER_HOUR;
+    const RETENTION_SECS: i64 = 25 * SECS_PER_HOUR;
+
+    pub(crate) fn new(store: Arc<KeyStore>, backend_time: BackendTime) -> Self {
+        Self {
+            store,
+            backend: UserBusinessCalls1hBackend::Memory(Arc::new(
+                MemoryUserBusinessCalls1hBackend::default(),
+            )),
+            window_minutes: Self::WINDOW_MINUTES,
+            rolling_window_secs: Self::ROLLING_WINDOW_SECS,
+            retention_secs: Self::RETENTION_SECS,
+            backend_time,
+        }
+    }
+
+    pub(crate) async fn backfill_recent(&self) -> Result<(), ProxyError> {
+        let now_ts = self.backend_time.now_ts();
+        let since_ts = now_ts.saturating_sub(self.retention_secs);
+        let rows = sqlx::query(
+            r#"
+            SELECT request_user_id, created_at, result_status
+            FROM request_logs INDEXED BY idx_request_logs_time
+            WHERE created_at >= ?
+              AND request_user_id IS NOT NULL
+              AND counts_business_quota = 1
+              AND result_status != ?
+              AND (
+                upstream_operation IS NOT NULL
+                OR (
+                  api_key_id IS NOT NULL
+                  AND path IN (
+                    '/api/tavily/search',
+                    '/api/tavily/extract',
+                    '/api/tavily/crawl',
+                    '/api/tavily/map'
+                )
+                )
+              )
+            ORDER BY created_at ASC, id ASC
+            "#,
+        )
+        .bind(since_ts)
+        .bind(OUTCOME_QUOTA_EXHAUSTED)
+        .fetch_all(&self.store.pool)
+        .await?;
+        let events: Vec<UserBusinessCalls1hBackfillRow> = rows
+            .into_iter()
+            .filter_map(|row| {
+                let user_id = row.try_get::<String, _>("request_user_id").ok()?;
+                let created_at = row.try_get::<i64, _>("created_at").ok()?;
+                let result_status = row.try_get::<String, _>("result_status").ok()?;
+                let outcome = if result_status == OUTCOME_SUCCESS {
+                    UserBusinessCallOutcome::Success
+                } else {
+                    UserBusinessCallOutcome::Failure
+                };
+                Some(UserBusinessCalls1hBackfillRow {
+                    user_id,
+                    created_at,
+                    outcome,
+                })
+            })
+            .collect();
+        self.backend
+            .replace_from_backfill(&events, now_ts, self.retention_secs)
+            .await;
+        Ok(())
+    }
+
+    pub(crate) async fn record_event(
+        &self,
+        user_id: &str,
+        created_at: i64,
+        outcome: UserBusinessCallOutcome,
+    ) {
+        self.backend
+            .record_event(
+                user_id,
+                UserBusinessCallEvent {
+                    created_at,
+                    outcome,
+                },
+                self.backend_time.now_ts(),
+                self.retention_secs,
+            )
+            .await;
+    }
+
+    pub(crate) async fn snapshot_for_users(
+        &self,
+        user_ids: &[String],
+    ) -> HashMap<String, BusinessCalls1hSummary> {
+        if user_ids.is_empty() {
+            return HashMap::new();
+        }
+        let now_ts = self.backend_time.now_ts();
+        let counts = self
+            .backend
+            .snapshot_many(
+                user_ids,
+                now_ts,
+                self.rolling_window_secs,
+                self.retention_secs,
+            )
+            .await;
+        user_ids
+            .iter()
+            .map(|user_id| {
+                let counts = counts.get(user_id).cloned().unwrap_or_default();
+                (
+                    user_id.clone(),
+                    BusinessCalls1hSummary {
+                        success_count: counts.success_count,
+                        failure_count: counts.failure_count,
+                        total_count: counts.total_count(),
+                        window_minutes: self.window_minutes,
+                    },
+                )
+            })
+            .collect()
+    }
+
+    pub(crate) async fn usage_series(&self, user_id: &str) -> Vec<AdminUserBusinessCalls1hPoint> {
+        let now_ts = self.backend_time.now_ts();
+        let current_bucket_start = now_ts - now_ts.rem_euclid(SECS_PER_FIVE_MINUTES);
+        let start = current_bucket_start - 287 * SECS_PER_FIVE_MINUTES;
+        let bucket_starts: Vec<i64> = (0..288)
+            .map(|index| start + index * SECS_PER_FIVE_MINUTES)
+            .collect();
+        let events = self
+            .backend
+            .retained_events_for_user(user_id, now_ts, self.retention_secs)
+            .await;
+        if bucket_starts.is_empty() {
+            return Vec::new();
+        }
+
+        let coverage_floor = now_ts.saturating_sub(self.retention_secs);
+        let mut points = Vec::with_capacity(bucket_starts.len());
+        let mut rolling = UserBusinessCallCounts::default();
+        let mut rolling_start = 0usize;
+        let mut event_cursor = 0usize;
+        let mut bucket_start_cursor = 0usize;
+
+        for (index, bucket_start) in bucket_starts.iter().copied().enumerate() {
+            let bucket_end = bucket_start + SECS_PER_FIVE_MINUTES;
+            let pressure_at = if index + 1 == bucket_starts.len() {
+                now_ts
+            } else {
+                bucket_end
+            };
+
+            while event_cursor < events.len() && events[event_cursor].created_at < bucket_end {
+                rolling.record(events[event_cursor].outcome);
+                event_cursor += 1;
+            }
+            let rolling_cutoff = pressure_at - self.rolling_window_secs;
+            while rolling_start < event_cursor && events[rolling_start].created_at <= rolling_cutoff
+            {
+                match events[rolling_start].outcome {
+                    UserBusinessCallOutcome::Success => rolling.success_count -= 1,
+                    UserBusinessCallOutcome::Failure => rolling.failure_count -= 1,
+                }
+                rolling_start += 1;
+            }
+
+            let mut bars = UserBusinessCallCounts::default();
+            while bucket_start_cursor < event_cursor
+                && events[bucket_start_cursor].created_at < bucket_start
+            {
+                bucket_start_cursor += 1;
+            }
+            let mut bucket_cursor = bucket_start_cursor;
+            while bucket_cursor < event_cursor && events[bucket_cursor].created_at < bucket_end {
+                bars.record(events[bucket_cursor].outcome);
+                bucket_cursor += 1;
+            }
+            let has_coverage = bucket_start >= coverage_floor;
+            points.push(AdminUserBusinessCalls1hPoint {
+                bucket_start,
+                display_bucket_start: None,
+                bars: AdminUserBusinessCalls1hBarsPoint {
+                    success: has_coverage.then_some(bars.success_count),
+                    failure: has_coverage.then_some(bars.failure_count),
+                },
+                pressure: has_coverage.then_some(rolling.total_count()),
+                limit_value: None,
+            });
+        }
+        points
+    }
+}
+
 impl RequestRateLimitBackend {
     async fn check(
         &self,
@@ -1328,6 +1590,70 @@ impl RequestRateLimitBackend {
     async fn debug_prune_idle_subjects(&self, now_ts: i64, window_secs: i64) {
         match self {
             Self::Memory(backend) => backend.debug_prune_idle_subjects(now_ts, window_secs).await,
+        }
+    }
+}
+
+impl UserBusinessCalls1hBackend {
+    async fn replace_from_backfill(
+        &self,
+        rows: &[UserBusinessCalls1hBackfillRow],
+        now_ts: i64,
+        retention_secs: i64,
+    ) {
+        match self {
+            Self::Memory(backend) => {
+                backend
+                    .replace_from_backfill(rows, now_ts, retention_secs)
+                    .await
+            }
+        }
+    }
+
+    async fn record_event(
+        &self,
+        user_id: &str,
+        event: UserBusinessCallEvent,
+        now_ts: i64,
+        retention_secs: i64,
+    ) {
+        match self {
+            Self::Memory(backend) => {
+                backend
+                    .record_event(user_id, event, now_ts, retention_secs)
+                    .await
+            }
+        }
+    }
+
+    async fn snapshot_many(
+        &self,
+        user_ids: &[String],
+        now_ts: i64,
+        rolling_window_secs: i64,
+        retention_secs: i64,
+    ) -> HashMap<String, UserBusinessCallCounts> {
+        match self {
+            Self::Memory(backend) => {
+                backend
+                    .snapshot_many(user_ids, now_ts, rolling_window_secs, retention_secs)
+                    .await
+            }
+        }
+    }
+
+    async fn retained_events_for_user(
+        &self,
+        user_id: &str,
+        now_ts: i64,
+        retention_secs: i64,
+    ) -> Vec<UserBusinessCallEvent> {
+        match self {
+            Self::Memory(backend) => {
+                backend
+                    .retained_events_for_user(user_id, now_ts, retention_secs)
+                    .await
+            }
         }
     }
 }
@@ -1477,5 +1803,140 @@ impl MemoryRequestRateLimitBackend {
         let mut state = self.state.lock().await;
         state.next_gc_at = 0;
         Self::maybe_gc(&mut state, now_ts, window_secs);
+    }
+}
+
+impl MemoryUserBusinessCalls1hBackend {
+    async fn replace_from_backfill(
+        &self,
+        rows: &[UserBusinessCalls1hBackfillRow],
+        now_ts: i64,
+        retention_secs: i64,
+    ) {
+        let mut state = self.state.lock().await;
+        state.entries.clear();
+        state.next_gc_at = 0;
+        for row in rows {
+            state
+                .entries
+                .entry(row.user_id.clone())
+                .or_default()
+                .push_back(UserBusinessCallEvent {
+                    created_at: row.created_at,
+                    outcome: row.outcome,
+                });
+        }
+        Self::maybe_gc(&mut state, now_ts, retention_secs);
+    }
+
+    async fn record_event(
+        &self,
+        user_id: &str,
+        event: UserBusinessCallEvent,
+        now_ts: i64,
+        retention_secs: i64,
+    ) {
+        let mut state = self.state.lock().await;
+        Self::maybe_gc(&mut state, now_ts, retention_secs);
+        let queue = state.entries.entry(user_id.to_string()).or_default();
+        Self::insert_event_sorted(queue, event);
+        Self::prune_queue(queue, now_ts, retention_secs);
+        if queue.is_empty() {
+            state.entries.remove(user_id);
+        }
+    }
+
+    async fn snapshot_many(
+        &self,
+        user_ids: &[String],
+        now_ts: i64,
+        rolling_window_secs: i64,
+        retention_secs: i64,
+    ) -> HashMap<String, UserBusinessCallCounts> {
+        let mut state = self.state.lock().await;
+        Self::maybe_gc(&mut state, now_ts, retention_secs);
+        let mut out = HashMap::with_capacity(user_ids.len());
+        let mut empty_keys = Vec::new();
+        for user_id in user_ids {
+            let counts = if let Some(queue) = state.entries.get_mut(user_id) {
+                Self::prune_queue(queue, now_ts, retention_secs);
+                let counts = Self::rolling_counts(queue, now_ts, rolling_window_secs);
+                if queue.is_empty() {
+                    empty_keys.push(user_id.clone());
+                }
+                counts
+            } else {
+                UserBusinessCallCounts::default()
+            };
+            out.insert(user_id.clone(), counts);
+        }
+        for key in empty_keys {
+            state.entries.remove(&key);
+        }
+        out
+    }
+
+    async fn retained_events_for_user(
+        &self,
+        user_id: &str,
+        now_ts: i64,
+        retention_secs: i64,
+    ) -> Vec<UserBusinessCallEvent> {
+        let mut state = self.state.lock().await;
+        Self::maybe_gc(&mut state, now_ts, retention_secs);
+        let Some(queue) = state.entries.get_mut(user_id) else {
+            return Vec::new();
+        };
+        Self::prune_queue(queue, now_ts, retention_secs);
+        let out = queue.iter().cloned().collect();
+        if queue.is_empty() {
+            state.entries.remove(user_id);
+        }
+        out
+    }
+
+    fn maybe_gc(state: &mut MemoryUserBusinessCalls1hState, now_ts: i64, retention_secs: i64) {
+        if now_ts < state.next_gc_at {
+            return;
+        }
+        state.entries.retain(|_, queue| {
+            Self::prune_queue(queue, now_ts, retention_secs);
+            !queue.is_empty()
+        });
+        state.next_gc_at = now_ts.saturating_add(retention_secs.clamp(60, SECS_PER_HOUR));
+    }
+
+    fn prune_queue(queue: &mut VecDeque<UserBusinessCallEvent>, now_ts: i64, retention_secs: i64) {
+        let expires_at = now_ts - retention_secs;
+        while queue
+            .front()
+            .is_some_and(|event| event.created_at <= expires_at)
+        {
+            queue.pop_front();
+        }
+    }
+
+    fn insert_event_sorted(
+        queue: &mut VecDeque<UserBusinessCallEvent>,
+        event: UserBusinessCallEvent,
+    ) {
+        let insert_at = queue
+            .iter()
+            .position(|existing| existing.created_at > event.created_at)
+            .unwrap_or(queue.len());
+        queue.insert(insert_at, event);
+    }
+
+    fn rolling_counts(
+        queue: &VecDeque<UserBusinessCallEvent>,
+        now_ts: i64,
+        rolling_window_secs: i64,
+    ) -> UserBusinessCallCounts {
+        let cutoff = now_ts - rolling_window_secs;
+        let mut counts = UserBusinessCallCounts::default();
+        for event in queue.iter().filter(|event| event.created_at > cutoff) {
+            counts.record(event.outcome);
+        }
+        counts
     }
 }

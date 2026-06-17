@@ -775,6 +775,12 @@ async fn get_user_detail(
         token_count: user.token_count,
         api_key_count,
         request_rate: summary.request_rate.clone(),
+        business_calls_1h: AdminBusinessCalls1hSummaryView {
+            success_count: summary.business_calls_1h.success_count,
+            failure_count: summary.business_calls_1h.failure_count,
+            total_count: summary.business_calls_1h.total_count,
+            window_minutes: summary.business_calls_1h.window_minutes,
+        },
         hourly_any_used: summary.hourly_any_used,
         hourly_any_limit: summary.hourly_any_limit,
         quota_hourly_used: summary.quota_hourly_used,
@@ -859,25 +865,51 @@ async fn get_user_usage_series(
         return Err((StatusCode::NOT_FOUND, "user not found".to_string()));
     };
 
-    let usage = state
-        .proxy
-        .admin_user_usage_series(&id, series)
-        .await
-        .map_err(|err| admin_proxy_error_response("get admin user usage series error", err))?;
+    let payload = if series == AdminUserUsageSeriesKind::BusinessCalls1h {
+        let usage = state
+            .proxy
+            .admin_user_business_calls_1h_series(&id)
+            .await
+            .map_err(|err| admin_proxy_error_response("get admin user business usage series error", err))?;
+        AdminUserUsageSeriesView::BusinessCalls1h {
+            limit: usage.limit,
+            points: usage
+                .points
+                .into_iter()
+                .map(|point| AdminUserBusinessCalls1hPointView {
+                    bucket_start: point.bucket_start,
+                    display_bucket_start: point.display_bucket_start,
+                    bars: AdminUserBusinessCalls1hBarsPointView {
+                        success: point.bars.success,
+                        failure: point.bars.failure,
+                    },
+                    pressure: point.pressure,
+                    limit_value: point.limit_value,
+                })
+                .collect(),
+        }
+    } else {
+        let usage = state
+            .proxy
+            .admin_user_usage_series(&id, series)
+            .await
+            .map_err(|err| admin_proxy_error_response("get admin user usage series error", err))?;
+        AdminUserUsageSeriesView::QuotaLike {
+            limit: usage.limit,
+            points: usage
+                .points
+                .into_iter()
+                .map(|point| AdminUserUsageSeriesQuotaPointView {
+                    bucket_start: point.bucket_start,
+                    display_bucket_start: point.display_bucket_start,
+                    value: point.value,
+                    limit_value: point.limit_value,
+                })
+                .collect(),
+        }
+    };
 
-    Ok(Json(AdminUserUsageSeriesView {
-        limit: usage.limit,
-        points: usage
-            .points
-            .into_iter()
-            .map(|point| AdminUserUsageSeriesPointView {
-                bucket_start: point.bucket_start,
-                display_bucket_start: point.display_bucket_start,
-                value: point.value,
-                limit_value: point.limit_value,
-            })
-            .collect(),
-    }))
+    Ok(Json(payload))
 }
 
 #[axum::debug_handler]

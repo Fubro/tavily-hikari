@@ -21,7 +21,7 @@ import type {
   AdminUserIpTimelineEntry,
   AdminUserUsageSeries,
   AdminUserUsageSeriesKey,
-  AdminUserUsageSeriesPoint,
+  AdminUserUsageSeriesQuotaPoint,
 } from '../api'
 import type { AdminTranslations } from '../i18n'
 import SegmentedTabs from '../components/ui/SegmentedTabs'
@@ -30,8 +30,21 @@ import { useTheme } from '../theme'
 
 ChartJS.register(CategoryScale, LinearScale, BarElement, LineController, LineElement, PointElement, Tooltip, Legend)
 
-const USAGE_TAB_ORDER: readonly AdminUserUsagePanelTab[] = ['rate5m', 'quota1h', 'quota24h', 'quotaMonth', 'ip']
-const USAGE_SERIES_KEYS = new Set<AdminUserUsageSeriesKey>(['rate5m', 'quota1h', 'quota24h', 'quotaMonth'])
+const USAGE_TAB_ORDER: readonly AdminUserUsagePanelTab[] = [
+  'rate5m',
+  'quota1h',
+  'businessCalls1h',
+  'quota24h',
+  'quotaMonth',
+  'ip',
+]
+const USAGE_SERIES_KEYS = new Set<AdminUserUsageSeriesKey>([
+  'rate5m',
+  'quota1h',
+  'businessCalls1h',
+  'quota24h',
+  'quotaMonth',
+])
 
 type LoadStatus = 'idle' | 'loading' | 'success' | 'error'
 type TooltipVerticalPlacement = 'top' | 'bottom'
@@ -85,7 +98,7 @@ function formatNumber(locale: string, value: number): string {
 function formatBucketAxisLabel(
   locale: string,
   series: AdminUserUsageSeriesKey,
-  point: AdminUserUsageSeriesPoint,
+  point: AdminUserUsageSeriesQuotaPoint,
 ): string {
   const date = new Date((point.displayBucketStart ?? point.bucketStart) * 1000)
   if (series === 'quotaMonth') {
@@ -118,6 +131,7 @@ function monthBucketEnd(bucketStart: Date): Date {
 function bucketDurationSeconds(series: AdminUserUsageSeriesKey, bucketStart: number): number {
   switch (series) {
     case 'rate5m':
+    case 'businessCalls1h':
       return 5 * 60
     case 'quota1h':
       return 60 * 60
@@ -133,7 +147,7 @@ function bucketDurationSeconds(series: AdminUserUsageSeriesKey, bucketStart: num
 function formatBucketTooltipLabel(
   locale: string,
   series: AdminUserUsageSeriesKey,
-  point: AdminUserUsageSeriesPoint,
+  point: AdminUserUsageSeriesQuotaPoint,
 ): string {
   const displayStart = point.displayBucketStart ?? point.bucketStart
   const start = new Date(displayStart * 1000)
@@ -195,6 +209,7 @@ function clipIpTimelineRange(item: AdminUserIpTimelineEntry, bounds: TimelineBou
 function axisTickStride(series: AdminUserUsageSeriesKey): number {
   switch (series) {
     case 'rate5m':
+    case 'businessCalls1h':
       return 24
     case 'quota1h':
       return 6
@@ -203,6 +218,22 @@ function axisTickStride(series: AdminUserUsageSeriesKey): number {
     case 'quotaMonth':
       return 1
   }
+}
+
+export function isBusinessCalls1hStacked(activeSeries: AdminUserUsageSeriesKey): boolean {
+  return activeSeries === 'businessCalls1h'
+}
+
+function isQuotaLikeSeries(
+  value: AdminUserUsageSeries | null | undefined,
+): value is Extract<AdminUserUsageSeries, { kind: 'quotaLike' }> {
+  return value?.kind === 'quotaLike'
+}
+
+function isBusinessCallsSeries(
+  value: AdminUserUsageSeries | null | undefined,
+): value is Extract<AdminUserUsageSeries, { kind: 'businessCalls1h' }> {
+  return value?.kind === 'businessCalls1h'
 }
 
 function areTooltipStatesEqual(a: SharedUsageTooltipState | null, b: SharedUsageTooltipState | null): boolean {
@@ -349,7 +380,15 @@ export function UserDetailSharedUsagePanel({
     () => USAGE_TAB_ORDER.filter((key) => key === 'ip' || (isUsageSeriesKey(key) && seriesCache[key] != null)),
     [seriesCache],
   )
-  const hasRenderablePoints = currentSeries?.points.some((point) => point.value != null || point.limitValue != null) ?? false
+  const hasRenderablePoints = useMemo(() => {
+    if (!currentSeries) return false
+    if (isQuotaLikeSeries(currentSeries)) {
+      return currentSeries.points.some((point) => point.value != null || point.limitValue != null)
+    }
+    return currentSeries.points.some(
+      (point) => point.bars.success != null || point.bars.failure != null || point.pressure != null,
+    )
+  }, [currentSeries])
   const chartPalette = useMemo(
     () => ({
       bar: readChartColorVar('--primary', '#38bdf8'),
@@ -363,7 +402,11 @@ export function UserDetailSharedUsagePanel({
 
   const activeTooltip = pinnedTooltip ?? hoverTooltip
   const activeTooltipPoint = activeTooltip ? currentSeries?.points[activeTooltip.index] ?? null : null
-  const tooltipHasGap = activeTooltipPoint ? activeTooltipPoint.value == null || activeTooltipPoint.limitValue == null : false
+  const tooltipHasGap = activeTooltipPoint
+    ? 'value' in activeTooltipPoint
+      ? activeTooltipPoint.value == null || activeTooltipPoint.limitValue == null
+      : activeTooltipPoint.pressure == null
+    : false
 
   const retryActiveSeries = () => {
     if (!isUsageSeriesKey(activeSeries)) return
@@ -377,6 +420,55 @@ export function UserDetailSharedUsagePanel({
   const chartData = useMemo(() => {
     if (!isUsageSeriesKey(activeSeries)) {
       return { labels: [], datasets: [] } as unknown as ChartData<'bar', (number | null)[], string>
+    }
+    if (isBusinessCallsSeries(currentSeries)) {
+      const labels = currentSeries.points.map((point) =>
+        formatBucketAxisLabel(language, 'businessCalls1h', {
+          bucketStart: point.bucketStart,
+          displayBucketStart: point.displayBucketStart,
+          value: point.pressure,
+          limitValue: point.limitValue,
+        }),
+      )
+      return {
+        labels,
+        datasets: [
+          {
+            type: 'bar',
+            label: usersStrings.detail.sharedUsageLegendSuccess,
+            data: currentSeries.points.map((point) => point.bars.success),
+            backgroundColor: chartPalette.bar,
+            borderColor: chartPalette.barBorder,
+            borderWidth: 1,
+            borderRadius: 6,
+            stack: 'business-bars',
+            barPercentage: 0.72,
+            categoryPercentage: 0.82,
+          },
+          {
+            type: 'bar',
+            label: usersStrings.detail.sharedUsageLegendFailure,
+            data: currentSeries.points.map((point) => point.bars.failure),
+            backgroundColor: readChartColorVar('--destructive', '#ef4444'),
+            borderColor: readChartColorVar('--destructive', '#dc2626'),
+            borderWidth: 1,
+            borderRadius: 6,
+            stack: 'business-bars',
+            barPercentage: 0.72,
+            categoryPercentage: 0.82,
+          },
+          {
+            type: 'line',
+            label: usersStrings.detail.sharedUsageLegendPressure,
+            data: currentSeries.points.map((point) => point.pressure),
+            borderColor: chartPalette.line,
+            borderWidth: 2,
+            pointRadius: 0,
+            pointHoverRadius: 0,
+            tension: 0,
+          },
+        ],
+      } as unknown as ChartData<'bar', (number | null)[], string>
     }
     const labels = currentSeries?.points.map((point) => formatBucketAxisLabel(language, activeSeries, point)) ?? []
     return {
@@ -413,7 +505,10 @@ export function UserDetailSharedUsagePanel({
     chartPalette.line,
     currentSeries,
     language,
+    usersStrings.detail.sharedUsageLegendFailure,
     usersStrings.detail.sharedUsageLegendLimit,
+    usersStrings.detail.sharedUsageLegendPressure,
+    usersStrings.detail.sharedUsageLegendSuccess,
     usersStrings.detail.sharedUsageLegendUsed,
   ])
 
@@ -485,6 +580,7 @@ export function UserDetailSharedUsagePanel({
       },
       scales: {
         x: {
+          stacked: isBusinessCalls1hStacked(activeSeries),
           grid: { display: false },
           ticks: {
             autoSkip: false,
@@ -504,6 +600,7 @@ export function UserDetailSharedUsagePanel({
         },
         y: {
           beginAtZero: true,
+          stacked: isBusinessCalls1hStacked(activeSeries),
           grid: { color: chartPalette.grid },
           ticks: {
             color: chartPalette.tick,
@@ -675,6 +772,7 @@ export function UserDetailSharedUsagePanel({
             options={[
               { value: 'rate5m', label: usersStrings.detail.sharedUsageTabs.fiveMinute },
               { value: 'quota1h', label: usersStrings.detail.sharedUsageTabs.oneHour },
+              { value: 'businessCalls1h', label: usersStrings.detail.sharedUsageTabs.businessOneHour },
               { value: 'quota24h', label: usersStrings.detail.sharedUsageTabs.daily },
               { value: 'quotaMonth', label: usersStrings.detail.sharedUsageTabs.monthly },
               { value: 'ip', label: usersStrings.detail.sharedUsageTabs.ip },
@@ -691,6 +789,7 @@ export function UserDetailSharedUsagePanel({
             options={[
               { value: 'rate5m', label: usersStrings.detail.sharedUsageTabs.fiveMinute },
               { value: 'quota1h', label: usersStrings.detail.sharedUsageTabs.oneHour },
+              { value: 'businessCalls1h', label: usersStrings.detail.sharedUsageTabs.businessOneHour },
               { value: 'quota24h', label: usersStrings.detail.sharedUsageTabs.daily },
               { value: 'quotaMonth', label: usersStrings.detail.sharedUsageTabs.monthly },
               { value: 'ip', label: usersStrings.detail.sharedUsageTabs.ip },
@@ -706,12 +805,25 @@ export function UserDetailSharedUsagePanel({
           <div className="admin-user-shared-usage-legend">
             <span className="admin-user-shared-usage-legend-item">
               <span className="admin-user-shared-usage-legend-chip admin-user-shared-usage-legend-chip-bar" />
-              {usersStrings.detail.sharedUsageLegendUsed}
+              {activeSeries === 'businessCalls1h'
+                ? usersStrings.detail.sharedUsageLegendSuccess
+                : usersStrings.detail.sharedUsageLegendUsed}
             </span>
             <span className="admin-user-shared-usage-legend-item">
               <span className="admin-user-shared-usage-legend-chip admin-user-shared-usage-legend-chip-line" />
-              {usersStrings.detail.sharedUsageLegendLimit}
+              {activeSeries === 'businessCalls1h'
+                ? usersStrings.detail.sharedUsageLegendPressure
+                : usersStrings.detail.sharedUsageLegendLimit}
             </span>
+            {activeSeries === 'businessCalls1h' ? (
+              <span className="admin-user-shared-usage-legend-item">
+                <span
+                  className="admin-user-shared-usage-legend-chip"
+                  style={{ backgroundColor: readChartColorVar('--destructive', '#ef4444') }}
+                />
+                {usersStrings.detail.sharedUsageLegendFailure}
+              </span>
+            ) : null}
           </div>
         </div>
       )}
@@ -758,21 +870,67 @@ export function UserDetailSharedUsagePanel({
                 }}
               >
                 <div className="admin-user-shared-usage-tooltip-header">
-                  <strong>{formatBucketTooltipLabel(language, activeSeries, activeTooltipPoint)}</strong>
+                  <strong>
+                    {formatBucketTooltipLabel(
+                      language,
+                      activeSeries,
+                      'value' in activeTooltipPoint
+                        ? activeTooltipPoint
+                        : {
+                            bucketStart: activeTooltipPoint.bucketStart,
+                            displayBucketStart: activeTooltipPoint.displayBucketStart,
+                            value: activeTooltipPoint.pressure,
+                            limitValue: activeTooltipPoint.limitValue,
+                          },
+                    )}
+                  </strong>
                 </div>
                 <dl className="admin-user-shared-usage-tooltip-grid">
-                  <div>
-                    <dt>{usersStrings.detail.sharedUsageLegendUsed}</dt>
-                    <dd>
-                      {activeTooltipPoint.value == null ? '—' : formatNumber(language, activeTooltipPoint.value)}
-                    </dd>
-                  </div>
-                  <div>
-                    <dt>{usersStrings.detail.sharedUsageLegendLimit}</dt>
-                    <dd>
-                      {activeTooltipPoint.limitValue == null ? '—' : formatNumber(language, activeTooltipPoint.limitValue)}
-                    </dd>
-                  </div>
+                  {'value' in activeTooltipPoint ? (
+                    <>
+                      <div>
+                        <dt>{usersStrings.detail.sharedUsageLegendUsed}</dt>
+                        <dd>
+                          {activeTooltipPoint.value == null ? '—' : formatNumber(language, activeTooltipPoint.value)}
+                        </dd>
+                      </div>
+                      <div>
+                        <dt>{usersStrings.detail.sharedUsageLegendLimit}</dt>
+                        <dd>
+                          {activeTooltipPoint.limitValue == null
+                            ? '—'
+                            : formatNumber(language, activeTooltipPoint.limitValue)}
+                        </dd>
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      <div>
+                        <dt>{usersStrings.detail.sharedUsageLegendSuccess}</dt>
+                        <dd>
+                          {activeTooltipPoint.bars.success == null
+                            ? '—'
+                            : formatNumber(language, activeTooltipPoint.bars.success)}
+                        </dd>
+                      </div>
+                      <div>
+                        <dt>{usersStrings.detail.sharedUsageLegendFailure}</dt>
+                        <dd>
+                          {activeTooltipPoint.bars.failure == null
+                            ? '—'
+                            : formatNumber(language, activeTooltipPoint.bars.failure)}
+                        </dd>
+                      </div>
+                      <div>
+                        <dt>{usersStrings.detail.sharedUsageLegendPressure}</dt>
+                        <dd>
+                          {activeTooltipPoint.pressure == null
+                            ? '—'
+                            : formatNumber(language, activeTooltipPoint.pressure)}
+                        </dd>
+                      </div>
+                    </>
+                  )}
                 </dl>
                 {tooltipHasGap ? (
                   <p className="admin-user-shared-usage-tooltip-note">{usersStrings.detail.sharedUsagePartialHint}</p>

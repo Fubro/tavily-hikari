@@ -1437,6 +1437,7 @@ const MOCK_USERS: AdminUserSummary[] = [
     apiKeyCount: 3,
     tags: MOCK_ALICE_TAGS,
     requestRate: createRequestRate(58, 60, 'user'),
+    businessCalls1h: { successCount: 34, failureCount: 2, totalCount: 36, windowMinutes: 60 },
     hourlyAnyUsed: 58,
     hourlyAnyLimit: 60,
     quotaHourlyUsed: 1_118,
@@ -1465,6 +1466,7 @@ const MOCK_USERS: AdminUserSummary[] = [
     apiKeyCount: 2,
     tags: MOCK_BOB_TAGS,
     requestRate: createRequestRate(60, 60, 'user'),
+    businessCalls1h: { successCount: 58, failureCount: 4, totalCount: 62, windowMinutes: 60 },
     hourlyAnyUsed: 60,
     hourlyAnyLimit: 60,
     quotaHourlyUsed: 602,
@@ -1493,6 +1495,7 @@ const MOCK_USERS: AdminUserSummary[] = [
     apiKeyCount: 0,
     tags: [],
     requestRate: createRequestRate(0, 60, 'user'),
+    businessCalls1h: { successCount: 0, failureCount: 0, totalCount: 0, windowMinutes: 60 },
     hourlyAnyUsed: 0,
     hourlyAnyLimit: 60,
     quotaHourlyUsed: 0,
@@ -1540,6 +1543,7 @@ const MOCK_USER_TOKENS: AdminUserTokenSummary[] = [
 
 const MOCK_USER_USAGE_SERIES: Record<AdminUserUsageSeriesKey, AdminUserUsageSeries> = {
   quota1h: {
+    kind: 'quotaLike',
     limit: 500,
     points: Array.from({ length: 72 }, (_, index) => ({
       bucketStart: now - (71 - index) * 3_600,
@@ -1548,6 +1552,7 @@ const MOCK_USER_USAGE_SERIES: Record<AdminUserUsageSeriesKey, AdminUserUsageSeri
     })),
   },
   rate5m: {
+    kind: 'quotaLike',
     limit: 100,
     points: Array.from({ length: 288 }, (_, index) => ({
       bucketStart: now - (287 - index) * 300,
@@ -1556,6 +1561,7 @@ const MOCK_USER_USAGE_SERIES: Record<AdminUserUsageSeriesKey, AdminUserUsageSeri
     })),
   },
   quota24h: {
+    kind: 'quotaLike',
     limit: 12_000,
     points: Array.from({ length: 7 }, (_, index) => ({
       bucketStart: now - (6 - index) * 86_400,
@@ -1564,6 +1570,7 @@ const MOCK_USER_USAGE_SERIES: Record<AdminUserUsageSeriesKey, AdminUserUsageSeri
     })),
   },
   quotaMonth: {
+    kind: 'quotaLike',
     limit: 160_000,
     points: Array.from({ length: 12 }, (_, index) => ({
       bucketStart: Date.UTC(2025, 4 + index, 1, 0, 0, 0) / 1000,
@@ -1575,6 +1582,19 @@ const MOCK_USER_USAGE_SERIES: Record<AdminUserUsageSeriesKey, AdminUserUsageSeri
         : index < 9
           ? 120_000
           : 160_000,
+    })),
+  },
+  businessCalls1h: {
+    kind: 'businessCalls1h',
+    limit: 0,
+    points: Array.from({ length: 288 }, (_, index) => ({
+      bucketStart: now - (287 - index) * 300,
+      bars: {
+        success: 1 + ((index * 3) % 5),
+        failure: index % 31 === 0 ? 1 : 0,
+      },
+      pressure: 18 + ((index * 7) % 24),
+      limitValue: null,
     })),
   },
 }
@@ -2058,6 +2078,20 @@ function formatQuotaStackValue(used: number, limit: number): { primary: string; 
     primary: formatNumber(Math.max(0, used)),
     secondary: formatQuotaLimitValue(limit),
     primaryClassName: quotaUsagePrimaryClassName(used, limit) ?? undefined,
+  }
+}
+
+function formatBusinessCalls1hStackValue(
+  success: number,
+  failure: number,
+  language: 'en' | 'zh',
+): { primary: string; secondary: string } {
+  return {
+    primary: formatNumber(success + failure),
+    secondary:
+      language === 'zh'
+        ? `成 ${formatNumber(success)} / 败 ${formatNumber(failure)}`
+        : `S ${formatNumber(success)} / F ${formatNumber(failure)}`,
   }
 }
 
@@ -5273,6 +5307,7 @@ function UsersUsagePageCanvas({
                     activeOrder={effectiveSortOrder}
                     onToggle={toggleSort}
                   />
+                  <th>{users.usage.table.businessOneHour}</th>
                   <StoryAdminUsersSortableHeader
                     label={users.usage.table.daily}
                     field="quotaDailyUsed"
@@ -5331,6 +5366,11 @@ function UsersUsagePageCanvas({
                   const requestRate = resolveRequestRate(item, 'user')
                   const requestRateMetric = formatQuotaStackValue(requestRate.used, requestRate.limit)
                   const hourlyMetric = formatQuotaStackValue(item.quotaHourlyUsed, item.quotaHourlyLimit)
+                  const businessCalls1hMetric = formatBusinessCalls1hStackValue(
+                    item.businessCalls1h.successCount,
+                    item.businessCalls1h.failureCount,
+                    language,
+                  )
                   const dailyQuotaMetric = formatQuotaStackValue(item.quotaDailyUsed, item.quotaDailyLimit)
                   const monthlyQuotaMetric = formatQuotaStackValue(item.quotaMonthlyUsed, item.quotaMonthlyLimit)
                   const monthlyBrokenMetric = formatMonthlyBrokenStackValue(
@@ -5372,6 +5412,12 @@ function UsersUsagePageCanvas({
                         <div className="admin-table-value-stack">
                           <span className={`admin-table-value-primary${hourlyMetric.primaryClassName ? ` ${hourlyMetric.primaryClassName}` : ''}`}>{hourlyMetric.primary}</span>
                           <span className="admin-table-value-secondary">{hourlyMetric.secondary}</span>
+                        </div>
+                      </td>
+                      <td className="admin-users-compact-cell">
+                        <div className="admin-table-value-stack">
+                          <span className="admin-table-value-primary">{businessCalls1hMetric.primary}</span>
+                          <span className="admin-table-value-secondary">{businessCalls1hMetric.secondary}</span>
                         </div>
                       </td>
                       <td className="admin-users-compact-cell">
@@ -6096,6 +6142,17 @@ function UserDetailPageCanvas({
           <div className="token-info-card">
             <span className="token-info-label">{users.table.tokenCount}</span>
             <span className="token-info-value">{formatNumber(detail.tokenCount)}</span>
+          </div>
+          <div className="token-info-card">
+            <span className="token-info-label">{users.usage.table.businessOneHour}</span>
+            <span className="token-info-value">
+              {formatNumber(detail.businessCalls1h.totalCount)}
+              <span className="admin-table-value-secondary" style={{ display: 'block' }}>
+                {language === 'zh'
+                  ? `成 ${formatNumber(detail.businessCalls1h.successCount)} / 败 ${formatNumber(detail.businessCalls1h.failureCount)}`
+                  : `S ${formatNumber(detail.businessCalls1h.successCount)} / F ${formatNumber(detail.businessCalls1h.failureCount)}`}
+              </span>
+            </span>
           </div>
           <div className="token-info-card">
             <span className="token-info-label">{users.usage.table.ipCount24h}</span>
@@ -7343,6 +7400,27 @@ export const UserDetailCompact: Story = {
 
 export const UserDetailMonthlyGap: Story = {
   render: () => <UserDetailPageCanvas initialUsageSeries="quotaMonth" />,
+}
+
+export const UserDetailBusinessCalls1h: Story = {
+  render: () => <UserDetailPageCanvas initialUsageSeries="businessCalls1h" />,
+  parameters: {
+    viewport: { defaultViewport: '1440-device-desktop' },
+  },
+  play: async ({ canvasElement }) => {
+    await new Promise((resolve) => window.setTimeout(resolve, 80))
+
+    const usagePanel = canvasElement.querySelector<HTMLElement>('.admin-user-shared-usage-panel')
+    if (usagePanel?.dataset.activeSeries !== 'businessCalls1h') {
+      throw new Error('Expected the business calls story to open the business 1h tab.')
+    }
+    if (!canvasElement.textContent?.includes('业务 1h')) {
+      throw new Error('Expected the business calls story to include the business 1h label.')
+    }
+    if (!canvasElement.textContent?.includes('36')) {
+      throw new Error('Expected the business calls story to expose the business 1h total summary.')
+    }
+  },
 }
 
 export const UserDetailIpUsage: Story = {

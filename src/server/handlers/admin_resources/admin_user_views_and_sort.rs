@@ -125,6 +125,7 @@ struct AdminUserSummaryView {
     token_count: i64,
     api_key_count: i64,
     request_rate: tavily_hikari::RequestRateView,
+    business_calls_1h: AdminBusinessCalls1hSummaryView,
     hourly_any_used: i64,
     hourly_any_limit: i64,
     quota_hourly_used: i64,
@@ -143,6 +144,15 @@ struct AdminUserSummaryView {
     recent_ip_count_7d: i64,
     last_activity: Option<i64>,
     tags: Vec<AdminUserTagBindingView>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct AdminBusinessCalls1hSummaryView {
+    success_count: i64,
+    failure_count: i64,
+    total_count: i64,
+    window_minutes: i64,
 }
 
 #[derive(Debug, Serialize)]
@@ -176,7 +186,7 @@ struct ListUserTagsResponse {
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct AdminUserUsageSeriesPointView {
+struct AdminUserUsageSeriesQuotaPointView {
     bucket_start: i64,
     display_bucket_start: Option<i64>,
     value: Option<i64>,
@@ -185,9 +195,35 @@ struct AdminUserUsageSeriesPointView {
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct AdminUserUsageSeriesView {
-    limit: i64,
-    points: Vec<AdminUserUsageSeriesPointView>,
+struct AdminUserBusinessCalls1hBarsPointView {
+    success: Option<i64>,
+    failure: Option<i64>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct AdminUserBusinessCalls1hPointView {
+    bucket_start: i64,
+    display_bucket_start: Option<i64>,
+    bars: AdminUserBusinessCalls1hBarsPointView,
+    pressure: Option<i64>,
+    limit_value: Option<i64>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+#[serde(tag = "kind")]
+enum AdminUserUsageSeriesView {
+    #[serde(rename = "quotaLike")]
+    QuotaLike {
+        limit: i64,
+        points: Vec<AdminUserUsageSeriesQuotaPointView>,
+    },
+    #[serde(rename = "businessCalls1h")]
+    BusinessCalls1h {
+        limit: i64,
+        points: Vec<AdminUserBusinessCalls1hPointView>,
+    },
 }
 
 #[derive(Debug, Serialize)]
@@ -210,6 +246,7 @@ struct AdminUserDetailView {
     token_count: i64,
     api_key_count: i64,
     request_rate: tavily_hikari::RequestRateView,
+    business_calls_1h: AdminBusinessCalls1hSummaryView,
     hourly_any_used: i64,
     hourly_any_limit: i64,
     quota_hourly_used: i64,
@@ -555,6 +592,12 @@ fn build_admin_user_summary_view(
         token_count: user.token_count,
         api_key_count: input.api_key_count,
         request_rate: summary.request_rate.clone(),
+        business_calls_1h: AdminBusinessCalls1hSummaryView {
+            success_count: summary.business_calls_1h.success_count,
+            failure_count: summary.business_calls_1h.failure_count,
+            total_count: summary.business_calls_1h.total_count,
+            window_minutes: summary.business_calls_1h.window_minutes,
+        },
         hourly_any_used: summary.hourly_any_used,
         hourly_any_limit: summary.hourly_any_limit,
         quota_hourly_used: summary.quota_hourly_used,
@@ -630,6 +673,10 @@ fn empty_user_dashboard_summary() -> tavily_hikari::UserDashboardSummary {
     tavily_hikari::UserDashboardSummary {
         debug_info_shared: false,
         request_rate: default_request_rate_view(tavily_hikari::RequestRateScope::User),
+        business_calls_1h: tavily_hikari::BusinessCalls1hSummary {
+            window_minutes: 60,
+            ..tavily_hikari::BusinessCalls1hSummary::default()
+        },
         hourly_any_used: 0,
         hourly_any_limit: 0,
         quota_hourly_used: 0,

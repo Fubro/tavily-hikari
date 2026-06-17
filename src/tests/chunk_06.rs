@@ -1944,6 +1944,7 @@ async fn monthly_quota_rebase_startup_gate_runs_once_and_manual_rebase_remains_i
         .expect("audit before startup rebase");
     assert_eq!(audit_before.summary.month_only_mismatches, 1);
 
+    proxy.key_store.flush_request_stats_writes().await.expect("flush stats before reopen");
     drop(proxy);
 
     let proxy_after = TavilyProxy::with_endpoint(Vec::<String>::new(), DEFAULT_UPSTREAM, &db_str)
@@ -1978,6 +1979,11 @@ async fn monthly_quota_rebase_startup_gate_runs_once_and_manual_rebase_remains_i
         .execute(&proxy_after.key_store.pool)
         .await
         .expect("corrupt token month after startup rebase");
+    proxy_after
+        .key_store
+        .flush_request_stats_writes()
+        .await
+        .expect("flush stats before third reopen");
     drop(proxy_after);
 
     let proxy_third = TavilyProxy::with_endpoint(Vec::<String>::new(), DEFAULT_UPSTREAM, &db_str)

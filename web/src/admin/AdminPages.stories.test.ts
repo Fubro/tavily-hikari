@@ -26,6 +26,7 @@ describe('AdminPages Storybook proofs', () => {
     expect(adminPageStories.UserDetailSharedUsageTooltip).toMatchObject({})
     expect(adminPageStories.UserDetailCompact).toMatchObject({})
     expect(adminPageStories.UserDetailSingleTokenGuard).toMatchObject({})
+    expect(adminPageStories.UserDetailBusinessCalls1h).toMatchObject({})
   })
 
   it('renders the sync-progress story with the progress bubble copy', () => {
@@ -309,6 +310,24 @@ describe('AdminPages Storybook proofs', () => {
     expect(markup).toContain('admin-user-mobile-chip')
     expect(markup).toContain('累计请求')
     expect(markup).toContain('最终有效额度')
+  })
+
+  it('renders the user detail stories with business 1h summary and tab affordances', () => {
+    const renderStory = adminPageStories.UserDetailBusinessCalls1h.render as (() => JSX.Element) | undefined
+    expect(renderStory).toBeDefined()
+
+    const markup = renderToStaticMarkup(
+      createElement(
+        LanguageProvider,
+        { initialLanguage: 'zh' },
+        createElement(ThemeProvider, null, createElement(TooltipProvider, null, createElement(renderStory!))),
+      ),
+    )
+
+    expect(markup).toContain('业务 1h')
+    expect(markup).toContain('36')
+    expect(markup).toContain('34')
+    expect(markup).toContain('2')
   })
 
   it('renders the user detail stories with add and delete token controls', () => {

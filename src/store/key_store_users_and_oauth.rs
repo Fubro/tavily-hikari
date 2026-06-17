@@ -1270,7 +1270,7 @@ impl KeyStore {
         selection_effect_code: &str,
         selection_effect_summary: Option<&str>,
         request_log_id: Option<i64>,
-    ) -> Result<(), ProxyError> {
+    ) -> Result<Option<UserBusinessCallEventWrite>, ProxyError> {
         let created_at = self.backend_time.now_ts();
         let request_kind = self
             .resolve_token_log_request_kind(request_log_id, request_kind)
@@ -1288,10 +1288,15 @@ impl KeyStore {
         let key_effect_summary = key_effect_summary.map(str::to_string);
         let binding_effect_summary = binding_effect_summary.map(str::to_string);
         let selection_effect_summary = selection_effect_summary.map(str::to_string);
-        let request_user_id = self.resolve_request_rollup_user_id(token_id, None).await?;
         let diagnostic_metadata = self
             .resolve_request_log_diagnostic_metadata(request_log_id)
             .await?;
+        let request_user_id = diagnostic_metadata
+            .request_user_id
+            .clone()
+            .or(self.resolve_request_rollup_user_id(token_id, None).await?);
+        let request_log_created_at = diagnostic_metadata.created_at;
+        let upstream_operation_for_business = diagnostic_metadata.upstream_operation.clone();
         sqlx::query(
             r#"
             INSERT INTO auth_token_logs (
@@ -1340,7 +1345,13 @@ impl KeyStore {
         self.request_stats_coalescer
             .enqueue_auth_token_activity(token_id, request_user_id.as_deref(), created_at)
             .await;
-        Ok(())
+        Ok(build_user_business_call_event_write(
+            request_user_id,
+            counts_business_quota,
+            upstream_operation_for_business,
+            result_status,
+            request_log_created_at.unwrap_or(created_at),
+        ))
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -1367,7 +1378,7 @@ impl KeyStore {
         selection_effect_code: &str,
         selection_effect_summary: Option<&str>,
         request_log_id: Option<i64>,
-    ) -> Result<i64, ProxyError> {
+    ) -> Result<(i64, Option<UserBusinessCallEventWrite>), ProxyError> {
         let created_at = self.backend_time.now_ts();
         let request_kind = self
             .resolve_token_log_request_kind(request_log_id, request_kind)
@@ -1395,12 +1406,15 @@ impl KeyStore {
         let key_effect_summary = key_effect_summary.map(str::to_string);
         let binding_effect_summary = binding_effect_summary.map(str::to_string);
         let selection_effect_summary = selection_effect_summary.map(str::to_string);
-        let request_user_id = self
-            .resolve_request_rollup_user_id(token_id, Some(billing_subject))
-            .await?;
         let diagnostic_metadata = self
             .resolve_request_log_diagnostic_metadata(request_log_id)
             .await?;
+        let request_user_id = diagnostic_metadata.request_user_id.clone().or(
+            self.resolve_request_rollup_user_id(token_id, Some(billing_subject))
+                .await?,
+        );
+        let request_log_created_at = diagnostic_metadata.created_at;
+        let upstream_operation_for_business = diagnostic_metadata.upstream_operation.clone();
         let log_id: i64 = sqlx::query_scalar(
             r#"
             INSERT INTO auth_token_logs (
@@ -1521,7 +1535,16 @@ impl KeyStore {
         self.request_stats_coalescer
             .enqueue_auth_token_activity(token_id, request_user_id.as_deref(), created_at)
             .await;
-        Ok(log_id)
+        Ok((
+            log_id,
+            build_user_business_call_event_write(
+                request_user_id,
+                counts_business_quota,
+                upstream_operation_for_business,
+                result_status,
+                request_log_created_at.unwrap_or(created_at),
+            ),
+        ))
     }
 
     async fn resolve_request_log_diagnostic_metadata(
@@ -1532,9 +1555,18 @@ impl KeyStore {
             return Ok(RequestLogDiagnosticMetadata::default());
         };
 
-        let row = sqlx::query_as::<_, (Option<String>, Option<String>, Option<String>, Option<String>, Option<String>, Option<String>)>(
+        let row = sqlx::query_as::<_, (
+            Option<i64>,
+            Option<String>,
+            Option<String>,
+            Option<String>,
+            Option<String>,
+            Option<String>,
+            Option<String>,
+            Option<String>,
+        )>(
             r#"
-            SELECT gateway_mode, experiment_variant, proxy_session_id, routing_subject_hash, upstream_operation, fallback_reason
+            SELECT created_at, request_user_id, gateway_mode, experiment_variant, proxy_session_id, routing_subject_hash, upstream_operation, fallback_reason
             FROM request_logs
             WHERE id = ?
             LIMIT 1
@@ -1547,6 +1579,8 @@ impl KeyStore {
         Ok(row
             .map(
                 |(
+                    created_at,
+                    request_user_id,
                     gateway_mode,
                     experiment_variant,
                     proxy_session_id,
@@ -1554,6 +1588,8 @@ impl KeyStore {
                     upstream_operation,
                     fallback_reason,
                 )| RequestLogDiagnosticMetadata {
+                    created_at,
+                    request_user_id,
                     gateway_mode,
                     experiment_variant,
                     proxy_session_id,
@@ -2306,4 +2342,26 @@ impl KeyStore {
         Ok(())
     }
 
+}
+
+fn build_user_business_call_event_write(
+    request_user_id: Option<String>,
+    counts_business_quota: i64,
+    upstream_operation: Option<String>,
+    result_status: &str,
+    created_at: i64,
+) -> Option<UserBusinessCallEventWrite> {
+    let user_id = request_user_id?;
+    if counts_business_quota != 1 {
+        return None;
+    }
+    upstream_operation.as_ref()?;
+    if result_status == OUTCOME_QUOTA_EXHAUSTED {
+        return None;
+    }
+    Some(UserBusinessCallEventWrite {
+        user_id,
+        created_at,
+        result_status: result_status.to_string(),
+    })
 }

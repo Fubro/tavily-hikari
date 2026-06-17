@@ -372,7 +372,8 @@ impl TavilyProxy {
         selection_effect_summary: Option<&str>,
         request_log_id: Option<i64>,
     ) -> Result<(), ProxyError> {
-        self.key_store
+        let event = self
+            .key_store
             .insert_token_log(
                 token_id,
                 method,
@@ -393,7 +394,18 @@ impl TavilyProxy {
                 selection_effect_summary,
                 request_log_id,
             )
-            .await
+            .await?;
+        if let Some(event) = event {
+            let outcome = if event.result_status == OUTCOME_SUCCESS {
+                UserBusinessCallOutcome::Success
+            } else {
+                UserBusinessCallOutcome::Failure
+            };
+            self.user_business_calls_1h_window
+                .record_event(&event.user_id, event.created_at, outcome)
+                .await;
+        }
+        Ok(())
     }
 
     /// Persist a billable attempt before quota counters are charged, so it can be replayed if the
@@ -856,7 +868,8 @@ impl TavilyProxy {
         selection_effect_summary: Option<&str>,
         request_log_id: Option<i64>,
     ) -> Result<i64, ProxyError> {
-        self.key_store
+        let (log_id, event) = self
+            .key_store
             .insert_token_log_pending_billing(
                 token_id,
                 method,
@@ -880,7 +893,18 @@ impl TavilyProxy {
                 selection_effect_summary,
                 request_log_id,
             )
-            .await
+            .await?;
+        if let Some(event) = event {
+            let outcome = if event.result_status == OUTCOME_SUCCESS {
+                UserBusinessCallOutcome::Success
+            } else {
+                UserBusinessCallOutcome::Failure
+            };
+            self.user_business_calls_1h_window
+                .record_event(&event.user_id, event.created_at, outcome)
+                .await;
+        }
+        Ok(log_id)
     }
 
     pub async fn settle_pending_billing_attempt(

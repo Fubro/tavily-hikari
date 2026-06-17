@@ -18,21 +18,21 @@ const EXCEPTIONS = new Map<string, { max: number; reason: string }>([
   [
     'src/admin/AdminDashboardRuntime.tsx',
     {
-      max: 13223,
+      max: 13268,
       reason: 'Legacy admin dashboard runtime remains as a compatibility shell while HA source settings and active-user list filtering land before a larger extraction pass.',
     },
   ],
   [
     'src/admin/storySupport/AdminPagesStoryRuntime.tsx',
     {
-      max: 7445,
+      max: 7523,
       reason: 'Storybook proof runtime remains centralized temporarily while active-user admin states stay on the shared Admin/Pages proof shell.',
     },
   ],
   [
     'src/api/runtime.ts',
     {
-      max: 3469,
+      max: 3505,
       reason:
         'API barrel still carries HA source settings, admin settings, user-list contracts, source dialog failure normalization, and user-console overview APIs until the proxy API surface is split out.',
     },
@@ -61,21 +61,21 @@ const EXCEPTIONS = new Map<string, { max: number; reason: string }>([
   [
     'src/i18n/translations/en.ts',
     {
-      max: 1528,
+      max: 1533,
       reason: 'Admin jobs maintenance copy is still stored in the shared English runtime catalog.',
     },
   ],
   [
     'src/i18n/translations/zh.ts',
     {
-      max: 1527,
+      max: 1532,
       reason: 'Admin jobs maintenance copy is still stored in the shared Chinese runtime catalog.',
     },
   ],
   [
     'src/i18n/types.ts',
     {
-      max: 1603,
+      max: 1608,
       reason:
         'HA source settings mode-specific failure copy and admin jobs maintenance translation types remain in the shared catalog contract.',
     },
