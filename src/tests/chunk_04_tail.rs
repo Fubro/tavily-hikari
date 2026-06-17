@@ -538,6 +538,18 @@ async fn observability_sidecar_migrate_moves_large_legacy_request_logs_offline()
     let proxy = TavilyProxy::with_endpoint(Vec::<String>::new(), DEFAULT_UPSTREAM, &db_str)
         .await
         .expect("proxy opens migrated db");
+    let migrated_catalog_retention_days = sqlx::query_scalar::<_, i64>(
+        "SELECT CAST(value AS INTEGER) FROM meta WHERE key = ? LIMIT 1",
+    )
+    .bind(META_KEY_REQUEST_LOG_CATALOG_ROLLUP_V1_RETENTION_DAYS)
+    .fetch_one(&proxy.key_store.pool)
+    .await
+    .expect("read migrated catalog retention meta");
+    assert_eq!(
+        migrated_catalog_retention_days,
+        effective_request_logs_retention_days(),
+        "migration should preserve the current catalog retention window after resetting rebuild markers"
+    );
     let attached_path = proxy
         .sqlite_observability_database_path()
         .expect("observability database attached");

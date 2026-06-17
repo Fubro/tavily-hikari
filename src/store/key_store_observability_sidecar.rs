@@ -475,6 +475,11 @@ impl KeyStore {
                         .fetch_one(&store.pool)
                         .await?;
 
+                let request_log_catalog_rollup_retention_days = store
+                    .get_system_settings()
+                    .await?
+                    .request_log_retention
+                    .max_log_retention_days;
                 let mut copied_request_logs = 0_i64;
                 let mut batches = 0_i64;
                 let mut dropped_main_request_logs = false;
@@ -561,12 +566,13 @@ impl KeyStore {
                     sqlx::query(
                         r#"
                         INSERT INTO meta (key, value)
-                        VALUES (?, '0'), (?, '0')
+                        VALUES (?, '0'), (?, ?)
                         ON CONFLICT(key) DO UPDATE SET value = excluded.value
                         "#,
                     )
                     .bind(META_KEY_REQUEST_LOG_CATALOG_ROLLUP_V1_DONE)
                     .bind(META_KEY_REQUEST_LOG_CATALOG_ROLLUP_V1_RETENTION_DAYS)
+                    .bind(request_log_catalog_rollup_retention_days.to_string())
                     .execute(&mut *tx)
                     .await?;
                     sqlx::query("DROP TABLE request_log_catalog_rollups")

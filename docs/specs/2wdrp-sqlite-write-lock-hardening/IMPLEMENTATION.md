@@ -138,6 +138,10 @@
   - resets each legacy rollup/bucket rebuild marker in the same SQLite transaction that drops the
     corresponding legacy `main` table, so an interrupted cutover cannot strand a missing table
     behind a stale “already rebuilt” marker.
+  - preserves `request_log_catalog_rollup_v1_retention_days` at the current retention window while
+    resetting `request_log_catalog_rollup_v1_done`, so post-cutover startup sees the intended
+    rebuild marker reset without forcing an extra catalog rebuild solely because the retention meta
+    was zeroed.
 - Server/admin test helpers now mirror that sidecar layout instead of opening only the core DB
   file. SQLite schema assertions for `request_logs` and the other observability tables now probe
   the attached schema explicitly, which keeps migration and admin-route coverage aligned with the

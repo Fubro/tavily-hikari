@@ -211,7 +211,9 @@ source when a usable persisted runtime already exists.
   `*-observability.db` exists, `main.request_logs` is gone, `observability.request_logs` preserves
   the original `id` coverage, child `request_log_id` / `source_request_log_id` references remain
   valid, and legacy `api_key_usage_buckets`, `dashboard_request_rollup_buckets`, and
-  `request_log_catalog_rollups` are removed from `main` with their rebuild markers reset.
+  `request_log_catalog_rollups` are removed from `main` with their rebuild markers reset. The
+  catalog retention meta must stay aligned with the current retention setting so the first normal
+  startup after cutover does not trigger an avoidable extra catalog rebuild.
 - The explicit migration path must refuse to run while another process still holds the sibling
   `observability-migrate.lock`; success no longer relies on WAL-mode `BEGIN EXCLUSIVE` semantics to
   infer that the live service has stopped.
