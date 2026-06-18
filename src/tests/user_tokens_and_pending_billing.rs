@@ -1,3 +1,6 @@
+use super::jobs_and_request_log_retention::RequestLogsRetentionEnvGuard;
+use super::*;
+
 #[tokio::test]
 async fn ensure_user_token_binding_reuses_existing_binding() {
     let db_path = temp_db_path("user-token-binding-reuse");
@@ -1221,7 +1224,10 @@ async fn request_log_catalog_rollup_feeds_catalog_and_legacy_page() {
         .expect("load exact since logs page");
     assert_eq!(since_page.total, 1);
     assert_eq!(since_page.items.len(), 1);
-    assert_eq!(since_page.items[0].auth_token_id.as_deref(), Some("rollup-token-c"));
+    assert_eq!(
+        since_page.items[0].auth_token_id.as_deref(),
+        Some("rollup-token-c")
+    );
 
     sqlx::query(
         "UPDATE observability.request_logs SET key_effect_code = ? WHERE auth_token_id = 'rollup-token-a'",
@@ -1296,10 +1302,12 @@ async fn request_log_catalog_rollup_feeds_catalog_and_legacy_page() {
     .await
     .expect("insert older retained row outside rollup window");
 
-    sqlx::query("DROP TRIGGER IF EXISTS observability.trg_request_logs_canonical_request_kind_update")
-        .execute(&proxy.key_store.pool)
-        .await
-        .expect("simulate database before legacy canonicalization trigger");
+    sqlx::query(
+        "DROP TRIGGER IF EXISTS observability.trg_request_logs_canonical_request_kind_update",
+    )
+    .execute(&proxy.key_store.pool)
+    .await
+    .expect("simulate database before legacy canonicalization trigger");
     sqlx::query(
         r#"
         UPDATE observability.request_logs
@@ -1333,7 +1341,16 @@ async fn request_log_catalog_rollup_feeds_catalog_and_legacy_page() {
         .await
         .expect("proxy rebuilt rollup after retention metadata changed");
     let rebuilt_catalog = rebuilt_proxy
-        .request_logs_catalog(&["mcp:search".to_string()], None, None, None, None, None, None, None)
+        .request_logs_catalog(
+            &["mcp:search".to_string()],
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+        )
         .await
         .expect("load rebuilt catalog after retention change");
     assert_eq!(rebuilt_catalog.request_kind_options[0].count, 2);
