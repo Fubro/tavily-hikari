@@ -90,7 +90,8 @@ pub fn init_runtime_logging() {
                     .without_time()
                     .compact(),
             )
-            .init();
+            .try_init()
+            .ok();
     });
 }
 
