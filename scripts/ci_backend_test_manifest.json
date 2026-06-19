@@ -87,6 +87,7 @@
         "analysis::tests::",
         "ha::tests::",
         "models::client_ip_tests::",
+        "store::tests::",
         "tavily_proxy::tests::",
         "tests::request_kind_and_core::parse_",
         "tests::proxy_affinity_and_summary::extract_",
