@@ -1147,6 +1147,7 @@ use super::upstream_support_and_manual_jobs::*;
         proxy
             .set_system_settings(&tavily_hikari::SystemSettings {
                 request_rate_limit: request_rate_limit(),
+                auth_token_log_retention_days: tavily_hikari::AUTH_TOKEN_LOG_RETENTION_DAYS_DEFAULT,
                 mcp_session_affinity_key_count: 5,
                 rebalance_mcp_enabled: true,
                 rebalance_mcp_session_percent: 100,
@@ -1442,6 +1443,7 @@ use super::upstream_support_and_manual_jobs::*;
         proxy
             .set_system_settings(&tavily_hikari::SystemSettings {
                 request_rate_limit: request_rate_limit(),
+                auth_token_log_retention_days: tavily_hikari::AUTH_TOKEN_LOG_RETENTION_DAYS_DEFAULT,
                 mcp_session_affinity_key_count: 5,
                 rebalance_mcp_enabled: false,
                 rebalance_mcp_session_percent: 0,
@@ -1496,6 +1498,7 @@ use super::upstream_support_and_manual_jobs::*;
         proxy
             .set_system_settings(&tavily_hikari::SystemSettings {
                 request_rate_limit: request_rate_limit(),
+                auth_token_log_retention_days: tavily_hikari::AUTH_TOKEN_LOG_RETENTION_DAYS_DEFAULT,
                 mcp_session_affinity_key_count: 5,
                 rebalance_mcp_enabled: true,
                 rebalance_mcp_session_percent: 100,
@@ -1589,6 +1592,7 @@ use super::upstream_support_and_manual_jobs::*;
         proxy
             .set_system_settings(&tavily_hikari::SystemSettings {
                 request_rate_limit: request_rate_limit(),
+                auth_token_log_retention_days: tavily_hikari::AUTH_TOKEN_LOG_RETENTION_DAYS_DEFAULT,
                 mcp_session_affinity_key_count: 5,
                 rebalance_mcp_enabled: true,
                 rebalance_mcp_session_percent: 100,
@@ -1827,6 +1831,7 @@ use super::upstream_support_and_manual_jobs::*;
         proxy
             .set_system_settings(&tavily_hikari::SystemSettings {
                 request_rate_limit: request_rate_limit(),
+                auth_token_log_retention_days: tavily_hikari::AUTH_TOKEN_LOG_RETENTION_DAYS_DEFAULT,
                 mcp_session_affinity_key_count: 5,
                 rebalance_mcp_enabled: true,
                 rebalance_mcp_session_percent: 100,
@@ -2075,6 +2080,7 @@ use super::upstream_support_and_manual_jobs::*;
         proxy
             .set_system_settings(&tavily_hikari::SystemSettings {
                 request_rate_limit: request_rate_limit(),
+                auth_token_log_retention_days: tavily_hikari::AUTH_TOKEN_LOG_RETENTION_DAYS_DEFAULT,
                 mcp_session_affinity_key_count: 5,
                 rebalance_mcp_enabled: true,
                 rebalance_mcp_session_percent: 100,
@@ -2183,6 +2189,7 @@ use super::upstream_support_and_manual_jobs::*;
         proxy
             .set_system_settings(&tavily_hikari::SystemSettings {
                 request_rate_limit: request_rate_limit(),
+                auth_token_log_retention_days: tavily_hikari::AUTH_TOKEN_LOG_RETENTION_DAYS_DEFAULT,
                 mcp_session_affinity_key_count: 5,
                 rebalance_mcp_enabled: true,
                 rebalance_mcp_session_percent: 100,
@@ -2261,6 +2268,7 @@ use super::upstream_support_and_manual_jobs::*;
         proxy
             .set_system_settings(&tavily_hikari::SystemSettings {
                 request_rate_limit: request_rate_limit(),
+                auth_token_log_retention_days: tavily_hikari::AUTH_TOKEN_LOG_RETENTION_DAYS_DEFAULT,
                 mcp_session_affinity_key_count: 5,
                 rebalance_mcp_enabled: true,
                 rebalance_mcp_session_percent: 100,
@@ -2330,6 +2338,7 @@ use super::upstream_support_and_manual_jobs::*;
         proxy
             .set_system_settings(&tavily_hikari::SystemSettings {
                 request_rate_limit: request_rate_limit(),
+                auth_token_log_retention_days: tavily_hikari::AUTH_TOKEN_LOG_RETENTION_DAYS_DEFAULT,
                 mcp_session_affinity_key_count: 5,
                 rebalance_mcp_enabled: true,
                 rebalance_mcp_session_percent: 100,

@@ -1915,6 +1915,12 @@ impl KeyStore {
         )
         .execute(&self.pool)
         .await?;
+        sqlx::query(
+            r#"CREATE INDEX IF NOT EXISTS idx_account_usage_rollup_metric_lookup
+               ON account_usage_rollup_buckets(metric_kind, bucket_kind, bucket_start DESC, user_id)"#,
+        )
+        .execute(&self.pool)
+        .await?;
 
         sqlx::query(
             r#"

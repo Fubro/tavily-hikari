@@ -269,6 +269,13 @@ impl KeyStore {
         self.sqlite_db_stats().await
     }
 
+    pub(crate) async fn checkpoint_sqlite_wal_passive(&self) -> Result<(i64, i64, i64), ProxyError> {
+        sqlx::query_as("PRAGMA wal_checkpoint(PASSIVE)")
+            .fetch_one(&self.pool)
+            .await
+            .map_err(ProxyError::Database)
+    }
+
     pub(crate) async fn scheduled_job_start(
         &self,
         job_type: &str,

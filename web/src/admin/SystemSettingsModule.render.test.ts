@@ -36,6 +36,7 @@ describe('SystemSettingsModule rendering', () => {
         strings,
         settings: {
           requestRateLimit: 100,
+          authTokenLogRetentionDays: 92,
           mcpSessionAffinityKeyCount: 5,
           rebalanceMcpEnabled: false,
           rebalanceMcpSessionPercent: 100,
@@ -99,6 +100,7 @@ describe('SystemSettingsModule rendering', () => {
         strings,
         settings: {
           requestRateLimit: 100,
+          authTokenLogRetentionDays: 92,
           mcpSessionAffinityKeyCount: 5,
           rebalanceMcpEnabled: true,
           rebalanceMcpSessionPercent: 35,
@@ -135,6 +137,7 @@ describe('SystemSettingsModule rendering', () => {
         strings,
         settings: {
           requestRateLimit: 100,
+          authTokenLogRetentionDays: 92,
           mcpSessionAffinityKeyCount: 5,
           rebalanceMcpEnabled: false,
           rebalanceMcpSessionPercent: 35,

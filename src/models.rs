@@ -932,6 +932,7 @@ pub struct RequestLogRetentionSettings {
 #[serde(rename_all = "camelCase")]
 pub struct SystemSettings {
     pub request_rate_limit: i64,
+    pub auth_token_log_retention_days: i64,
     pub mcp_session_affinity_key_count: i64,
     pub rebalance_mcp_enabled: bool,
     pub rebalance_mcp_session_percent: i64,

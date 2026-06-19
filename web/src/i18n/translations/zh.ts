@@ -625,7 +625,7 @@ export const ZH: TranslationShape = {
           activeUsersDefaultLabel: '默认仅展示活跃用户',
           activeUsersDefaultHint: '控制用户管理与用户用量列表在未搜索时，默认展示全部用户还是仅展示活跃用户。',
           activeUsersDefaultCount: '活跃用户 {active} / 总用户 {total}',
-          activeUsersDefinition: '活跃用户指最近 {days} 天内至少成功调用过一次接口的用户。',
+          activeUsersDefinition: '活跃用户指最近 {days} 天内至少调用过一次接口的用户。',
           ...adminTotpTranslations.zh, ...adminTrustedClientIpTranslations.zh,
           blockedKeyBaseLimitLabel: '封禁数基础值',
           blockedKeyBaseLimitHint: '作为所有用户封禁数限额的全局基础值；用户隐藏附加额度可正可负，最终有效值不会低于 0。',
@@ -659,7 +659,7 @@ export const ZH: TranslationShape = {
         search: '搜索',
         clear: '清空',
         filterStatus: {
-          defaultActiveOnly: '默认仅展示近 90 天内成功调用过接口的活跃用户。',
+          defaultActiveOnly: '默认仅展示近 90 天内调用过接口的活跃用户。',
           searchAll: '搜索已扩展到全部用户集合，避免遗漏非活跃用户。',
         },
         pagination: '第 {page}/{total} 页',

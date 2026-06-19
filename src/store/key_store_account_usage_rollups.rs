@@ -1,5 +1,8 @@
+use crate::analysis::request_value_bucket_sql;
+
 const ACCOUNT_USAGE_ROLLUP_METRIC_REQUEST_COUNT: &str = "request_count";
 const ACCOUNT_USAGE_ROLLUP_METRIC_PRIMARY_SUCCESS: &str = "primary_success";
+const ACCOUNT_USAGE_ROLLUP_METRIC_SECONDARY_SUCCESS: &str = "secondary_success";
 const ACCOUNT_USAGE_ROLLUP_METRIC_BUSINESS_CREDITS: &str = "business_credits";
 const ACCOUNT_USAGE_ROLLUP_BUCKET_FIVE_MINUTE: &str = "five_minute";
 const ACCOUNT_USAGE_ROLLUP_BUCKET_HOUR: &str = "hour";
@@ -12,6 +15,7 @@ const ACCOUNT_USAGE_ROLLUP_INSERT_CHUNK_SIZE: usize = 400;
 pub(crate) enum AccountUsageRollupMetricKind {
     RequestCount,
     PrimarySuccess,
+    SecondarySuccess,
     BusinessCredits,
 }
 
@@ -20,6 +24,7 @@ impl AccountUsageRollupMetricKind {
         match self {
             Self::RequestCount => ACCOUNT_USAGE_ROLLUP_METRIC_REQUEST_COUNT,
             Self::PrimarySuccess => ACCOUNT_USAGE_ROLLUP_METRIC_PRIMARY_SUCCESS,
+            Self::SecondarySuccess => ACCOUNT_USAGE_ROLLUP_METRIC_SECONDARY_SUCCESS,
             Self::BusinessCredits => ACCOUNT_USAGE_ROLLUP_METRIC_BUSINESS_CREDITS,
         }
     }
@@ -51,6 +56,97 @@ pub(crate) struct AccountUsageRollupRecord {
     pub(crate) user_id: String,
     pub(crate) bucket_start: i64,
     pub(crate) value: i64,
+}
+
+type RequestRollupRow = (String, i64, i64, i64, i64, i64);
+
+struct FoldedRequestRollupRecords {
+    request_records: Vec<AccountUsageRollupRecord>,
+    primary_success_records: Vec<AccountUsageRollupRecord>,
+    secondary_success_records: Vec<AccountUsageRollupRecord>,
+    request_day_records: Vec<AccountUsageRollupRecord>,
+    primary_success_day_records: Vec<AccountUsageRollupRecord>,
+    secondary_success_day_records: Vec<AccountUsageRollupRecord>,
+}
+
+fn sort_account_usage_rollup_records(records: &mut [AccountUsageRollupRecord]) {
+    records.sort_by(|left, right| {
+        left.user_id
+            .cmp(&right.user_id)
+            .then_with(|| left.bucket_start.cmp(&right.bucket_start))
+    });
+}
+
+fn collect_account_usage_rollup_records(
+    rollups: HashMap<(String, i64), i64>,
+) -> Vec<AccountUsageRollupRecord> {
+    let mut records = rollups
+        .into_iter()
+        .map(|((user_id, bucket_start), value)| AccountUsageRollupRecord {
+            user_id,
+            bucket_start,
+            value,
+        })
+        .collect::<Vec<_>>();
+    sort_account_usage_rollup_records(&mut records);
+    records
+}
+
+fn fold_request_rollup_rows(
+    request_rows: Vec<RequestRollupRow>,
+    request_backfill_start: i64,
+    request_day_backfill_start: i64,
+) -> FoldedRequestRollupRecords {
+    let mut request_rollups: HashMap<(String, i64), i64> = HashMap::new();
+    let mut primary_success_rollups: HashMap<(String, i64), i64> = HashMap::new();
+    let mut secondary_success_rollups: HashMap<(String, i64), i64> = HashMap::new();
+    let mut request_day_rollups: HashMap<(String, i64), i64> = HashMap::new();
+    let mut primary_success_day_rollups: HashMap<(String, i64), i64> = HashMap::new();
+    let mut secondary_success_day_rollups: HashMap<(String, i64), i64> = HashMap::new();
+
+    for (user_id, bucket_start, day_bucket_start, value, primary_success, secondary_success) in
+        request_rows
+    {
+        if bucket_start >= request_backfill_start {
+            *request_rollups
+                .entry((user_id.clone(), bucket_start))
+                .or_default() += value;
+        }
+        if day_bucket_start >= request_day_backfill_start {
+            *request_day_rollups
+                .entry((user_id.clone(), day_bucket_start))
+                .or_default() += value;
+            if primary_success > 0 {
+                *primary_success_day_rollups
+                    .entry((user_id.clone(), day_bucket_start))
+                    .or_default() += primary_success;
+            }
+            if secondary_success > 0 {
+                *secondary_success_day_rollups
+                    .entry((user_id.clone(), day_bucket_start))
+                    .or_default() += secondary_success;
+            }
+        }
+        if primary_success > 0 && bucket_start >= request_backfill_start {
+            *primary_success_rollups
+                .entry((user_id.clone(), bucket_start))
+                .or_default() += primary_success;
+        }
+        if secondary_success > 0 && bucket_start >= request_backfill_start {
+            *secondary_success_rollups
+                .entry((user_id, bucket_start))
+                .or_default() += secondary_success;
+        }
+    }
+
+    FoldedRequestRollupRecords {
+        request_records: collect_account_usage_rollup_records(request_rollups),
+        primary_success_records: collect_account_usage_rollup_records(primary_success_rollups),
+        secondary_success_records: collect_account_usage_rollup_records(secondary_success_rollups),
+        request_day_records: collect_account_usage_rollup_records(request_day_rollups),
+        primary_success_day_records: collect_account_usage_rollup_records(primary_success_day_rollups),
+        secondary_success_day_records: collect_account_usage_rollup_records(secondary_success_day_rollups),
+    }
 }
 
 async fn upsert_account_usage_rollup_executor<'e, E>(
@@ -131,6 +227,12 @@ async fn replace_account_usage_rollup_records(
 }
 
 impl KeyStore {
+    fn request_local_day_bucket_start_sql(created_at_sql: &str) -> String {
+        format!(
+            "CAST(strftime('%s', date({created_at_sql}, 'unixepoch', 'localtime'), 'utc') AS INTEGER)"
+        )
+    }
+
     pub(crate) async fn record_account_business_credit_rollups(
         &self,
         tx: &mut Transaction<'_, Sqlite>,
@@ -232,10 +334,15 @@ impl KeyStore {
         let now = self.backend_time.now_utc();
         let now_ts = now.timestamp();
         let request_backfill_start = now_ts.saturating_sub(ACCOUNT_USAGE_ROLLUP_REQUEST_BACKFILL_SECS);
+        let request_day_backfill_start =
+            local_day_bucket_start_utc_ts(now_ts.saturating_sub(ACCOUNT_USAGE_ROLLUP_REQUEST_DAY_BACKFILL_SECS));
         let business_backfill_start = now_ts.saturating_sub(ACCOUNT_USAGE_ROLLUP_BUSINESS_BACKFILL_SECS);
         let monthly_coverage_start =
             shift_month_start_utc_ts(start_of_month(now).timestamp(), -(ACCOUNT_USAGE_ROLLUP_MONTH_CHART_MONTHS - 1));
 
+        let existing_request_day_coverage = self
+            .get_meta_i64(META_KEY_ACCOUNT_USAGE_ROLLUP_REQUEST_DAY_COVERAGE_START)
+            .await?;
         let existing_quota1h_coverage = self
             .get_meta_i64(META_KEY_ACCOUNT_USAGE_ROLLUP_QUOTA1H_COVERAGE_START)
             .await?;
@@ -246,7 +353,9 @@ impl KeyStore {
             .get_meta_i64(META_KEY_ACCOUNT_USAGE_ROLLUP_QUOTA_MONTH_COVERAGE_START)
             .await?;
 
-        let request_rows = sqlx::query_as::<_, (String, i64, i64, i64)>(
+        let request_value_bucket_sql = request_value_bucket_sql("l.request_kind_key", "NULL");
+        let request_day_bucket_sql = Self::request_local_day_bucket_start_sql("l.created_at");
+        let request_rows = sqlx::query_as::<_, (String, i64, i64, i64, i64, i64)>(&format!(
             r#"
             SELECT
                 COALESCE(
@@ -258,39 +367,23 @@ impl KeyStore {
                     b.user_id
                 ) AS user_id,
                 (l.created_at / ?) * ? AS bucket_start,
+                {request_day_bucket_sql} AS day_bucket_start,
                 COUNT(*) AS total,
                 SUM(
                     CASE
-                        WHEN l.result_status = 'success'
-                             AND (
-                                CASE
-                                    WHEN l.request_kind_key LIKE 'api:%' THEN 'valuable'
-                                    WHEN l.request_kind_key = 'mcp:batch' AND COALESCE(l.counts_business_quota, 0) <> 0 THEN 'valuable'
-                                    WHEN l.request_kind_key = 'mcp:batch' THEN 'other'
-                                    WHEN l.request_kind_key IN (
-                                        'mcp:search',
-                                        'mcp:extract',
-                                        'mcp:crawl',
-                                        'mcp:map',
-                                        'mcp:research'
-                                    ) THEN 'valuable'
-                                    WHEN l.request_kind_key IN (
-                                        'api:usage',
-                                        'mcp:initialize',
-                                        'mcp:ping',
-                                        'mcp:tools/list'
-                                    )
-                                    OR l.request_kind_key LIKE 'mcp:resources/%'
-                                    OR l.request_kind_key LIKE 'mcp:prompts/%'
-                                    OR l.request_kind_key LIKE 'mcp:notifications/%'
-                                    THEN 'other'
-                                    ELSE 'unknown'
-                                END
-                             ) = 'valuable'
+                        WHEN l.result_status = 'success' AND ({request_value_bucket_sql}) = 'valuable'
                         THEN 1
                         ELSE 0
                     END
                 ) AS primary_success
+                ,
+                SUM(
+                    CASE
+                        WHEN l.result_status = 'success' AND ({request_value_bucket_sql}) = 'other'
+                        THEN 1
+                        ELSE 0
+                    END
+                ) AS secondary_success
             FROM auth_token_logs l
             LEFT JOIN user_token_bindings b ON b.token_id = l.token_id
             WHERE l.created_at >= ?
@@ -302,31 +395,27 @@ impl KeyStore {
                     END,
                     b.user_id
                 ) IS NOT NULL
-            GROUP BY user_id, bucket_start
-            ORDER BY user_id ASC, bucket_start ASC
+            GROUP BY user_id, bucket_start, day_bucket_start
+            ORDER BY user_id ASC, bucket_start ASC, day_bucket_start ASC
             "#,
-        )
+        ))
         .bind(SECS_PER_FIVE_MINUTES)
         .bind(SECS_PER_FIVE_MINUTES)
-        .bind(request_backfill_start)
+        .bind(request_day_backfill_start)
         .fetch_all(&self.pool)
         .await?;
-        let mut request_records = Vec::with_capacity(request_rows.len());
-        let mut primary_success_records = Vec::new();
-        for (user_id, bucket_start, value, primary_success) in request_rows {
-            request_records.push(AccountUsageRollupRecord {
-                user_id: user_id.clone(),
-                bucket_start,
-                value,
-            });
-            if primary_success > 0 {
-                primary_success_records.push(AccountUsageRollupRecord {
-                    user_id,
-                    bucket_start,
-                    value: primary_success,
-                });
-            }
-        }
+        let FoldedRequestRollupRecords {
+            request_records,
+            primary_success_records,
+            secondary_success_records,
+            request_day_records,
+            primary_success_day_records,
+            secondary_success_day_records,
+        } = fold_request_rollup_rows(
+            request_rows,
+            request_backfill_start,
+            request_day_backfill_start,
+        );
 
         let business_rows = sqlx::query_as::<_, (String, i64, i64)>(
             r#"
@@ -508,6 +597,38 @@ impl KeyStore {
         .bind(request_backfill_start)
         .execute(&mut *tx)
         .await?;
+        sqlx::query(
+            r#"
+            DELETE FROM account_usage_rollup_buckets
+            WHERE metric_kind = ?
+              AND bucket_kind = ?
+              AND bucket_start >= ?
+            "#,
+        )
+        .bind(AccountUsageRollupMetricKind::SecondarySuccess.as_str())
+        .bind(AccountUsageRollupBucketKind::FiveMinute.as_str())
+        .bind(request_backfill_start)
+        .execute(&mut *tx)
+        .await?;
+        for metric_kind in [
+            AccountUsageRollupMetricKind::RequestCount,
+            AccountUsageRollupMetricKind::PrimarySuccess,
+            AccountUsageRollupMetricKind::SecondarySuccess,
+        ] {
+            sqlx::query(
+                r#"
+                DELETE FROM account_usage_rollup_buckets
+                WHERE metric_kind = ?
+                  AND bucket_kind = ?
+                  AND bucket_start >= ?
+                "#,
+            )
+            .bind(metric_kind.as_str())
+            .bind(AccountUsageRollupBucketKind::Day.as_str())
+            .bind(request_day_backfill_start)
+            .execute(&mut *tx)
+            .await?;
+        }
 
         for bucket_kind in [
             AccountUsageRollupBucketKind::FiveMinute,
@@ -562,6 +683,38 @@ impl KeyStore {
         .await?;
         replace_account_usage_rollup_records(
             &mut tx,
+            AccountUsageRollupMetricKind::SecondarySuccess,
+            AccountUsageRollupBucketKind::FiveMinute,
+            &secondary_success_records,
+            now_ts,
+        )
+        .await?;
+        replace_account_usage_rollup_records(
+            &mut tx,
+            AccountUsageRollupMetricKind::RequestCount,
+            AccountUsageRollupBucketKind::Day,
+            &request_day_records,
+            now_ts,
+        )
+        .await?;
+        replace_account_usage_rollup_records(
+            &mut tx,
+            AccountUsageRollupMetricKind::PrimarySuccess,
+            AccountUsageRollupBucketKind::Day,
+            &primary_success_day_records,
+            now_ts,
+        )
+        .await?;
+        replace_account_usage_rollup_records(
+            &mut tx,
+            AccountUsageRollupMetricKind::SecondarySuccess,
+            AccountUsageRollupBucketKind::Day,
+            &secondary_success_day_records,
+            now_ts,
+        )
+        .await?;
+        replace_account_usage_rollup_records(
+            &mut tx,
             AccountUsageRollupMetricKind::BusinessCredits,
             AccountUsageRollupBucketKind::FiveMinute,
             &five_minute_records,
@@ -602,6 +755,9 @@ impl KeyStore {
         .await?;
 
         let rate5m_coverage = request_backfill_start;
+        let request_day_coverage = existing_request_day_coverage
+            .map(|value| value.min(request_day_backfill_start))
+            .unwrap_or(request_day_backfill_start);
         let quota1h_coverage = existing_quota1h_coverage
             .map(|value| value.min(business_backfill_start))
             .unwrap_or(business_backfill_start);
@@ -613,6 +769,12 @@ impl KeyStore {
             .unwrap_or(monthly_coverage_start);
 
         set_meta_i64_executor(&mut *tx, META_KEY_ACCOUNT_USAGE_ROLLUP_RATE5M_COVERAGE_START, rate5m_coverage).await?;
+        set_meta_i64_executor(
+            &mut *tx,
+            META_KEY_ACCOUNT_USAGE_ROLLUP_REQUEST_DAY_COVERAGE_START,
+            request_day_coverage,
+        )
+        .await?;
         set_meta_i64_executor(&mut *tx, META_KEY_ACCOUNT_USAGE_ROLLUP_QUOTA1H_COVERAGE_START, quota1h_coverage).await?;
         set_meta_i64_executor(&mut *tx, META_KEY_ACCOUNT_USAGE_ROLLUP_QUOTA24H_COVERAGE_START, quota24h_coverage).await?;
         set_meta_i64_executor(&mut *tx, META_KEY_ACCOUNT_USAGE_ROLLUP_QUOTA_MONTH_COVERAGE_START, quota_month_coverage).await?;

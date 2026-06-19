@@ -33,11 +33,14 @@ impl KeyStore {
         builder.push("))) AND (");
         builder.push_bind(active_since);
         builder.push(
-            " IS NULL OR EXISTS (SELECT 1 FROM auth_token_logs atl WHERE atl.request_user_id = u.id AND atl.result_status = ",
+            " IS NULL OR EXISTS (SELECT 1 FROM account_usage_rollup_buckets aur WHERE aur.user_id = u.id AND aur.metric_kind = ",
         );
-        builder.push_bind(OUTCOME_SUCCESS);
-        builder.push(" AND atl.created_at >= ");
-        builder.push_bind(active_since);
+        builder.push_bind(AccountUsageRollupMetricKind::RequestCount.as_str());
+        builder.push(" AND aur.bucket_kind = ");
+        builder.push_bind(AccountUsageRollupBucketKind::Day.as_str());
+        builder.push(" AND aur.bucket_start >= ");
+        builder.push_bind(active_since.map(local_day_bucket_start_utc_ts));
+        builder.push(" AND aur.value > 0");
         builder.push("))");
     }
 
@@ -91,25 +94,26 @@ impl KeyStore {
     }
 
     pub(crate) async fn count_active_users_since(&self, since: i64) -> Result<i64, ProxyError> {
+        self.flush_request_stats_writes().await?;
+        let since_bucket_start = local_day_bucket_start_utc_ts(since);
         sqlx::query_scalar::<_, i64>(
-            r#"SELECT COUNT(*)
-               FROM users u
-               WHERE EXISTS (
-                   SELECT 1
-                   FROM auth_token_logs atl
-                   WHERE atl.request_user_id = u.id
-                     AND atl.result_status = ?
-                     AND atl.created_at >= ?
-               )"#,
+            r#"SELECT COUNT(DISTINCT user_id)
+               FROM account_usage_rollup_buckets
+               WHERE metric_kind = ?
+                 AND bucket_kind = ?
+                 AND bucket_start >= ?
+                 AND value > 0"#,
         )
-        .bind(OUTCOME_SUCCESS)
-        .bind(since)
+        .bind(AccountUsageRollupMetricKind::RequestCount.as_str())
+        .bind(AccountUsageRollupBucketKind::Day.as_str())
+        .bind(since_bucket_start)
         .fetch_one(&self.pool)
         .await
         .map_err(ProxyError::Database)
     }
 
     pub(crate) async fn get_admin_user_list_stats(&self) -> Result<AdminUserListStats, ProxyError> {
+        self.flush_request_stats_writes().await?;
         let total_users = self.count_total_users().await?;
         let active_users_90d = self
             .count_active_users_since(self.backend_time.now_ts() - ADMIN_ACTIVE_USERS_WINDOW_SECS)
@@ -1769,6 +1773,7 @@ impl KeyStore {
         tag_id: Option<&str>,
         activity_scope: AdminUserActivityScope,
     ) -> Result<(Vec<AdminUserIdentity>, i64), ProxyError> {
+        self.flush_request_stats_writes().await?;
         let _permit = self
             .admin_heavy_read_semaphore
             .acquire()
@@ -1824,6 +1829,7 @@ impl KeyStore {
         tag_id: Option<&str>,
         activity_scope: AdminUserActivityScope,
     ) -> Result<Vec<AdminUserIdentity>, ProxyError> {
+        self.flush_request_stats_writes().await?;
         let _permit = self
             .admin_heavy_read_semaphore
             .acquire()

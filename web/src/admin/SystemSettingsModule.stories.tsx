@@ -35,6 +35,7 @@ function SystemSettingsCanvas(props: {
   const [allowRegistration, setAllowRegistration] = useState(false)
   const [currentSettings, setCurrentSettings] = useState<SystemSettings>({
     requestRateLimit: props.requestRateLimit ?? 100,
+    authTokenLogRetentionDays: 92,
     mcpSessionAffinityKeyCount: props.count ?? 5,
     rebalanceMcpEnabled: props.rebalanceEnabled ?? false,
     rebalanceMcpSessionPercent: props.rebalancePercent ?? 100,
@@ -197,6 +198,7 @@ const meta = {
     strings: translations.zh.admin.systemSettings,
     settings: {
       requestRateLimit: 100,
+      authTokenLogRetentionDays: 92,
       mcpSessionAffinityKeyCount: 5,
       rebalanceMcpEnabled: false,
       rebalanceMcpSessionPercent: 100,

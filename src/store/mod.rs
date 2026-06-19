@@ -2174,13 +2174,22 @@ impl AuthTokenActivityDelta {
 pub(crate) struct AccountUsageRollupDelta {
     pub(crate) request_count: i64,
     pub(crate) primary_success: i64,
+    pub(crate) secondary_success: i64,
 }
 
 impl AccountUsageRollupDelta {
     pub(crate) fn add(&mut self, other: Self) {
         self.request_count += other.request_count;
         self.primary_success += other.primary_success;
+        self.secondary_success += other.secondary_success;
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub(crate) struct AccountRequestRollupKey {
+    pub(crate) user_id: String,
+    pub(crate) five_minute_bucket_start: i64,
+    pub(crate) day_bucket_start: i64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -2202,7 +2211,8 @@ pub(crate) struct RequestStatsCoalescerState {
     pub(crate) pending_dashboard_rollups: HashMap<(i64, i64), DashboardRequestRollupCounts>,
     pub(crate) pending_api_key_usage: HashMap<(String, i64), ApiKeyUsageBucketDelta>,
     pub(crate) pending_auth_token_activity: HashMap<String, AuthTokenActivityDelta>,
-    pub(crate) pending_account_request_rollups: HashMap<(String, i64), AccountUsageRollupDelta>,
+    pub(crate) pending_account_request_rollups:
+        HashMap<AccountRequestRollupKey, AccountUsageRollupDelta>,
     pub(crate) pending_request_log_catalog: HashMap<RequestLogCatalogRollupKey, i64>,
     pub(crate) flush_deadline: Option<Instant>,
     pub(crate) flushing: bool,
@@ -2290,6 +2300,7 @@ impl RequestStatsCoalescer {
                 request_user_id,
                 created_at,
                 dashboard_counts.valuable_success_count,
+                dashboard_counts.other_success_count,
             );
             if let Some(request_log_catalog_key) = request_log_catalog_key {
                 *state
@@ -2316,6 +2327,7 @@ impl RequestStatsCoalescer {
                 request_user_id,
                 created_at,
                 0,
+                0,
             );
             Self::mark_flush_deadline_if_pending(&mut state);
         }
@@ -2328,6 +2340,7 @@ impl RequestStatsCoalescer {
         request_user_id: Option<&str>,
         created_at: i64,
         primary_success_delta: i64,
+        secondary_success_delta: i64,
     ) {
         state
             .pending_auth_token_activity
@@ -2335,13 +2348,20 @@ impl RequestStatsCoalescer {
             .or_default()
             .add_request(created_at);
         if let Some(user_id) = request_user_id {
-            let bucket_start = created_at - created_at.rem_euclid(SECS_PER_FIVE_MINUTES);
+            let five_minute_bucket_start =
+                created_at - created_at.rem_euclid(SECS_PER_FIVE_MINUTES);
+            let day_bucket_start = local_day_bucket_start_utc_ts(created_at);
             let entry = state
                 .pending_account_request_rollups
-                .entry((user_id.to_string(), bucket_start))
+                .entry(AccountRequestRollupKey {
+                    user_id: user_id.to_string(),
+                    five_minute_bucket_start,
+                    day_bucket_start,
+                })
                 .or_default();
             entry.request_count += 1;
             entry.primary_success += primary_success_delta.max(0);
+            entry.secondary_success += secondary_success_delta.max(0);
         }
     }
 
@@ -2443,6 +2463,15 @@ include!("key_store_ha.rs");
 mod tests {
     use super::*;
 
+    fn as_account_usage_rollup_tuples(
+        records: &[AccountUsageRollupRecord],
+    ) -> Vec<(String, i64, i64)> {
+        records
+            .iter()
+            .map(|record| (record.user_id.clone(), record.bucket_start, record.value))
+            .collect()
+    }
+
     #[test]
     fn db_operation_log_format_includes_operation_context_and_error() {
         let rendered = format_db_operation_log(
@@ -2463,6 +2492,51 @@ mod tests {
         assert_eq!(
             sqlite_runtime_log_context("data/core.db", "startup", false, true),
             "path=data/core.db, mode=startup, read_only=false, create_if_missing=true"
+        );
+    }
+
+    #[test]
+    fn fold_request_rollup_rows_preserves_day_buckets_across_shared_five_minute_bucket() {
+        let rows = vec![
+            ("user-1".to_string(), 300, 0, 1, 1, 0),
+            ("user-1".to_string(), 300, 86_400, 1, 0, 1),
+        ];
+
+        let FoldedRequestRollupRecords {
+            request_records,
+            primary_success_records,
+            secondary_success_records,
+            request_day_records,
+            primary_success_day_records,
+            secondary_success_day_records,
+        } = fold_request_rollup_rows(rows, 0, 0);
+
+        assert_eq!(
+            as_account_usage_rollup_tuples(&request_records),
+            vec![("user-1".to_string(), 300, 2)]
+        );
+        assert_eq!(
+            as_account_usage_rollup_tuples(&primary_success_records),
+            vec![("user-1".to_string(), 300, 1)]
+        );
+        assert_eq!(
+            as_account_usage_rollup_tuples(&secondary_success_records),
+            vec![("user-1".to_string(), 300, 1)]
+        );
+        assert_eq!(
+            as_account_usage_rollup_tuples(&request_day_records),
+            vec![
+                ("user-1".to_string(), 0, 1),
+                ("user-1".to_string(), 86_400, 1),
+            ]
+        );
+        assert_eq!(
+            as_account_usage_rollup_tuples(&primary_success_day_records),
+            vec![("user-1".to_string(), 0, 1)]
+        );
+        assert_eq!(
+            as_account_usage_rollup_tuples(&secondary_success_day_records),
+            vec![("user-1".to_string(), 86_400, 1)]
         );
     }
 }

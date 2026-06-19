@@ -1,5 +1,26 @@
 use super::*;
 
+fn find_non_aligned_local_day_start_utc_ts() -> Option<i64> {
+    let mut cursor = Utc
+        .with_ymd_and_hms(1850, 1, 1, 12, 0, 0)
+        .single()
+        .expect("valid probe start")
+        .timestamp();
+    let limit = Utc
+        .with_ymd_and_hms(2050, 1, 1, 12, 0, 0)
+        .single()
+        .expect("valid probe end")
+        .timestamp();
+    while cursor < limit {
+        let day_start = local_day_bucket_start_utc_ts(cursor);
+        if day_start.rem_euclid(SECS_PER_FIVE_MINUTES) != 0 {
+            return Some(day_start);
+        }
+        cursor = cursor.saturating_add(SECS_PER_DAY);
+    }
+    None
+}
+
 #[tokio::test]
 async fn system_settings_safe_defaults_disable_rollouts() {
     let db_path = temp_db_path("system-settings-api-rebalance-defaults");
@@ -81,6 +102,79 @@ async fn request_stats_coalescer_flushes_rate5m_series_on_read() {
         .find(|point| point.bucket_start == current_bucket_start)
         .expect("current bucket point");
     assert_eq!(current_bucket.value, Some(1));
+
+    let _ = std::fs::remove_file(db_path);
+}
+
+#[tokio::test]
+async fn request_stats_coalescer_uses_event_day_bucket_for_account_rollups() {
+    let db_path = temp_db_path("request-stats-coalescer-event-day-bucket");
+    let db_str = db_path.to_string_lossy().to_string();
+
+    let proxy = TavilyProxy::with_endpoint(Vec::<String>::new(), DEFAULT_UPSTREAM, &db_str)
+        .await
+        .expect("proxy created");
+    let user = proxy
+        .upsert_oauth_account(&OAuthAccountProfile {
+            provider: "github".to_string(),
+            provider_user_id: "event-day-bucket".to_string(),
+            username: Some("event_day_bucket".to_string()),
+            name: Some("Event Day Bucket".to_string()),
+            avatar_template: None,
+            active: true,
+            trust_level: None,
+            raw_payload_json: None,
+        })
+        .await
+        .expect("upsert user");
+
+    let event_day_bucket_start = find_non_aligned_local_day_start_utc_ts()
+        .unwrap_or_else(|| local_day_bucket_start_utc_ts(Utc::now().timestamp()));
+    let event_created_at = event_day_bucket_start.saturating_add(1);
+    let five_minute_bucket_start =
+        event_created_at - event_created_at.rem_euclid(SECS_PER_FIVE_MINUTES);
+    let wrong_day_bucket_start = local_day_bucket_start_utc_ts(five_minute_bucket_start);
+    let has_distinct_wrong_day = wrong_day_bucket_start != event_day_bucket_start;
+
+    proxy
+        .key_store
+        .request_stats_coalescer
+        .enqueue_auth_token_activity(&user.user_id, Some(&user.user_id), event_created_at)
+        .await;
+
+    proxy
+        .key_store
+        .flush_request_stats_writes()
+        .await
+        .expect("flush request stats");
+
+    let day_values = proxy
+        .key_store
+        .fetch_account_usage_rollup_values(
+            &user.user_id,
+            AccountUsageRollupMetricKind::RequestCount,
+            AccountUsageRollupBucketKind::Day,
+            event_day_bucket_start,
+            next_local_day_start_utc_ts(event_day_bucket_start),
+        )
+        .await
+        .expect("load event day bucket");
+    assert_eq!(day_values.get(&event_day_bucket_start), Some(&1));
+
+    if has_distinct_wrong_day {
+        let wrong_day_values = proxy
+            .key_store
+            .fetch_account_usage_rollup_values(
+                &user.user_id,
+                AccountUsageRollupMetricKind::RequestCount,
+                AccountUsageRollupBucketKind::Day,
+                wrong_day_bucket_start,
+                next_local_day_start_utc_ts(wrong_day_bucket_start),
+            )
+            .await
+            .expect("load wrong event day bucket");
+        assert!(wrong_day_values.is_empty());
+    }
 
     let _ = std::fs::remove_file(db_path);
 }
@@ -1800,6 +1894,123 @@ async fn account_usage_rollup_rebuild_uses_current_binding_for_pre_migration_req
 }
 
 #[tokio::test]
+async fn account_usage_rollup_rebuild_writes_request_day_and_secondary_success_buckets() {
+    let db_path = temp_db_path("account-usage-rollup-request-day-secondary-success");
+    let db_str = db_path.to_string_lossy().to_string();
+
+    let proxy = TavilyProxy::with_endpoint(Vec::<String>::new(), DEFAULT_UPSTREAM, &db_str)
+        .await
+        .expect("proxy created");
+    let user = proxy
+        .upsert_oauth_account(&OAuthAccountProfile {
+            provider: "github".to_string(),
+            provider_user_id: "request-day-secondary-success".to_string(),
+            username: Some("request_day_secondary_success".to_string()),
+            name: Some("Request Day Secondary Success".to_string()),
+            avatar_template: None,
+            active: true,
+            trust_level: None,
+            raw_payload_json: None,
+        })
+        .await
+        .expect("upsert user");
+    let token = proxy
+        .ensure_user_token_binding(&user.user_id, Some("request-day-secondary-success"))
+        .await
+        .expect("bind token");
+
+    proxy
+        .record_token_attempt(
+            &token.id,
+            &Method::POST,
+            "/api/tavily/search",
+            Some("q=valuable"),
+            Some(StatusCode::OK.as_u16() as i64),
+            Some(200),
+            true,
+            OUTCOME_SUCCESS,
+            None,
+        )
+        .await
+        .expect("record valuable success");
+    proxy
+        .record_token_attempt(
+            &token.id,
+            &Method::GET,
+            "/api/tavily/usage",
+            None,
+            Some(StatusCode::OK.as_u16() as i64),
+            Some(200),
+            false,
+            OUTCOME_SUCCESS,
+            None,
+        )
+        .await
+        .expect("record secondary success");
+
+    let created_at: i64 = sqlx::query_scalar(
+        r#"
+        SELECT created_at
+        FROM auth_token_logs
+        WHERE token_id = ?
+        ORDER BY id DESC
+        LIMIT 1
+        "#,
+    )
+    .bind(&token.id)
+    .fetch_one(&proxy.key_store.pool)
+    .await
+    .expect("load latest created_at");
+    let day_bucket_start = local_day_bucket_start_utc_ts(created_at);
+
+    proxy
+        .key_store
+        .rebuild_account_usage_rollup_buckets_v1()
+        .await
+        .expect("rebuild account usage rollups");
+
+    let request_day_values = proxy
+        .key_store
+        .fetch_account_usage_rollup_values(
+            &user.user_id,
+            AccountUsageRollupMetricKind::RequestCount,
+            AccountUsageRollupBucketKind::Day,
+            day_bucket_start,
+            day_bucket_start + SECS_PER_DAY,
+        )
+        .await
+        .expect("load request day rollups");
+    let primary_day_values = proxy
+        .key_store
+        .fetch_account_usage_rollup_values(
+            &user.user_id,
+            AccountUsageRollupMetricKind::PrimarySuccess,
+            AccountUsageRollupBucketKind::Day,
+            day_bucket_start,
+            day_bucket_start + SECS_PER_DAY,
+        )
+        .await
+        .expect("load primary day rollups");
+    let secondary_day_values = proxy
+        .key_store
+        .fetch_account_usage_rollup_values(
+            &user.user_id,
+            AccountUsageRollupMetricKind::SecondarySuccess,
+            AccountUsageRollupBucketKind::Day,
+            day_bucket_start,
+            day_bucket_start + SECS_PER_DAY,
+        )
+        .await
+        .expect("load secondary day rollups");
+
+    assert_eq!(request_day_values.get(&day_bucket_start), Some(&2));
+    assert_eq!(primary_day_values.get(&day_bucket_start), Some(&1));
+    assert_eq!(secondary_day_values.get(&day_bucket_start), Some(&1));
+
+    let _ = std::fs::remove_file(db_path);
+}
+
+#[tokio::test]
 async fn account_usage_rollup_rebuild_zero_fills_inactive_rate5m_window() {
     let db_path = temp_db_path("account-usage-rollup-empty-rate5m-window");
     let db_str = db_path.to_string_lossy().to_string();
@@ -1914,6 +2125,92 @@ async fn account_usage_rollup_rebuild_clears_stale_rate5m_buckets_without_logs()
         .await
         .expect("load rebuilt stale bucket");
     assert!(values.is_empty());
+
+    let _ = std::fs::remove_file(db_path);
+}
+
+#[tokio::test]
+async fn account_usage_rollup_rebuild_backfills_request_day_buckets_beyond_rate5m_window() {
+    let db_path = temp_db_path("account-usage-rollup-request-day-beyond-rate5m-window");
+    let db_str = db_path.to_string_lossy().to_string();
+
+    let proxy = TavilyProxy::with_endpoint(Vec::<String>::new(), DEFAULT_UPSTREAM, &db_str)
+        .await
+        .expect("proxy created");
+    let user = proxy
+        .upsert_oauth_account(&OAuthAccountProfile {
+            provider: "github".to_string(),
+            provider_user_id: "request-day-beyond-rate5m-window".to_string(),
+            username: Some("request_day_beyond_rate5m_window".to_string()),
+            name: Some("Request Day Beyond Rate5m Window".to_string()),
+            avatar_template: None,
+            active: true,
+            trust_level: None,
+            raw_payload_json: None,
+        })
+        .await
+        .expect("upsert user");
+    let token = proxy
+        .ensure_user_token_binding(&user.user_id, Some("request-day-beyond-rate5m-window"))
+        .await
+        .expect("bind token");
+
+    proxy
+        .record_token_attempt(
+            &token.id,
+            &Method::POST,
+            "/api/tavily/search",
+            Some("q=older-day"),
+            Some(StatusCode::OK.as_u16() as i64),
+            Some(200),
+            true,
+            OUTCOME_SUCCESS,
+            None,
+        )
+        .await
+        .expect("record older valuable success");
+
+    let older_created_at = Utc::now().timestamp().saturating_sub(60 * SECS_PER_DAY);
+    sqlx::query("UPDATE auth_token_logs SET created_at = ? WHERE token_id = ?")
+        .bind(older_created_at)
+        .bind(&token.id)
+        .execute(&proxy.key_store.pool)
+        .await
+        .expect("backdate auth token log beyond rate5m window");
+    let day_bucket_start = local_day_bucket_start_utc_ts(older_created_at);
+
+    proxy
+        .key_store
+        .rebuild_account_usage_rollup_buckets_v1()
+        .await
+        .expect("rebuild account usage rollups");
+
+    let day_values = proxy
+        .key_store
+        .fetch_account_usage_rollup_values(
+            &user.user_id,
+            AccountUsageRollupMetricKind::RequestCount,
+            AccountUsageRollupBucketKind::Day,
+            day_bucket_start,
+            day_bucket_start + SECS_PER_DAY,
+        )
+        .await
+        .expect("load rebuilt request day bucket");
+    assert_eq!(day_values.get(&day_bucket_start), Some(&1));
+
+    let five_minute_values = proxy
+        .key_store
+        .fetch_account_usage_rollup_values(
+            &user.user_id,
+            AccountUsageRollupMetricKind::RequestCount,
+            AccountUsageRollupBucketKind::FiveMinute,
+            older_created_at - older_created_at.rem_euclid(SECS_PER_FIVE_MINUTES),
+            older_created_at - older_created_at.rem_euclid(SECS_PER_FIVE_MINUTES)
+                + SECS_PER_FIVE_MINUTES,
+        )
+        .await
+        .expect("load rate5m bucket beyond retention");
+    assert!(five_minute_values.is_empty());
 
     let _ = std::fs::remove_file(db_path);
 }

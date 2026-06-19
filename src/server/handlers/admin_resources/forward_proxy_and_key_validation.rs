@@ -73,6 +73,9 @@ async fn put_system_settings(
             request_rate_limit: payload
                 .request_rate_limit
                 .unwrap_or(current_settings.request_rate_limit),
+            auth_token_log_retention_days: payload
+                .auth_token_log_retention_days
+                .unwrap_or(current_settings.auth_token_log_retention_days),
             mcp_session_affinity_key_count: payload.mcp_session_affinity_key_count,
             rebalance_mcp_enabled: payload.rebalance_mcp_enabled,
             rebalance_mcp_session_percent: payload.rebalance_mcp_session_percent,
@@ -113,6 +116,7 @@ async fn put_system_settings(
             eprintln!("update system settings error: {err}");
             let message = err.to_string();
             if message.contains("request_rate_limit must be at least")
+                || message.contains("auth_token_log_retention_days")
                 || message.contains("mcp_session_affinity_key_count must be between")
                 || message.contains("rebalance_mcp_session_percent must be between")
                 || message.contains("api_rebalance_percent must be between")

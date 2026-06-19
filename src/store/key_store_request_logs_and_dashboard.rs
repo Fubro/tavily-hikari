@@ -332,60 +332,105 @@ impl KeyStore {
                 let mut account_request_rollup_entries =
                     pending_account_request_rollups.drain().collect::<Vec<_>>();
                 account_request_rollup_entries.sort_by(|left, right| left.0.cmp(&right.0));
-                for ((user_id, bucket_start), delta) in account_request_rollup_entries {
+                for (key, delta) in account_request_rollup_entries {
+                    let user_id = key.user_id;
+                    let bucket_start = key.five_minute_bucket_start;
+                    let day_bucket_start = key.day_bucket_start;
                     if delta.request_count > 0 {
-                        sqlx::query(
-                            r#"
-                            INSERT INTO account_usage_rollup_buckets (
-                                user_id,
-                                metric_kind,
-                                bucket_kind,
-                                bucket_start,
-                                value,
-                                updated_at
+                        for (bucket_kind, rollup_bucket_start) in [
+                            (AccountUsageRollupBucketKind::FiveMinute, bucket_start),
+                            (AccountUsageRollupBucketKind::Day, day_bucket_start),
+                        ] {
+                            sqlx::query(
+                                r#"
+                                INSERT INTO account_usage_rollup_buckets (
+                                    user_id,
+                                    metric_kind,
+                                    bucket_kind,
+                                    bucket_start,
+                                    value,
+                                    updated_at
+                                )
+                                VALUES (?, ?, ?, ?, ?, ?)
+                                ON CONFLICT(user_id, metric_kind, bucket_kind, bucket_start)
+                                DO UPDATE SET
+                                    value = account_usage_rollup_buckets.value + excluded.value,
+                                    updated_at = excluded.updated_at
+                                "#,
                             )
-                            VALUES (?, ?, ?, ?, ?, ?)
-                            ON CONFLICT(user_id, metric_kind, bucket_kind, bucket_start)
-                            DO UPDATE SET
-                                value = account_usage_rollup_buckets.value + excluded.value,
-                                updated_at = excluded.updated_at
-                            "#,
-                        )
-                        .bind(&user_id)
-                        .bind(AccountUsageRollupMetricKind::RequestCount.as_str())
-                        .bind(AccountUsageRollupBucketKind::FiveMinute.as_str())
-                        .bind(bucket_start)
-                        .bind(delta.request_count)
-                        .bind(updated_at)
-                        .execute(&mut *tx)
-                        .await?;
+                            .bind(&user_id)
+                            .bind(AccountUsageRollupMetricKind::RequestCount.as_str())
+                            .bind(bucket_kind.as_str())
+                            .bind(rollup_bucket_start)
+                            .bind(delta.request_count)
+                            .bind(updated_at)
+                            .execute(&mut *tx)
+                            .await?;
+                        }
                     }
                     if delta.primary_success > 0 {
-                        sqlx::query(
-                            r#"
-                            INSERT INTO account_usage_rollup_buckets (
-                                user_id,
-                                metric_kind,
-                                bucket_kind,
-                                bucket_start,
-                                value,
-                                updated_at
+                        for (bucket_kind, rollup_bucket_start) in [
+                            (AccountUsageRollupBucketKind::FiveMinute, bucket_start),
+                            (AccountUsageRollupBucketKind::Day, day_bucket_start),
+                        ] {
+                            sqlx::query(
+                                r#"
+                                INSERT INTO account_usage_rollup_buckets (
+                                    user_id,
+                                    metric_kind,
+                                    bucket_kind,
+                                    bucket_start,
+                                    value,
+                                    updated_at
+                                )
+                                VALUES (?, ?, ?, ?, ?, ?)
+                                ON CONFLICT(user_id, metric_kind, bucket_kind, bucket_start)
+                                DO UPDATE SET
+                                    value = account_usage_rollup_buckets.value + excluded.value,
+                                    updated_at = excluded.updated_at
+                                "#,
                             )
-                            VALUES (?, ?, ?, ?, ?, ?)
-                            ON CONFLICT(user_id, metric_kind, bucket_kind, bucket_start)
-                            DO UPDATE SET
-                                value = account_usage_rollup_buckets.value + excluded.value,
-                                updated_at = excluded.updated_at
-                            "#,
-                        )
-                        .bind(&user_id)
-                        .bind(AccountUsageRollupMetricKind::PrimarySuccess.as_str())
-                        .bind(AccountUsageRollupBucketKind::FiveMinute.as_str())
-                        .bind(bucket_start)
-                        .bind(delta.primary_success)
-                        .bind(updated_at)
-                        .execute(&mut *tx)
-                        .await?;
+                            .bind(&user_id)
+                            .bind(AccountUsageRollupMetricKind::PrimarySuccess.as_str())
+                            .bind(bucket_kind.as_str())
+                            .bind(rollup_bucket_start)
+                            .bind(delta.primary_success)
+                            .bind(updated_at)
+                            .execute(&mut *tx)
+                            .await?;
+                        }
+                    }
+                    if delta.secondary_success > 0 {
+                        for (bucket_kind, rollup_bucket_start) in [
+                            (AccountUsageRollupBucketKind::FiveMinute, bucket_start),
+                            (AccountUsageRollupBucketKind::Day, day_bucket_start),
+                        ] {
+                            sqlx::query(
+                                r#"
+                                INSERT INTO account_usage_rollup_buckets (
+                                    user_id,
+                                    metric_kind,
+                                    bucket_kind,
+                                    bucket_start,
+                                    value,
+                                    updated_at
+                                )
+                                VALUES (?, ?, ?, ?, ?, ?)
+                                ON CONFLICT(user_id, metric_kind, bucket_kind, bucket_start)
+                                DO UPDATE SET
+                                    value = account_usage_rollup_buckets.value + excluded.value,
+                                    updated_at = excluded.updated_at
+                                "#,
+                            )
+                            .bind(&user_id)
+                            .bind(AccountUsageRollupMetricKind::SecondarySuccess.as_str())
+                            .bind(bucket_kind.as_str())
+                            .bind(rollup_bucket_start)
+                            .bind(delta.secondary_success)
+                            .bind(updated_at)
+                            .execute(&mut *tx)
+                            .await?;
+                        }
                     }
                 }
 

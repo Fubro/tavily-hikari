@@ -6538,6 +6538,7 @@ function SystemSettingsPageCanvas(): JSX.Element {
         strings={admin.systemSettings}
         settings={{
           requestRateLimit: 100,
+          authTokenLogRetentionDays: 92,
           mcpSessionAffinityKeyCount: 5,
           rebalanceMcpEnabled: false,
           rebalanceMcpSessionPercent: 100,

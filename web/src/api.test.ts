@@ -1391,6 +1391,7 @@ describe('admin user tag api helpers', () => {
           JSON.stringify({
             systemSettings: {
               requestRateLimit: 72,
+              authTokenLogRetentionDays: 92,
               mcpSessionAffinityKeyCount: 3,
               rebalanceMcpEnabled: true,
               rebalanceMcpSessionPercent: 35,
@@ -1425,6 +1426,7 @@ describe('admin user tag api helpers', () => {
 
     await expect(fetchSystemSettings()).resolves.toEqual({
       requestRateLimit: 72,
+      authTokenLogRetentionDays: 92,
       mcpSessionAffinityKeyCount: 3,
       rebalanceMcpEnabled: true,
       rebalanceMcpSessionPercent: 35,
@@ -1477,6 +1479,7 @@ describe('admin user tag api helpers', () => {
         new Response(
           JSON.stringify({
             requestRateLimit: 75,
+            authTokenLogRetentionDays: 92,
             mcpSessionAffinityKeyCount: 4,
             rebalanceMcpEnabled: false,
             rebalanceMcpSessionPercent: 100,
@@ -1506,6 +1509,7 @@ describe('admin user tag api helpers', () => {
     await expect(
       updateSystemSettings({
         requestRateLimit: 75,
+        authTokenLogRetentionDays: 92,
         mcpSessionAffinityKeyCount: 4,
         rebalanceMcpEnabled: false,
         rebalanceMcpSessionPercent: 100,
@@ -1528,6 +1532,7 @@ describe('admin user tag api helpers', () => {
       }),
     ).resolves.toEqual({
       requestRateLimit: 75,
+      authTokenLogRetentionDays: 92,
       mcpSessionAffinityKeyCount: 4,
       rebalanceMcpEnabled: false,
         rebalanceMcpSessionPercent: 100,
@@ -1555,6 +1560,7 @@ describe('admin user tag api helpers', () => {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         requestRateLimit: 75,
+        authTokenLogRetentionDays: 92,
         mcpSessionAffinityKeyCount: 4,
         rebalanceMcpEnabled: false,
         rebalanceMcpSessionPercent: 100,
