@@ -1,4 +1,4 @@
-use crate::analysis::request_value_bucket_sql;
+use crate::analysis::request_value_bucket_for_stored_request_log_sql;
 
 const ACCOUNT_USAGE_ROLLUP_METRIC_REQUEST_COUNT: &str = "request_count";
 const ACCOUNT_USAGE_ROLLUP_METRIC_PRIMARY_SUCCESS: &str = "primary_success";
@@ -227,6 +227,16 @@ async fn replace_account_usage_rollup_records(
 }
 
 impl KeyStore {
+    pub(crate) async fn account_usage_rollup_request_day_rebuild_needed(&self) -> Result<bool, ProxyError> {
+        let now_ts = self.backend_time.now_ts();
+        let required_coverage_start =
+            local_day_bucket_start_utc_ts(now_ts.saturating_sub(ACCOUNT_USAGE_ROLLUP_REQUEST_DAY_BACKFILL_SECS));
+        let existing_coverage = self
+            .get_meta_i64(META_KEY_ACCOUNT_USAGE_ROLLUP_REQUEST_DAY_COVERAGE_START)
+            .await?;
+        Ok(existing_coverage.is_none_or(|value| value > required_coverage_start))
+    }
+
     fn request_local_day_bucket_start_sql(created_at_sql: &str) -> String {
         format!(
             "CAST(strftime('%s', date({created_at_sql}, 'unixepoch', 'localtime'), 'utc') AS INTEGER)"
@@ -353,7 +363,20 @@ impl KeyStore {
             .get_meta_i64(META_KEY_ACCOUNT_USAGE_ROLLUP_QUOTA_MONTH_COVERAGE_START)
             .await?;
 
-        let request_value_bucket_sql = request_value_bucket_sql("l.request_kind_key", "NULL");
+        let request_body_expr = if self.table_exists("request_logs").await?
+            && self
+                .table_column_exists("request_logs", "request_body")
+                .await?
+        {
+            "rl.request_body"
+        } else {
+            "NULL"
+        };
+        let request_value_bucket_sql = request_value_bucket_for_stored_request_log_sql(
+            "l.request_kind_key",
+            request_body_expr,
+            "l.counts_business_quota",
+        );
         let request_day_bucket_sql = Self::request_local_day_bucket_start_sql("l.created_at");
         let request_rows = sqlx::query_as::<_, (String, i64, i64, i64, i64, i64)>(&format!(
             r#"
@@ -386,6 +409,7 @@ impl KeyStore {
                 ) AS secondary_success
             FROM auth_token_logs l
             LEFT JOIN user_token_bindings b ON b.token_id = l.token_id
+            LEFT JOIN request_logs rl ON rl.id = l.request_log_id
             WHERE l.created_at >= ?
               AND COALESCE(
                     l.request_user_id,

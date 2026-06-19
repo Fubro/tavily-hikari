@@ -2214,11 +2214,12 @@ impl KeyStore {
                 )
                 .await?;
             }
-            if self
+            let account_usage_rollup_v1_done = self
                 .get_meta_i64(META_KEY_ACCOUNT_USAGE_ROLLUP_V1_DONE)
                 .await?
-                .unwrap_or_default()
-                <= 0
+                .unwrap_or_default();
+            if account_usage_rollup_v1_done <= 0
+                || self.account_usage_rollup_request_day_rebuild_needed().await?
             {
                 self.rebuild_account_usage_rollup_buckets_v1().await?;
             }

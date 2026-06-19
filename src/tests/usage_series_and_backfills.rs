@@ -2214,3 +2214,324 @@ async fn account_usage_rollup_rebuild_backfills_request_day_buckets_beyond_rate5
 
     let _ = std::fs::remove_file(db_path);
 }
+
+#[tokio::test]
+async fn startup_rebuilds_request_day_rollups_when_v1_done_exists_but_day_coverage_is_missing() {
+    let db_path = temp_db_path("startup-rebuilds-request-day-rollups-missing-coverage");
+    let db_str = db_path.to_string_lossy().to_string();
+
+    let proxy = TavilyProxy::with_endpoint(Vec::<String>::new(), DEFAULT_UPSTREAM, &db_str)
+        .await
+        .expect("proxy created");
+    let user = proxy
+        .upsert_oauth_account(&OAuthAccountProfile {
+            provider: "github".to_string(),
+            provider_user_id: "startup-day-rollup-rebuild".to_string(),
+            username: Some("startup_day_rollup_rebuild".to_string()),
+            name: Some("Startup Day Rollup Rebuild".to_string()),
+            avatar_template: None,
+            active: true,
+            trust_level: None,
+            raw_payload_json: None,
+        })
+        .await
+        .expect("upsert user");
+    let token = proxy
+        .ensure_user_token_binding(&user.user_id, Some("startup-day-rollup-rebuild"))
+        .await
+        .expect("bind token");
+
+    proxy
+        .record_token_attempt(
+            &token.id,
+            &Method::POST,
+            "/api/tavily/search",
+            Some("q=startup-rebuild"),
+            Some(StatusCode::OK.as_u16() as i64),
+            Some(200),
+            true,
+            OUTCOME_SUCCESS,
+            None,
+        )
+        .await
+        .expect("record startup rebuild request");
+
+    let historical_created_at = Utc::now().timestamp().saturating_sub(60 * SECS_PER_DAY);
+    sqlx::query("UPDATE auth_token_logs SET created_at = ? WHERE token_id = ?")
+        .bind(historical_created_at)
+        .bind(&token.id)
+        .execute(&proxy.key_store.pool)
+        .await
+        .expect("backdate auth token log into active90d window");
+    let historical_day_bucket_start = local_day_bucket_start_utc_ts(historical_created_at);
+
+    proxy
+        .key_store
+        .rebuild_account_usage_rollup_buckets_v1()
+        .await
+        .expect("initial rebuild");
+
+    sqlx::query(
+        r#"
+        DELETE FROM account_usage_rollup_buckets
+        WHERE metric_kind = ?
+          AND bucket_kind = ?
+        "#,
+    )
+    .bind(AccountUsageRollupMetricKind::RequestCount.as_str())
+    .bind(AccountUsageRollupBucketKind::Day.as_str())
+    .execute(&proxy.key_store.pool)
+    .await
+    .expect("clear request day rollups to simulate pre-upgrade state");
+    proxy
+        .key_store
+        .set_meta_i64(
+            META_KEY_ACCOUNT_USAGE_ROLLUP_V1_DONE,
+            Utc::now().timestamp(),
+        )
+        .await
+        .expect("preserve v1 done marker");
+    sqlx::query("DELETE FROM meta WHERE key = ?")
+        .bind(META_KEY_ACCOUNT_USAGE_ROLLUP_REQUEST_DAY_COVERAGE_START)
+        .execute(&proxy.key_store.pool)
+        .await
+        .expect("clear request day coverage marker");
+
+    drop(proxy);
+
+    let reopened = TavilyProxy::with_endpoint(Vec::<String>::new(), DEFAULT_UPSTREAM, &db_str)
+        .await
+        .expect("proxy reopened");
+    let day_values = reopened
+        .key_store
+        .fetch_account_usage_rollup_values(
+            &user.user_id,
+            AccountUsageRollupMetricKind::RequestCount,
+            AccountUsageRollupBucketKind::Day,
+            historical_day_bucket_start,
+            historical_day_bucket_start + SECS_PER_DAY,
+        )
+        .await
+        .expect("load rebuilt request day bucket after startup");
+    assert_eq!(day_values.get(&historical_day_bucket_start), Some(&1));
+
+    let _ = std::fs::remove_file(db_path);
+}
+
+#[tokio::test]
+async fn account_usage_rollup_rebuild_preserves_mcp_batch_successes_when_request_body_is_unavailable()
+ {
+    let db_path = temp_db_path("account-usage-rollup-mcp-batch-fallback-successes");
+    let db_str = db_path.to_string_lossy().to_string();
+
+    let proxy = TavilyProxy::with_endpoint(Vec::<String>::new(), DEFAULT_UPSTREAM, &db_str)
+        .await
+        .expect("proxy created");
+    let user = proxy
+        .upsert_oauth_account(&OAuthAccountProfile {
+            provider: "github".to_string(),
+            provider_user_id: "mcp-batch-fallback-successes".to_string(),
+            username: Some("mcp_batch_fallback_successes".to_string()),
+            name: Some("MCP Batch Fallback Successes".to_string()),
+            avatar_template: None,
+            active: true,
+            trust_level: None,
+            raw_payload_json: None,
+        })
+        .await
+        .expect("upsert user");
+    let token = proxy
+        .ensure_user_token_binding(&user.user_id, Some("mcp-batch-fallback-successes"))
+        .await
+        .expect("bind token");
+
+    let secondary_batch_body = br#"[
+      {"jsonrpc":"2.0","id":1,"method":"initialize"},
+      {"jsonrpc":"2.0","id":2,"method":"tools/list"}
+    ]"#;
+    let primary_batch_body = br#"[
+      {"jsonrpc":"2.0","id":1,"method":"initialize"},
+      {"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"tavily-search"}}
+    ]"#;
+    let created_at = Utc::now().timestamp();
+    let secondary_request_log_id = proxy
+        .record_local_request_log_without_key(
+            Some(&token.id),
+            &Method::POST,
+            "/mcp",
+            None,
+            StatusCode::OK,
+            Some(200),
+            secondary_batch_body,
+            b"{}",
+            OUTCOME_SUCCESS,
+            None,
+            &[],
+            &[],
+            None,
+        )
+        .await
+        .expect("record secondary batch request log");
+    proxy
+        .record_token_attempt_with_kind_request_log_metadata(
+            &token.id,
+            &Method::POST,
+            "/mcp",
+            None,
+            Some(StatusCode::OK.as_u16() as i64),
+            Some(200),
+            false,
+            OUTCOME_SUCCESS,
+            None,
+            &TokenRequestKind::new("mcp:batch", "MCP | batch", None),
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            Some(secondary_request_log_id),
+        )
+        .await
+        .expect("record linked secondary batch token log");
+
+    let primary_request_log_id = proxy
+        .record_local_request_log_without_key(
+            Some(&token.id),
+            &Method::POST,
+            "/mcp",
+            None,
+            StatusCode::OK,
+            Some(200),
+            primary_batch_body,
+            b"{}",
+            OUTCOME_SUCCESS,
+            None,
+            &[],
+            &[],
+            None,
+        )
+        .await
+        .expect("record primary batch request log");
+    proxy
+        .record_token_attempt_with_kind_request_log_metadata(
+            &token.id,
+            &Method::POST,
+            "/mcp",
+            None,
+            Some(StatusCode::OK.as_u16() as i64),
+            Some(200),
+            true,
+            OUTCOME_SUCCESS,
+            None,
+            &TokenRequestKind::new("mcp:batch", "MCP | batch", None),
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            Some(primary_request_log_id),
+        )
+        .await
+        .expect("record linked primary batch token log");
+
+    sqlx::query("UPDATE auth_token_logs SET created_at = ?, request_user_id = ? WHERE request_log_id IN (?, ?)")
+        .bind(created_at)
+        .bind(&user.user_id)
+        .bind(secondary_request_log_id)
+        .bind(primary_request_log_id)
+        .execute(&proxy.key_store.pool)
+        .await
+        .expect("align batch token log ownership and time");
+    sqlx::query("UPDATE request_logs SET request_body = NULL WHERE id IN (?, ?)")
+        .bind(secondary_request_log_id)
+        .bind(primary_request_log_id)
+        .execute(&proxy.key_store.pool)
+        .await
+        .expect("clear request bodies to force stored fallback");
+    let secondary_request_log_row: (String, Option<Vec<u8>>) =
+        sqlx::query_as("SELECT request_kind_key, request_body FROM request_logs WHERE id = ?")
+            .bind(secondary_request_log_id)
+            .fetch_one(&proxy.key_store.pool)
+            .await
+            .expect("load linked secondary request log row");
+    assert_eq!(secondary_request_log_row.0, "mcp:batch");
+    assert_eq!(secondary_request_log_row.1, None);
+    let primary_request_log_row: (String, Option<Vec<u8>>) =
+        sqlx::query_as("SELECT request_kind_key, request_body FROM request_logs WHERE id = ?")
+            .bind(primary_request_log_id)
+            .fetch_one(&proxy.key_store.pool)
+            .await
+            .expect("load linked primary request log row");
+    assert_eq!(primary_request_log_row.0, "mcp:batch");
+    assert_eq!(primary_request_log_row.1, None);
+    let five_minute_bucket_start = created_at - created_at.rem_euclid(SECS_PER_FIVE_MINUTES);
+    let day_bucket_start = local_day_bucket_start_utc_ts(created_at);
+
+    proxy
+        .key_store
+        .rebuild_account_usage_rollup_buckets_v1()
+        .await
+        .expect("rebuild account usage rollups");
+
+    let five_minute_secondary_values = proxy
+        .key_store
+        .fetch_account_usage_rollup_values(
+            &user.user_id,
+            AccountUsageRollupMetricKind::SecondarySuccess,
+            AccountUsageRollupBucketKind::FiveMinute,
+            five_minute_bucket_start,
+            five_minute_bucket_start + SECS_PER_FIVE_MINUTES,
+        )
+        .await
+        .expect("load rebuilt secondary five minute bucket");
+    let five_minute_primary_values = proxy
+        .key_store
+        .fetch_account_usage_rollup_values(
+            &user.user_id,
+            AccountUsageRollupMetricKind::PrimarySuccess,
+            AccountUsageRollupBucketKind::FiveMinute,
+            five_minute_bucket_start,
+            five_minute_bucket_start + SECS_PER_FIVE_MINUTES,
+        )
+        .await
+        .expect("load rebuilt primary five minute bucket");
+    let day_secondary_values = proxy
+        .key_store
+        .fetch_account_usage_rollup_values(
+            &user.user_id,
+            AccountUsageRollupMetricKind::SecondarySuccess,
+            AccountUsageRollupBucketKind::Day,
+            day_bucket_start,
+            day_bucket_start + SECS_PER_DAY,
+        )
+        .await
+        .expect("load rebuilt secondary day bucket");
+    let day_primary_values = proxy
+        .key_store
+        .fetch_account_usage_rollup_values(
+            &user.user_id,
+            AccountUsageRollupMetricKind::PrimarySuccess,
+            AccountUsageRollupBucketKind::Day,
+            day_bucket_start,
+            day_bucket_start + SECS_PER_DAY,
+        )
+        .await
+        .expect("load rebuilt primary day bucket");
+
+    assert_eq!(
+        five_minute_secondary_values.get(&five_minute_bucket_start),
+        Some(&1)
+    );
+    assert_eq!(
+        five_minute_primary_values.get(&five_minute_bucket_start),
+        Some(&1)
+    );
+    assert_eq!(day_secondary_values.get(&day_bucket_start), Some(&1));
+    assert_eq!(day_primary_values.get(&day_bucket_start), Some(&1));
+
+    let _ = std::fs::remove_file(db_path);
+}
