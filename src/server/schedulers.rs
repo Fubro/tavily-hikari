@@ -1,3 +1,5 @@
+use tokio::time::Instant;
+
 fn random_delay_secs(max_inclusive: u64) -> u64 {
     use rand::Rng;
     let mut rng = rand::thread_rng();
@@ -72,9 +74,27 @@ async fn enqueue_scheduled_job_logged(
     trigger_source: &str,
     log_prefix: &str,
 ) -> Option<i64> {
+    let started = Instant::now();
+    let context = format!(
+        "job_type={job_type}, trigger_source={trigger_source}, key_id={}",
+        key_id.unwrap_or("-")
+    );
     match enqueue_scheduled_job(state, job_type, key_id, trigger_source).await {
-        Ok(job_id) => Some(job_id),
+        Ok(job_id) => {
+            tavily_hikari::emit_db_operation_slow_log(
+                "scheduled job enqueue",
+                started.elapsed(),
+                Some(context.as_str()),
+            );
+            Some(job_id)
+        }
         Err(err) => {
+            tavily_hikari::emit_db_operation_error_log(
+                "scheduled job enqueue",
+                started.elapsed(),
+                Some(context.as_str()),
+                &err,
+            );
             eprintln!("{log_prefix}: enqueue job error: {err}");
             None
         }

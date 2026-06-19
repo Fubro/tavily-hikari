@@ -1,4 +1,13 @@
 impl TavilyProxy {
+    fn oauth_profile_log_context(profile: &OAuthAccountProfile) -> String {
+        let provider_user_id_hash = Self::sha256_hex(&profile.provider_user_id);
+        format!(
+            "provider={}, provider_user_id_sha256={}",
+            profile.provider,
+            &provider_user_id_hash[..16]
+        )
+    }
+
     // ----- Public auth token management API -----
 
     /// Validate an access token in format `th-<id>-<secret>` and record usage.
@@ -327,9 +336,18 @@ impl TavilyProxy {
     ) -> Result<UserIdentity, ProxyError> {
         let deadline = self.backend_time.deadline_after(Duration::from_secs(5));
         let mut attempt = 0usize;
+        let operation_started = Instant::now();
+        let context = Self::oauth_profile_log_context(profile);
         loop {
             match self.key_store.upsert_oauth_account(profile).await {
-                Ok(identity) => return Ok(identity),
+                Ok(identity) => {
+                    log_slow_db_operation(
+                        "oauth account upsert",
+                        operation_started.elapsed(),
+                        Some(context.as_str()),
+                    );
+                    return Ok(identity);
+                }
                 Err(err) => {
                     if sleep_before_sqlite_transient_write_retry(
                         &self.backend_time,
@@ -343,6 +361,12 @@ impl TavilyProxy {
                         attempt += 1;
                         continue;
                     }
+                    log_db_operation_error(
+                        "oauth account upsert",
+                        operation_started.elapsed(),
+                        Some(context.as_str()),
+                        &err,
+                    );
                     return Err(err);
                 }
             }
@@ -356,9 +380,18 @@ impl TavilyProxy {
     ) -> Result<UserIdentity, ProxyError> {
         let deadline = self.backend_time.deadline_after(Duration::from_secs(5));
         let mut attempt = 0usize;
+        let operation_started = Instant::now();
+        let context = Self::oauth_profile_log_context(profile);
         loop {
             match self.key_store.refresh_oauth_account_profile(profile).await {
-                Ok(identity) => return Ok(identity),
+                Ok(identity) => {
+                    log_slow_db_operation(
+                        "oauth account profile refresh",
+                        operation_started.elapsed(),
+                        Some(context.as_str()),
+                    );
+                    return Ok(identity);
+                }
                 Err(err) => {
                     if sleep_before_sqlite_transient_write_retry(
                         &self.backend_time,
@@ -372,6 +405,12 @@ impl TavilyProxy {
                         attempt += 1;
                         continue;
                     }
+                    log_db_operation_error(
+                        "oauth account profile refresh",
+                        operation_started.elapsed(),
+                        Some(context.as_str()),
+                        &err,
+                    );
                     return Err(err);
                 }
             }
@@ -387,6 +426,8 @@ impl TavilyProxy {
     ) -> Result<UserIdentity, ProxyError> {
         let deadline = self.backend_time.deadline_after(Duration::from_secs(5));
         let mut attempt = 0usize;
+        let operation_started = Instant::now();
+        let context = Self::oauth_profile_log_context(profile);
         loop {
             match self
                 .key_store
@@ -397,7 +438,14 @@ impl TavilyProxy {
                 )
                 .await
             {
-                Ok(identity) => return Ok(identity),
+                Ok(identity) => {
+                    log_slow_db_operation(
+                        "oauth account profile refresh token update",
+                        operation_started.elapsed(),
+                        Some(context.as_str()),
+                    );
+                    return Ok(identity);
+                }
                 Err(err) => {
                     if sleep_before_sqlite_transient_write_retry(
                         &self.backend_time,
@@ -411,6 +459,12 @@ impl TavilyProxy {
                         attempt += 1;
                         continue;
                     }
+                    log_db_operation_error(
+                        "oauth account profile refresh token update",
+                        operation_started.elapsed(),
+                        Some(context.as_str()),
+                        &err,
+                    );
                     return Err(err);
                 }
             }

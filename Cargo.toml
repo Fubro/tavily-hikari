@@ -37,3 +37,5 @@ md5 = "0.7"
 data-encoding = "2"
 totp-rs = { version = "5.7", features = ["qr", "zeroize"] }
 zstd = "0.13"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["fmt", "env-filter"] }

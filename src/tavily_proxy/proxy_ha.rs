@@ -41,9 +41,22 @@ impl TavilyProxy {
                     state.shutdown
                 };
 
+                let flush_started = Instant::now();
                 if let Err(err) = store.flush_request_stats_writes().await {
+                    log_db_operation_error(
+                        "request stats persist",
+                        flush_started.elapsed(),
+                        Some("component=request-stats-coalescer"),
+                        &err,
+                    );
                     eprintln!("request stats persist warning: {err}");
                     tokio::time::sleep(Duration::from_millis(100)).await;
+                } else {
+                    log_slow_db_operation(
+                        "request stats persist",
+                        flush_started.elapsed(),
+                        Some("component=request-stats-coalescer"),
+                    );
                 }
 
                 {

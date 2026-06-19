@@ -305,6 +305,7 @@ struct Cli {
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     dotenv().ok();
+    tavily_hikari::init_runtime_logging();
     let cli = Cli::parse();
     reject_legacy_ha_origin_env_vars()?;
 

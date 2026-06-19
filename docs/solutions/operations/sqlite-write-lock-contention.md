@@ -43,6 +43,18 @@ brief contention visible as HTTP 500s or failed background bookkeeping.
 
 ## Resolution
 
+- Add a runtime DB logging contract before changing lock semantics again. For this service, keep
+  stderr text logging, but make runtime DB phases emit one stable prefix:
+  `db operation slow:` / `db operation error:` with `operation`, `elapsed_ms`, optional `context`,
+  and optional `err`.
+- Enable SQL-level slow statement logging directly on runtime `sqlx` SQLite connect options. The
+  default threshold is `250ms` for SQL statements and `1s` for explicit DB operation phases such as
+  startup pool open, schema init, request-stats flush, scheduler enqueue, OAuth upsert, and
+  pending billing settlement.
+- Keep the historical startup line `forward-proxy startup: sqlite initialized in ...` for grep
+  continuity, but require the new DB phase logs alongside it so operators can tell whether the time
+  went into pool open, observability attach probing, `BEGIN IMMEDIATE`, schema bootstrap, or a
+  later request/worker write path.
 - Keep billing and MCP serialization fail-closed, but retry transient SQLite busy/locked writes
   inside the existing bounded lock wait or lease budget.
 - Retry background job bookkeeping writes before surfacing scheduler errors.
@@ -149,6 +161,11 @@ brief contention visible as HTTP 500s or failed background bookkeeping.
 
 ## Guardrails / Reuse Notes
 
+- Do not enable full SQL debug logging in production by default. Slow-statement logging is enough
+  for this contention class and avoids dumping every statement or bind-heavy traffic path.
+- Treat runtime DB operation logs and `sqlx::query` slow warnings as complementary:
+  `sqlx::query` answers “which statement was slow,” while `db operation ...` answers “which
+  service-layer operation or phase was slow/failing.”
 - Do not fix this class of problem by simply raising `sqlx` pool size; more concurrent writers can
   increase lock pressure.
 - Do not hand-edit production ledgers. Use repository repair binaries or controlled migrations when
@@ -178,3 +195,27 @@ brief contention visible as HTTP 500s or failed background bookkeeping.
 - `src/store/key_store_users_and_oauth.rs`
 - `src/store/key_store_request_logs_and_dashboard.rs`
 - `src/tavily_proxy/proxy_auth_and_oauth.rs`
+- `src/tavily_proxy/proxy_ha.rs`
+- `src/server/schedulers.rs`
+
+## 101 Symptom Mapping
+
+For the `2026-06-19 01:00 +08:00` onward 101 sample, the runtime DB log contract should map the
+observed symptoms like this:
+
+- `forward-proxy startup: sqlite initialized in 38906ms`
+  -> keep the existing startup line and also expect `db operation slow: operation=sqlite startup ...`
+- `quota-sync-hot: enqueue job error: ... database is locked`
+  -> expect `db operation error: operation=scheduled job enqueue ...`
+- `request stats persist warning: ... database is locked`
+  -> expect `db operation error: operation=request stats persist ...`
+- `upsert linuxdo oauth account error: ... database is locked`
+  -> expect `db operation error: operation=oauth account upsert ...`
+- `oauth account upsert: transient sqlite write error (...)`
+  -> keep bounded retry logs and expect the final phase-level `oauth account upsert` slow/error log
+- `apply_pending_billing_log: transient sqlite write error (...)`
+  -> keep bounded retry logs and expect the final phase-level
+  `db operation slow|error: operation=apply_pending_billing_log ...`
+- request-path `/api/tavily/search` / MCP billing failures
+  -> correlate request warning lines with `apply_pending_billing_log`, quota/billing lock logs, and
+  `sqlx::query` warn lines for slow statements on the same wall-clock window

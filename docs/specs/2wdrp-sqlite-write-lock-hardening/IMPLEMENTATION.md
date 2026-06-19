@@ -2,6 +2,31 @@
 
 ## Current Coverage
 
+- Added a runtime DB logging contract for the online service surface without migrating the whole
+  repo to structured logging. Runtime SQLite pool creation now initializes a minimal
+  `tracing_subscriber` backend once at process startup, and all runtime `SqliteConnectOptions`
+  enable `sqlx` slow statement logging at `250ms`.
+- Added shared DB operation log helpers in `src/store/mod.rs`. They emit stable stderr lines using
+  `db operation slow:` and `db operation error:` with `operation=...`, `elapsed_ms=...`, optional
+  `context=...`, and optional `err=...`, so startup, request-path, and background DB phases can be
+  grepped with one contract.
+- Runtime DB operation logs intentionally do not include SQL bind values. The SQL-level
+  `sqlx::query` slow-statement warnings keep the statement text/summary and timing, while the
+  explicit phase-level helper keeps only operation/context metadata to avoid leaking secrets.
+- Startup SQLite open / observability-attach probe / schema initialization now pass through that
+  shared helper with a `1s` slow-operation threshold. The existing
+  `forward-proxy startup: sqlite initialized in ...` line remains in place for historical grep
+  continuity, and the new `db operation slow:`/`error:` lines make it clear which startup DB phase
+  stalled or failed.
+- Request-path DB work now has unified phase logs around LinuxDo OAuth upsert/profile refresh and
+  pending billing settlement. That covers the same classes already seen in production after
+  `2026-06-19 01:00 +08:00`: `oauth account upsert`, `apply_pending_billing_log`, and the
+  downstream request-path billing failures that bubble up as `/api/tavily/search` or MCP proxy
+  errors.
+- Background scheduler/worker DB work now has unified phase logs around `scheduled job enqueue`
+  and `request stats persist`, so `quota-sync-hot enqueue`, `scheduled job finish`, and request
+  stats flush contention all have a stable DB operation prefix in addition to the existing
+  owner-facing warning lines.
 - Added a shared transient SQLite write retry helper for bounded backoff.
 - `quota_subject_locks` acquire/refresh/release now retry transient SQLite busy/locked errors within
   the existing lock timeout or lease budget.
@@ -233,6 +258,12 @@
 
 ## Validation
 
+- `cargo check -q`
+- `cargo test -q db_operation_log_format_includes_operation_context_and_error`
+- `cargo test -q sqlite_runtime_log_context_is_stable_and_grep_friendly`
+- `cargo test -q scheduled_job_enqueue`
+- `cargo test -q linuxdo_oauth_upsert_skips_missing_tags_for_new_accounts_and_recovers_after_reseed`
+- `cargo test -q pending_billing_claim_miss_is_retry_later_until_next_replay`
 - `cargo fmt --all`
 - `cargo test observability_sidecar_migrate_moves_large_legacy_request_logs_offline -- --nocapture`
 - `cargo test observability_sidecar_migrate_resumes_copy_from_preseeded_sidecar_gaps -- --nocapture`
@@ -264,6 +295,21 @@
 
 ## Operations Notes
 
+- The `2026-06-19 01:00 +08:00` to `2026-06-19 10:18 +08:00` 101 sample that motivated this pass
+  showed all three runtime responsibility surfaces at once:
+  - startup: `forward-proxy startup: sqlite initialized in 38906ms`
+  - background queueing/worker writes: `quota-sync-hot: enqueue job error`, `scheduled job finish`,
+    `request stats persist warning`
+  - request-path/user writes: `upsert linuxdo oauth account error`,
+    `oauth account upsert: transient sqlite write error`, `apply_pending_billing_log`, and
+    `/api/tavily/search` proxy failures bubbling a `database is locked`
+- The new runtime DB logging contract is designed to map those same symptoms onto stable grep keys:
+  - `db operation slow: operation=sqlite startup ...`
+  - `db operation error: operation=scheduled job enqueue ...`
+  - `db operation error: operation=request stats persist ...`
+  - `db operation error|slow: operation=oauth account upsert ...`
+  - `db operation error|slow: operation=apply_pending_billing_log ...`
+  - `sqlx::query` warn lines for statements slower than `250ms`
 - Production baseline was read-only: container healthy, version `0.46.2`, database `8.3G`, WAL
   `235M`, and the most recent one-hour lock sample only showed LinuxDo OAuth upsert contention.
 - Later production inspection found a `20G` database where startup spent roughly `78s` inside

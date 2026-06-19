@@ -2,15 +2,20 @@ use crate::analysis::*;
 use crate::backend_time::BackendTime;
 use crate::models::*;
 use crate::*;
+use sqlx::ConnectOptions;
 use sqlx::Connection;
 use sqlx::Row;
 use sqlx::SqliteConnection;
 use std::fs::{File, OpenOptions};
 use std::os::fd::AsRawFd;
+use tracing::log::LevelFilter;
 
 pub(crate) struct ObservabilityOfflineGuard {
     _lock_file: File,
 }
+
+pub(crate) const SQLITE_SLOW_STATEMENT_THRESHOLD: Duration = Duration::from_millis(250);
+pub(crate) const SQLITE_SLOW_OPERATION_THRESHOLD: Duration = Duration::from_secs(1);
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -110,6 +115,106 @@ pub(crate) fn sqlite_transient_write_retry_delay(attempt: usize) -> Duration {
             .get(attempt)
             .copied()
             .unwrap_or(*BACKOFF_MS.last().expect("backoff is non-empty")),
+    )
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum DbLogStatus {
+    Slow,
+    Error,
+}
+
+impl DbLogStatus {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Slow => "slow",
+            Self::Error => "error",
+        }
+    }
+}
+
+pub(crate) fn format_db_operation_log(
+    status: DbLogStatus,
+    operation: &str,
+    elapsed: Duration,
+    context: Option<&str>,
+    err: Option<&str>,
+) -> String {
+    let mut message = format!(
+        "db operation {}: operation={}, elapsed_ms={}",
+        status.as_str(),
+        operation,
+        elapsed.as_millis()
+    );
+    if let Some(context) = context.map(str::trim).filter(|value| !value.is_empty()) {
+        message.push_str(", context=");
+        message.push_str(context);
+    }
+    if let Some(err) = err.map(str::trim).filter(|value| !value.is_empty()) {
+        message.push_str(", err=");
+        message.push_str(err);
+    }
+    message
+}
+
+pub(crate) fn log_slow_db_operation(operation: &str, elapsed: Duration, context: Option<&str>) {
+    if elapsed < SQLITE_SLOW_OPERATION_THRESHOLD {
+        return;
+    }
+    eprintln!(
+        "{}",
+        format_db_operation_log(DbLogStatus::Slow, operation, elapsed, context, None)
+    );
+}
+
+pub(crate) fn log_db_operation_error(
+    operation: &str,
+    elapsed: Duration,
+    context: Option<&str>,
+    err: &ProxyError,
+) {
+    eprintln!(
+        "{}",
+        format_db_operation_log(
+            DbLogStatus::Error,
+            operation,
+            elapsed,
+            context,
+            Some(&err.to_string()),
+        )
+    );
+}
+
+pub(crate) async fn instrument_db_operation<T, F>(
+    operation: &str,
+    context: Option<&str>,
+    future: F,
+) -> Result<T, ProxyError>
+where
+    F: std::future::Future<Output = Result<T, ProxyError>>,
+{
+    let started_at = Instant::now();
+    match future.await {
+        Ok(value) => {
+            log_slow_db_operation(operation, started_at.elapsed(), context);
+            Ok(value)
+        }
+        Err(err) => {
+            log_db_operation_error(operation, started_at.elapsed(), context, &err);
+            Err(err)
+        }
+    }
+}
+
+pub(crate) fn sqlite_runtime_log_context(
+    database_path: &str,
+    mode: &str,
+    read_only: bool,
+    create_if_missing: bool,
+) -> String {
+    format!(
+        "path={}, mode={}, read_only={}, create_if_missing={}",
+        database_path, mode, read_only, create_if_missing
     )
 }
 
@@ -301,17 +406,24 @@ pub(crate) async fn open_sqlite_pool_with_observability(
         .filename(database_path)
         .create_if_missing(create_if_missing)
         .read_only(read_only)
-        .busy_timeout(Duration::from_secs(5));
+        .busy_timeout(Duration::from_secs(5))
+        .log_slow_statements(LevelFilter::Warn, SQLITE_SLOW_STATEMENT_THRESHOLD);
     if !read_only {
         options = options.journal_mode(SqliteJournalMode::Wal);
     }
 
-    let attach_plan = resolve_observability_attach_plan(
-        database_path,
-        observability_database_path,
-        create_if_missing,
-        read_only,
-        SQLITE_POOL_MAX_CONNECTIONS_DEFAULT,
+    let attach_context =
+        sqlite_runtime_log_context(database_path, "runtime", read_only, create_if_missing);
+    let attach_plan = instrument_db_operation(
+        "sqlite resolve observability attach plan",
+        Some(attach_context.as_str()),
+        resolve_observability_attach_plan(
+            database_path,
+            observability_database_path,
+            create_if_missing,
+            read_only,
+            SQLITE_POOL_MAX_CONNECTIONS_DEFAULT,
+        ),
     )
     .await?;
     let mut pool_options = SqlitePoolOptions::new()
@@ -327,10 +439,19 @@ pub(crate) async fn open_sqlite_pool_with_observability(
         });
     }
 
-    pool_options
-        .connect_with(options)
-        .await
-        .map_err(ProxyError::Database)
+    let open_context =
+        sqlite_runtime_log_context(database_path, "runtime", read_only, create_if_missing);
+    instrument_db_operation(
+        "sqlite open pool",
+        Some(open_context.as_str()),
+        async move {
+            pool_options
+                .connect_with(options)
+                .await
+                .map_err(ProxyError::Database)
+        },
+    )
+    .await
 }
 
 pub(crate) const LEGACY_REQUEST_LOGS_INLINE_SIDECAR_MIGRATION_MAX_BYTES: u64 = 32 * 1024 * 1024;
@@ -358,23 +479,50 @@ async fn resolve_observability_attach_plan(
         .filename(core_database_path)
         .create_if_missing(create_if_missing)
         .read_only(read_only)
-        .busy_timeout(Duration::from_secs(5));
+        .busy_timeout(Duration::from_secs(5))
+        .log_slow_statements(LevelFilter::Warn, SQLITE_SLOW_STATEMENT_THRESHOLD);
     if !read_only {
         options = options.journal_mode(SqliteJournalMode::Wal);
     }
 
-    let mut probe = SqliteConnection::connect_with(&options)
-        .await
-        .map_err(ProxyError::Database)?;
-    let target_path = select_observability_attach_path(
-        &mut probe,
+    let probe_context = sqlite_runtime_log_context(
         core_database_path,
-        observability_database_path,
-        create_if_missing,
+        "observability-probe",
         read_only,
+        create_if_missing,
+    );
+    let mut probe = instrument_db_operation(
+        "sqlite open observability attach probe",
+        Some(probe_context.as_str()),
+        async {
+            SqliteConnection::connect_with(&options)
+                .await
+                .map_err(ProxyError::Database)
+        },
     )
-    .await
-    .map_err(ProxyError::Database)?;
+    .await?;
+    let select_context = sqlite_runtime_log_context(
+        core_database_path,
+        "observability-probe",
+        read_only,
+        create_if_missing,
+    );
+    let target_path = instrument_db_operation(
+        "sqlite select observability attach path",
+        Some(select_context.as_str()),
+        async {
+            select_observability_attach_path(
+                &mut probe,
+                core_database_path,
+                observability_database_path,
+                create_if_missing,
+                read_only,
+            )
+            .await
+            .map_err(ProxyError::Database)
+        },
+    )
+    .await?;
     Ok(ObservabilityAttachPlan {
         target_path,
         max_connections: default_max_connections,
@@ -392,7 +540,8 @@ pub(crate) async fn open_sqlite_pool_forced_observability(
         .filename(core_database_path)
         .create_if_missing(create_if_missing)
         .read_only(read_only)
-        .busy_timeout(Duration::from_secs(5));
+        .busy_timeout(Duration::from_secs(5))
+        .log_slow_statements(LevelFilter::Warn, SQLITE_SLOW_STATEMENT_THRESHOLD);
     if !read_only {
         options = options.journal_mode(SqliteJournalMode::Wal);
     }
@@ -411,10 +560,23 @@ pub(crate) async fn open_sqlite_pool_forced_observability(
         });
     }
 
-    pool_options
-        .connect_with(options)
-        .await
-        .map_err(ProxyError::Database)
+    let forced_context = sqlite_runtime_log_context(
+        core_database_path,
+        "forced-observability",
+        read_only,
+        create_if_missing,
+    );
+    instrument_db_operation(
+        "sqlite open forced observability pool",
+        Some(forced_context.as_str()),
+        async move {
+            pool_options
+                .connect_with(options)
+                .await
+                .map_err(ProxyError::Database)
+        },
+    )
+    .await
 }
 
 async fn select_observability_attach_path(
@@ -674,12 +836,15 @@ pub(crate) fn sqlite_qualified_table_name(table: &str) -> String {
 pub(crate) async fn begin_immediate_sqlite_connection(
     pool: &SqlitePool,
 ) -> Result<sqlx::pool::PoolConnection<Sqlite>, ProxyError> {
-    let mut conn = pool.acquire().await?;
-    if let Err(err) = sqlx::query("BEGIN IMMEDIATE").execute(&mut *conn).await {
-        let _ = sqlx::query("ROLLBACK").execute(&mut *conn).await;
-        return Err(ProxyError::Database(err));
-    }
-    Ok(conn)
+    instrument_db_operation("sqlite begin immediate", None, async {
+        let mut conn = pool.acquire().await?;
+        if let Err(err) = sqlx::query("BEGIN IMMEDIATE").execute(&mut *conn).await {
+            let _ = sqlx::query("ROLLBACK").execute(&mut *conn).await;
+            return Err(ProxyError::Database(err));
+        }
+        Ok(conn)
+    })
+    .await
 }
 
 pub(crate) async fn begin_immediate_sqlite_connection_with_retry(
@@ -2254,3 +2419,31 @@ include!("key_store_jobs.rs");
 include!("key_store_account_limit_snapshots.rs");
 include!("key_store_account_usage_rollups.rs");
 include!("key_store_ha.rs");
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn db_operation_log_format_includes_operation_context_and_error() {
+        let rendered = format_db_operation_log(
+            DbLogStatus::Error,
+            "sqlite begin immediate",
+            Duration::from_millis(1534),
+            Some("path=data/core.db, mode=startup"),
+            Some("database is locked"),
+        );
+        assert_eq!(
+            rendered,
+            "db operation error: operation=sqlite begin immediate, elapsed_ms=1534, context=path=data/core.db, mode=startup, err=database is locked"
+        );
+    }
+
+    #[test]
+    fn sqlite_runtime_log_context_is_stable_and_grep_friendly() {
+        assert_eq!(
+            sqlite_runtime_log_context("data/core.db", "startup", false, true),
+            "path=data/core.db, mode=startup, read_only=false, create_if_missing=true"
+        );
+    }
+}

@@ -540,14 +540,21 @@ impl KeyStore {
     ) -> Result<Self, ProxyError> {
         #[cfg(test)]
         let _schema_init_guard = Self::acquire_test_schema_init_guard().await;
+        let startup_started = Instant::now();
         let layout = SqliteDatabaseLayout::from_database_path(database_path);
         let observability_lock =
             acquire_observability_service_shared_lock(&layout.core_database_path)?;
-        let pool = open_sqlite_pool_with_observability(
-            &layout.core_database_path,
-            layout.observability_database_path.as_deref(),
-            true,
-            false,
+        let startup_context =
+            sqlite_runtime_log_context(&layout.core_database_path, "startup", false, true);
+        let pool = instrument_db_operation(
+            "sqlite startup open pool",
+            Some(startup_context.as_str()),
+            open_sqlite_pool_with_observability(
+                &layout.core_database_path,
+                layout.observability_database_path.as_deref(),
+                true,
+                false,
+            ),
         )
         .await?;
         let observability_database_path = attached_database_path(&pool, "observability").await?;
@@ -577,7 +584,17 @@ impl KeyStore {
             forced_pending_claim_miss_log_ids: Mutex::new(HashSet::new()),
             forced_quota_subject_lock_loss_subjects: std::sync::Mutex::new(HashSet::new()),
         };
-        store.initialize_schema().await?;
+        instrument_db_operation(
+            "sqlite startup initialize schema",
+            Some(startup_context.as_str()),
+            store.initialize_schema(),
+        )
+        .await?;
+        log_slow_db_operation(
+            "sqlite startup total",
+            startup_started.elapsed(),
+            Some(startup_context.as_str()),
+        );
         Ok(store)
     }
 
@@ -596,11 +613,17 @@ impl KeyStore {
         let layout = SqliteDatabaseLayout::from_database_path(database_path);
         let observability_lock =
             acquire_observability_service_shared_lock(&layout.core_database_path)?;
-        let pool = open_sqlite_pool_with_observability(
-            &layout.core_database_path,
-            layout.observability_database_path.as_deref(),
-            true,
-            false,
+        let gc_context =
+            sqlite_runtime_log_context(&layout.core_database_path, "request-logs-gc", false, true);
+        let pool = instrument_db_operation(
+            "sqlite request logs gc open pool",
+            Some(gc_context.as_str()),
+            open_sqlite_pool_with_observability(
+                &layout.core_database_path,
+                layout.observability_database_path.as_deref(),
+                true,
+                false,
+            ),
         )
         .await?;
         let observability_database_path = attached_database_path(&pool, "observability").await?;
@@ -630,7 +653,11 @@ impl KeyStore {
             forced_pending_claim_miss_log_ids: Mutex::new(HashSet::new()),
             forced_quota_subject_lock_loss_subjects: std::sync::Mutex::new(HashSet::new()),
         };
-        sqlx::query(
+        instrument_db_operation(
+            "sqlite request logs gc bootstrap schema",
+            Some(gc_context.as_str()),
+            async {
+                sqlx::query(
             r#"
             CREATE TABLE IF NOT EXISTS observability.request_logs (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -683,14 +710,18 @@ impl KeyStore {
                 created_at INTEGER NOT NULL
             )
             "#,
+                )
+                .execute(&store.pool)
+                .await?;
+                store.ensure_meta_schema().await?;
+                store.ensure_users_debug_info_shared_column().await?;
+                store.migrate_legacy_observability_tables_to_sidecar().await?;
+                store.upgrade_request_logs_schema().await?;
+                store.ensure_request_logs_gc_support_indexes().await?;
+                Ok(())
+            },
         )
-        .execute(&store.pool)
         .await?;
-        store.ensure_meta_schema().await?;
-        store.ensure_users_debug_info_shared_column().await?;
-        store.migrate_legacy_observability_tables_to_sidecar().await?;
-        store.upgrade_request_logs_schema().await?;
-        store.ensure_request_logs_gc_support_indexes().await?;
         Ok(store)
     }
 

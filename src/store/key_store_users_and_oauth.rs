@@ -1686,9 +1686,18 @@ impl KeyStore {
     ) -> Result<PendingBillingSettleOutcome, ProxyError> {
         let deadline = Instant::now() + Duration::from_secs(10);
         let mut retry_attempt = 0usize;
+        let operation_started = Instant::now();
+        let context = format!("log_id={log_id}");
         loop {
             match self.apply_pending_billing_log_once(log_id).await {
-                Ok(outcome) => return Ok(outcome),
+                Ok(outcome) => {
+                    log_slow_db_operation(
+                        "apply_pending_billing_log",
+                        operation_started.elapsed(),
+                        Some(context.as_str()),
+                    );
+                    return Ok(outcome);
+                }
                 Err(err) => {
                     if sleep_before_sqlite_transient_write_retry(
                         &self.backend_time,
@@ -1702,6 +1711,12 @@ impl KeyStore {
                         retry_attempt += 1;
                         continue;
                     }
+                    log_db_operation_error(
+                        "apply_pending_billing_log",
+                        operation_started.elapsed(),
+                        Some(context.as_str()),
+                        &err,
+                    );
                     return Err(err);
                 }
             }

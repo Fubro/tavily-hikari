@@ -68,10 +68,44 @@ use sqlx::{Executor, QueryBuilder, Sqlite, SqlitePool, Transaction};
 use thiserror::Error;
 use tokio::sync::{Mutex, Notify, RwLock, Semaphore};
 use tokio::time::Instant;
+use tracing_subscriber::{EnvFilter, fmt, layer::SubscriberExt, util::SubscriberInitExt};
 use url::form_urlencoded;
 
 #[cfg(test)]
 use std::sync::atomic::AtomicU64;
+
+static RUNTIME_LOGGING_INIT: std::sync::OnceLock<()> = std::sync::OnceLock::new();
+
+pub fn init_runtime_logging() {
+    RUNTIME_LOGGING_INIT.get_or_init(|| {
+        let filter = EnvFilter::try_from_default_env()
+            .or_else(|_| EnvFilter::try_new("warn,sqlx::query=warn"))
+            .unwrap_or_else(|_| EnvFilter::new("warn"));
+        tracing_subscriber::registry()
+            .with(filter)
+            .with(
+                fmt::layer()
+                    .with_writer(std::io::stderr)
+                    .with_target(true)
+                    .without_time()
+                    .compact(),
+            )
+            .init();
+    });
+}
+
+pub fn emit_db_operation_slow_log(operation: &str, elapsed: Duration, context: Option<&str>) {
+    store::log_slow_db_operation(operation, elapsed, context);
+}
+
+pub fn emit_db_operation_error_log(
+    operation: &str,
+    elapsed: Duration,
+    context: Option<&str>,
+    err: &ProxyError,
+) {
+    store::log_db_operation_error(operation, elapsed, context, err);
+}
 
 pub type ForwardProxyProgressCallback = dyn Fn(ForwardProxyProgressEvent) + Send + Sync;
 
