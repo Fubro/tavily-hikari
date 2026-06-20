@@ -473,6 +473,7 @@ pub async fn serve(
     spawn_quota_sync_scheduler(state.clone());
     spawn_token_usage_rollup_scheduler(state.clone());
     spawn_auth_token_logs_gc_scheduler(state.clone());
+    spawn_ha_outbox_gc_scheduler(state.clone());
     spawn_mcp_sessions_gc_scheduler(state.clone());
     spawn_mcp_session_init_backoffs_gc_scheduler(state.clone());
     spawn_request_logs_gc_scheduler(state.clone());
@@ -582,140 +583,163 @@ async fn run_ha_standby_sync_once(
     internal_token: &str,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let local_node_id = state.ha.status().await.node_id;
-    let applied_seq = state
-        .proxy
-        .get_ha_sync_watermark("standby_applied_seq")
-        .await?
-        .unwrap_or(0);
-    let baseline_applied = state
-        .proxy
-        .get_ha_sync_watermark("standby_baseline_applied")
-        .await?
-        .unwrap_or(0)
-        > 0;
-    let mut next_seq = applied_seq;
-    if !baseline_applied {
-        let target = format!("{}/api/admin/ha/baseline", source_url.trim_end_matches('/'));
+    for channel in [
+        tavily_hikari::HaSyncChannel::Control,
+        tavily_hikari::HaSyncChannel::Billing,
+        tavily_hikari::HaSyncChannel::Runtime,
+    ] {
+        let seq_key = format!("standby_{}_applied_seq", channel.as_str());
+        let baseline_key = format!("standby_{}_baseline_applied", channel.as_str());
+        let baseline_report_key = format!("standby_{}_baseline", channel.as_str());
+        let applied_seq = state
+            .proxy
+            .get_ha_sync_watermark(&seq_key)
+            .await?
+            .unwrap_or(0);
+        let baseline_applied = state
+            .proxy
+            .get_ha_sync_watermark(&baseline_key)
+            .await?
+            .unwrap_or(0)
+            > 0;
+        let mut next_seq = applied_seq;
+
+        if !baseline_applied {
+            let target = format!(
+                "{}/api/admin/ha/baseline?channel={}",
+                source_url.trim_end_matches('/'),
+                channel.as_str()
+            );
+            let response = client
+                .get(target)
+                .header("x-ha-internal-token", internal_token)
+                .send()
+                .await?;
+            if !response.status().is_success() {
+                return Err(format!(
+                    "baseline request failed for {} with {}",
+                    channel.as_str(),
+                    response.status()
+                )
+                .into());
+            }
+            let compressed = response.bytes().await?;
+            let decoded = zstd::stream::decode_all(compressed.as_ref())?;
+            let ndjson = String::from_utf8(decoded)?;
+            let result = state.proxy.apply_ha_baseline_ndjson(channel, &ndjson).await?;
+            next_seq = result.high_watermark;
+            state
+                .proxy
+                .persist_ha_sync_watermark(
+                    &baseline_report_key,
+                    Some(source_url),
+                    Some(&local_node_id),
+                    result.high_watermark,
+                    Some(&format!("rows={}", result.row_count)),
+                )
+                .await?;
+            state
+                .proxy
+                .persist_ha_sync_watermark(
+                    &seq_key,
+                    Some(source_url),
+                    Some(&local_node_id),
+                    result.high_watermark,
+                    Some("baseline"),
+                )
+                .await?;
+            state
+                .proxy
+                .persist_ha_sync_watermark(
+                    &baseline_key,
+                    Some(source_url),
+                    Some(&local_node_id),
+                    1,
+                    Some("baseline applied"),
+                )
+                .await?;
+        }
+
+        let target = format!(
+            "{}/api/admin/ha/events?channel={}&after={}&limit=1000",
+            source_url.trim_end_matches('/'),
+            channel.as_str(),
+            next_seq
+        );
         let response = client
             .get(target)
             .header("x-ha-internal-token", internal_token)
             .send()
             .await?;
+        if matches!(
+            response.status(),
+            reqwest::StatusCode::GONE | reqwest::StatusCode::PAYLOAD_TOO_LARGE
+        ) {
+            let reset_detail = if response.status() == reqwest::StatusCode::PAYLOAD_TOO_LARGE {
+                "events batch too large; baseline required"
+            } else {
+                "retention window missed; baseline required"
+            };
+            state
+                .proxy
+                .persist_ha_sync_watermark(
+                    &seq_key,
+                    Some(source_url),
+                    Some(&local_node_id),
+                    0,
+                    Some(reset_detail),
+                )
+                .await?;
+            state
+                .proxy
+                .persist_ha_sync_watermark(
+                    &baseline_key,
+                    Some(source_url),
+                    Some(&local_node_id),
+                    0,
+                    Some(reset_detail),
+                )
+                .await?;
+            continue;
+        }
         if !response.status().is_success() {
-            return Err(format!("baseline request failed with {}", response.status()).into());
+            return Err(format!(
+                "events request failed for {} with {}",
+                channel.as_str(),
+                response.status()
+            )
+            .into());
         }
         let compressed = response.bytes().await?;
         let decoded = zstd::stream::decode_all(compressed.as_ref())?;
         let ndjson = String::from_utf8(decoded)?;
-        let result = state.proxy.apply_ha_baseline_ndjson(&ndjson).await?;
-        next_seq = result.high_watermark;
-        state
-            .proxy
-            .persist_ha_sync_watermark(
-                "standby_baseline",
-                Some(source_url),
-                Some(&local_node_id),
-                result.high_watermark,
-                Some(&format!("rows={}", result.row_count)),
-            )
-            .await?;
-        state
-            .proxy
-            .persist_ha_sync_watermark(
-                "standby_applied_seq",
-                Some(source_url),
-                Some(&local_node_id),
-                result.high_watermark,
-                Some("baseline"),
-            )
-            .await?;
-        state
-            .proxy
-            .persist_ha_sync_watermark(
-                "standby_baseline_applied",
-                Some(source_url),
-                Some(&local_node_id),
-                1,
-                Some("baseline applied"),
-            )
+        let result = state.proxy.apply_ha_events_ndjson(channel, &ndjson).await?;
+        if result.high_watermark > next_seq {
+            next_seq = result.high_watermark;
+            state
+                .proxy
+                .persist_ha_sync_watermark(
+                    &seq_key,
+                    Some(source_url),
+                    Some(&local_node_id),
+                    next_seq,
+                    Some(&format!("events={}", result.row_count)),
+                )
+                .await?;
+        }
+        let ack_target = format!("{}/api/admin/ha/events/ack", source_url.trim_end_matches('/'));
+        let _ = client
+            .post(ack_target)
+            .header("x-ha-internal-token", internal_token)
+            .json(&serde_json::json!({
+                "channel": channel,
+                "peerNodeId": local_node_id,
+                "ackedSeq": next_seq
+            }))
+            .send()
             .await?;
     }
-
-    let target = format!(
-        "{}/api/admin/ha/events?after={}&limit=1000",
-        source_url.trim_end_matches('/'),
-        next_seq
-    );
-    let response = client
-        .get(target)
-        .header("x-ha-internal-token", internal_token)
-        .send()
-        .await?;
-    if matches!(
-        response.status(),
-        reqwest::StatusCode::GONE | reqwest::StatusCode::PAYLOAD_TOO_LARGE
-    ) {
-        let reset_detail = if response.status() == reqwest::StatusCode::PAYLOAD_TOO_LARGE {
-            "events batch too large; baseline required"
-        } else {
-            "retention window missed; baseline required"
-        };
-        state
-            .proxy
-            .persist_ha_sync_watermark(
-                "standby_applied_seq",
-                Some(source_url),
-                Some(&local_node_id),
-                0,
-                Some(reset_detail),
-            )
-            .await?;
-        state
-            .proxy
-            .persist_ha_sync_watermark(
-                "standby_baseline_applied",
-                Some(source_url),
-                Some(&local_node_id),
-                0,
-                Some(reset_detail),
-            )
-            .await?;
-        state.proxy.flush_ha_state_writes().await?;
-        return Ok(());
-    }
-    if !response.status().is_success() {
-        return Err(format!("events request failed with {}", response.status()).into());
-    }
-    let compressed = response.bytes().await?;
-    let decoded = zstd::stream::decode_all(compressed.as_ref())?;
-    let ndjson = String::from_utf8(decoded)?;
-    let result = state.proxy.apply_ha_events_ndjson(&ndjson).await?;
-    if result.high_watermark > next_seq {
-        next_seq = result.high_watermark;
-        state
-            .proxy
-            .persist_ha_sync_watermark(
-                "standby_applied_seq",
-                Some(source_url),
-                Some(&local_node_id),
-                next_seq,
-                Some(&format!("events={}", result.row_count)),
-            )
-            .await?;
-    }
-    let ack_target = format!(
-        "{}/api/admin/ha/events/ack",
-        source_url.trim_end_matches('/')
-    );
-    let _ = client
-        .post(ack_target)
-        .header("x-ha-internal-token", internal_token)
-        .json(&serde_json::json!({
-            "peerNodeId": local_node_id,
-            "ackedSeq": next_seq
-        }))
-        .send()
-        .await?;
+    state.ha.mark_sync_success().await;
     state.proxy.flush_ha_state_writes().await?;
     Ok(())
 }

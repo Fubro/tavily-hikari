@@ -3,6 +3,8 @@ use super::core_support_and_parsing::*;
 use super::linuxdo_oauth_and_admin_keys::*;
 use super::upstream_support_and_manual_jobs::*;
 
+const TEST_SECS_PER_DAY: i64 = 24 * 60 * 60;
+
 #[tokio::test]
 async fn alerts_endpoints_and_dashboard_recent_alerts_share_default_window() {
     let db_path = temp_db_path("alerts-dashboard-default-window");
@@ -557,7 +559,214 @@ async fn ha_startup_clears_stale_outbox_suppression_marker() {
             .fetch_one(&pool)
             .await
             .expect("count emitted events");
-    assert_eq!(event_count, 1);
+    assert_eq!(event_count, 0);
+    pool.close().await;
+    let _ = std::fs::remove_file(db_path);
+}
+
+#[tokio::test]
+async fn ha_single_mode_does_not_emit_new_control_events() {
+    let db_path = temp_db_path("ha-single-no-control-events");
+    let db_str = db_path.to_string_lossy().to_string();
+    let proxy = TavilyProxy::with_options_in_ha_mode(
+        vec!["tvly-ha-single-mode-key".to_string()],
+        DEFAULT_UPSTREAM,
+        &db_str,
+        tavily_hikari::TavilyProxyOptions::from_database_path(&db_str),
+        tavily_hikari::HaMode::Single,
+    )
+    .await
+    .expect("proxy created");
+    drop(proxy);
+
+    let pool = connect_sqlite_test_pool(&db_str).await;
+    sqlx::query("INSERT OR REPLACE INTO meta (key, value) VALUES ('request_rate_limit_v1', '77')")
+        .execute(&pool)
+        .await
+        .expect("write whitelisted meta");
+    let event_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM ha_outbox")
+        .fetch_one(&pool)
+        .await
+        .expect("count control outbox");
+    assert_eq!(event_count, 0);
+    pool.close().await;
+    let _ = std::fs::remove_file(db_path);
+}
+
+#[tokio::test]
+async fn ha_switching_back_to_single_disables_billing_and_runtime_triggers() {
+    let db_path = temp_db_path("ha-single-disables-non-control-triggers");
+    let db_str = db_path.to_string_lossy().to_string();
+    let proxy = TavilyProxy::with_options_in_ha_mode(
+        vec!["tvly-ha-single-disable-triggers-key".to_string()],
+        DEFAULT_UPSTREAM,
+        &db_str,
+        tavily_hikari::TavilyProxyOptions::from_database_path(&db_str),
+        tavily_hikari::HaMode::ActiveStandby,
+    )
+    .await
+    .expect("proxy created");
+    drop(proxy);
+
+    let reopened = TavilyProxy::with_options_in_ha_mode(
+        Vec::<String>::new(),
+        DEFAULT_UPSTREAM,
+        &db_str,
+        tavily_hikari::TavilyProxyOptions::from_database_path(&db_str),
+        tavily_hikari::HaMode::Single,
+    )
+    .await
+    .expect("proxy reopened in single mode");
+    drop(reopened);
+
+    let pool = connect_sqlite_test_pool(&db_str).await;
+    let control_count_before: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM ha_outbox")
+        .fetch_one(&pool)
+        .await
+        .expect("count control outbox before single-mode writes");
+    let billing_count_before: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM ha_billing_outbox")
+        .fetch_one(&pool)
+        .await
+        .expect("count billing outbox before single-mode writes");
+    let runtime_count_before: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM ha_runtime_outbox")
+        .fetch_one(&pool)
+        .await
+        .expect("count runtime outbox before single-mode writes");
+    let trigger_count: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM sqlite_master WHERE type = 'trigger' AND name LIKE 'trg_ha_%'",
+    )
+    .fetch_one(&pool)
+    .await
+    .expect("count remaining ha triggers");
+    sqlx::query(
+        r#"
+        INSERT INTO users (id, display_name, username, active, created_at, updated_at)
+        VALUES ('user-ha-single-reopen', 'HA Single Reopen', 'ha_single_reopen', 1, 1, 1)
+        ON CONFLICT(id) DO NOTHING
+        "#,
+    )
+    .execute(&pool)
+    .await
+    .expect("seed user for runtime row");
+    sqlx::query(
+        r#"
+        INSERT INTO billing_ledger (
+            auth_token_log_id, token_id, billing_subject, billing_state, business_credits,
+            request_user_id, api_key_id, request_log_id, result_status, created_at, updated_at,
+            settled_at, error_message
+        ) VALUES (9101, 'tok-single-reopen', 'token:tok-single-reopen', 'charged', 2, NULL, NULL, NULL, 'success', 1, 1, 1, NULL)
+        "#,
+    )
+    .execute(&pool)
+    .await
+    .expect("insert billing row after single-mode reopen");
+    sqlx::query(
+        r#"
+        INSERT INTO account_quota_limits (
+            user_id, hourly_any_limit, hourly_limit, daily_limit, monthly_limit,
+            monthly_broken_limit, monthly_blocked_key_limit_delta, inherits_defaults,
+            created_at, updated_at
+        ) VALUES ('user-ha-single-reopen', 1, 2, 3, 4, 5, 0, 1, 1, 1)
+        ON CONFLICT(user_id) DO UPDATE SET updated_at = excluded.updated_at
+        "#,
+    )
+    .execute(&pool)
+    .await
+    .expect("insert runtime row after single-mode reopen");
+
+    let control_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM ha_outbox")
+        .fetch_one(&pool)
+        .await
+        .expect("count control outbox");
+    let billing_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM ha_billing_outbox")
+        .fetch_one(&pool)
+        .await
+        .expect("count billing outbox");
+    let runtime_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM ha_runtime_outbox")
+        .fetch_one(&pool)
+        .await
+        .expect("count runtime outbox");
+
+    assert_eq!(trigger_count, 0);
+    assert_eq!(control_count, control_count_before);
+    assert_eq!(billing_count, billing_count_before);
+    assert_eq!(runtime_count, runtime_count_before);
+    pool.close().await;
+    let _ = std::fs::remove_file(db_path);
+}
+
+#[tokio::test]
+async fn ha_billing_and_runtime_channels_do_not_route_into_control_outbox() {
+    let db_path = temp_db_path("ha-multichannel-outboxes");
+    let db_str = db_path.to_string_lossy().to_string();
+    let proxy = TavilyProxy::with_options_in_ha_mode(
+        vec!["tvly-ha-multichannel-key".to_string()],
+        DEFAULT_UPSTREAM,
+        &db_str,
+        tavily_hikari::TavilyProxyOptions::from_database_path(&db_str),
+        tavily_hikari::HaMode::ActiveStandby,
+    )
+    .await
+    .expect("proxy created");
+    drop(proxy);
+
+    let pool = connect_sqlite_test_pool(&db_str).await;
+    sqlx::query(
+        r#"
+        INSERT INTO users (id, display_name, username, active, created_at, updated_at)
+        VALUES ('user-runtime', 'Runtime User', 'runtime_user', 1, 1, 1)
+        ON CONFLICT(id) DO NOTHING
+        "#,
+    )
+    .execute(&pool)
+    .await
+    .expect("seed runtime user");
+    let control_count_before: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM ha_outbox")
+        .fetch_one(&pool)
+        .await
+        .expect("count initial control events");
+    sqlx::query(
+        r#"
+        INSERT INTO billing_ledger (
+            auth_token_log_id, token_id, billing_subject, billing_state, business_credits,
+            request_user_id, api_key_id, request_log_id, result_status, created_at, updated_at,
+            settled_at, error_message
+        ) VALUES (9001, 'tok-billing', 'token:tok-billing', 'charged', 3, NULL, NULL, NULL, 'success', 1, 1, 1, NULL)
+        "#,
+    )
+    .execute(&pool)
+    .await
+    .expect("insert billing row");
+    sqlx::query(
+        r#"
+        INSERT INTO account_quota_limits (
+            user_id, hourly_any_limit, hourly_limit, daily_limit, monthly_limit,
+            monthly_broken_limit, monthly_blocked_key_limit_delta, inherits_defaults,
+            created_at, updated_at
+        ) VALUES ('user-runtime', 1, 2, 3, 4, 5, 0, 1, 1, 1)
+        ON CONFLICT(user_id) DO UPDATE SET updated_at = excluded.updated_at
+        "#,
+    )
+    .execute(&pool)
+    .await
+    .expect("insert runtime row");
+
+    let control_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM ha_outbox")
+        .fetch_one(&pool)
+        .await
+        .expect("count control events");
+    let billing_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM ha_billing_outbox")
+        .fetch_one(&pool)
+        .await
+        .expect("count billing events");
+    let runtime_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM ha_runtime_outbox")
+        .fetch_one(&pool)
+        .await
+        .expect("count runtime events");
+
+    assert_eq!(control_count, control_count_before);
+    assert!(billing_count >= 1);
+    assert!(runtime_count >= 1);
     pool.close().await;
     let _ = std::fs::remove_file(db_path);
 }
@@ -596,7 +805,9 @@ async fn ha_baseline_uses_zstd_and_excludes_call_records() {
     });
     let active_addr = spawn_ha_admin_server(active_proxy, active_ha, true).await;
     let response = Client::new()
-        .get(format!("http://{active_addr}/api/admin/ha/baseline"))
+        .get(format!(
+            "http://{active_addr}/api/admin/ha/baseline?channel=control"
+        ))
         .send()
         .await
         .expect("baseline request");
@@ -672,7 +883,9 @@ async fn ha_events_endpoint_returns_zstd_ndjson() {
     });
     let addr = spawn_ha_admin_server(proxy, ha, true).await;
     let response = Client::new()
-        .get(format!("http://{addr}/api/admin/ha/events?after=0&limit=10"))
+        .get(format!(
+            "http://{addr}/api/admin/ha/events?channel=control&after=0&limit=10"
+        ))
         .send()
         .await
         .expect("events request");
@@ -700,10 +913,12 @@ fn ha_events_encoder_chunks_oversized_batches() {
         .map(|seq| HaEventResponseItem {
             seq,
             value: serde_json::json!({
-                "schemaVersion": 1,
+                "schemaVersion": 2,
                 "kind": "event",
+                "channel": "control",
                 "event": {
                     "seq": seq,
+                    "channel": "control",
                     "kind": "state",
                     "resource": "meta",
                     "resourceId": format!("request_rate_limit_v1-{seq}"),
@@ -718,13 +933,32 @@ fn ha_events_encoder_chunks_oversized_batches() {
             }),
         })
         .collect::<Vec<_>>();
-    let single = encode_ha_events_limited(0, 4, &events[..1], usize::MAX)
-        .expect("encode single event");
-    let full = encode_ha_events_limited(0, 4, &events, usize::MAX).expect("encode full batch");
+    let single = encode_ha_events_limited(
+        tavily_hikari::HaSyncChannel::Control,
+        0,
+        4,
+        &events[..1],
+        usize::MAX,
+    )
+    .expect("encode single event");
+    let full = encode_ha_events_limited(
+        tavily_hikari::HaSyncChannel::Control,
+        0,
+        4,
+        &events,
+        usize::MAX,
+    )
+    .expect("encode full batch");
     assert!(full.compressed.len() > single.compressed.len());
 
-    let chunked = encode_ha_events_limited(0, 4, &events, single.compressed.len())
-        .expect("chunk oversized batch");
+    let chunked = encode_ha_events_limited(
+        tavily_hikari::HaSyncChannel::Control,
+        0,
+        4,
+        &events,
+        single.compressed.len(),
+    )
+    .expect("chunk oversized batch");
     assert_eq!(chunked.event_count, 1);
     assert_eq!(chunked.last_seq, 1);
 }
@@ -755,19 +989,21 @@ async fn ha_events_storage_allows_nonzero_cursor_when_outbox_is_empty() {
     .unwrap_or(0);
     pool.close().await;
     let events = proxy
-        .list_ha_outbox_events_after(current_seq, 10)
+        .list_ha_events_after(tavily_hikari::HaSyncChannel::Control, current_seq, 10)
         .await
         .expect("empty retained outbox should not force baseline");
     assert!(events.is_empty());
 
     let pool = connect_sqlite_test_pool(&db_str).await;
+    let recent_ts = Utc::now().timestamp();
     let first_seq = sqlx::query(
         r#"
         INSERT INTO ha_outbox (kind, resource, resource_id, op, payload_json, created_at, checksum)
-        VALUES ('state', 'meta', 'request_rate_limit_v1', 'upsert', ?, 0, NULL)
+        VALUES ('state', 'meta', 'request_rate_limit_v1', 'upsert', ?, ?, NULL)
         "#,
     )
     .bind(serde_json::json!({"key":"request_rate_limit_v1","value":"55"}).to_string())
+    .bind(recent_ts)
     .execute(&pool)
     .await
     .expect("insert retained event")
@@ -775,25 +1011,86 @@ async fn ha_events_storage_allows_nonzero_cursor_when_outbox_is_empty() {
     let second_seq = sqlx::query(
         r#"
         INSERT INTO ha_outbox (kind, resource, resource_id, op, payload_json, created_at, checksum)
-        VALUES ('state', 'meta', 'api_rebalance_enabled_v1', 'upsert', ?, 0, NULL)
+        VALUES ('state', 'meta', 'api_rebalance_enabled_v1', 'upsert', ?, ?, NULL)
         "#,
     )
     .bind(serde_json::json!({"key":"api_rebalance_enabled_v1","value":"true"}).to_string())
+    .bind(recent_ts + 1)
         .execute(&pool)
         .await
         .expect("insert retained event")
         .last_insert_rowid();
     pool.close().await;
-    let err = proxy
-        .list_ha_outbox_events_after(first_seq, 10)
-        .await
-        .expect_err("pruned cursor should require baseline");
-    assert!(err.to_string().contains("retention window"));
     let events = proxy
-        .list_ha_outbox_events_after(second_seq, 10)
+        .list_ha_events_after(tavily_hikari::HaSyncChannel::Control, first_seq, 10)
         .await
-        .expect("current cursor can poll empty pruned outbox");
+        .expect("existing rows after cursor should still be returned");
+    assert_eq!(events.len(), 1);
+    assert_eq!(events[0].seq, second_seq);
+    assert_eq!(events[0].resource, "meta");
+    let events = proxy
+        .list_ha_events_after(tavily_hikari::HaSyncChannel::Control, second_seq, 10)
+        .await
+        .expect("current cursor can poll empty outbox after latest seq");
     assert!(events.is_empty());
+    let _ = std::fs::remove_file(db_path);
+}
+
+#[tokio::test]
+async fn ha_events_read_path_hides_expired_rows_without_deleting_them() {
+    let db_path = temp_db_path("ha-events-retention-read-filter");
+    let db_str = db_path.to_string_lossy().to_string();
+    let proxy = TavilyProxy::with_endpoint(
+        vec!["tvly-ha-events-retention-filter-key".to_string()],
+        DEFAULT_UPSTREAM,
+        &db_str,
+    )
+    .await
+    .expect("proxy created");
+    let pool = connect_sqlite_test_pool(&db_str).await;
+    let old_ts = Utc::now().timestamp() - (4 * TEST_SECS_PER_DAY);
+    let recent_ts = Utc::now().timestamp();
+    let old_seq = sqlx::query(
+        r#"
+        INSERT INTO ha_outbox (kind, resource, resource_id, op, payload_json, created_at, checksum)
+        VALUES ('state', 'meta', 'request_rate_limit_v1', 'upsert', ?, ?, NULL)
+        "#,
+    )
+    .bind(serde_json::json!({"key":"request_rate_limit_v1","value":"55"}).to_string())
+    .bind(old_ts)
+    .execute(&pool)
+    .await
+    .expect("insert expired event")
+    .last_insert_rowid();
+    let recent_seq = sqlx::query(
+        r#"
+        INSERT INTO ha_outbox (kind, resource, resource_id, op, payload_json, created_at, checksum)
+        VALUES ('state', 'meta', 'api_rebalance_enabled_v1', 'upsert', ?, ?, NULL)
+        "#,
+    )
+    .bind(serde_json::json!({"key":"api_rebalance_enabled_v1","value":"true"}).to_string())
+    .bind(recent_ts)
+    .execute(&pool)
+    .await
+    .expect("insert recent event")
+    .last_insert_rowid();
+    drop(pool);
+
+    let events = proxy
+        .list_ha_events_after(tavily_hikari::HaSyncChannel::Control, 0, 10)
+        .await
+        .expect("list retained events");
+    assert_eq!(events.len(), 1);
+    assert_eq!(events[0].seq, recent_seq);
+
+    let pool = connect_sqlite_test_pool(&db_str).await;
+    let stored_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM ha_outbox WHERE seq IN (?, ?)")
+        .bind(old_seq)
+        .bind(recent_seq)
+        .fetch_one(&pool)
+        .await
+        .expect("count persisted rows");
+    assert_eq!(stored_count, 2, "read path must not delete expired rows");
     let _ = std::fs::remove_file(db_path);
 }
 
@@ -834,7 +1131,7 @@ async fn ha_sync_transports_system_settings_meta_only() {
     active_pool.close().await;
 
     let baseline = active
-        .export_ha_baseline_ndjson("active-meta")
+        .export_ha_baseline_ndjson(tavily_hikari::HaSyncChannel::Control, "active-meta")
         .await
         .expect("export baseline");
     assert!(baseline.ndjson.contains("request_rate_limit_v1"));
@@ -842,7 +1139,7 @@ async fn ha_sync_transports_system_settings_meta_only() {
     assert!(!baseline.ndjson.contains("ha_unsynced_local_marker"));
 
     standby
-        .apply_ha_baseline_ndjson(&baseline.ndjson)
+        .apply_ha_baseline_ndjson(tavily_hikari::HaSyncChannel::Control, &baseline.ndjson)
         .await
         .expect("apply baseline");
     let standby_pool = connect_sqlite_test_pool(&standby_db_str).await;
@@ -861,6 +1158,10 @@ async fn ha_sync_transports_system_settings_meta_only() {
     standby_pool.close().await;
 
     let active_pool = connect_sqlite_test_pool(&active_db_str).await;
+    let before_seq: i64 = sqlx::query_scalar("SELECT COALESCE(MAX(seq), 0) FROM ha_outbox")
+        .fetch_one(&active_pool)
+        .await
+        .expect("read control watermark before update");
     sqlx::query("DELETE FROM ha_outbox")
         .execute(&active_pool)
         .await
@@ -879,24 +1180,10 @@ async fn ha_sync_transports_system_settings_meta_only() {
     active_pool.close().await;
 
     let events = active
-        .list_ha_outbox_events_after(0, 10)
+        .list_ha_events_after(tavily_hikari::HaSyncChannel::Control, before_seq, 10)
         .await
         .expect("list meta events");
-    assert_eq!(events.len(), 1, "only whitelisted meta should emit events");
-    assert_eq!(events[0].resource, "meta");
-    assert_eq!(events[0].payload["key"].as_str(), Some("request_rate_limit_v1"));
-    let events_ndjson = [
-        serde_json::json!({"schemaVersion":1,"kind":"events_start","after":0,"limit":10})
-            .to_string(),
-        serde_json::json!({"schemaVersion":1,"kind":"event","event":events[0]}).to_string(),
-        serde_json::json!({"schemaVersion":1,"kind":"events_end","lastSeq":events[0].seq,"eventCount":1})
-            .to_string(),
-    ]
-    .join("\n");
-    standby
-        .apply_ha_events_ndjson(&events_ndjson)
-        .await
-        .expect("apply meta event");
+    assert_eq!(events.len(), 0, "meta changes are baseline-only in channel v2");
     let standby_pool = connect_sqlite_test_pool(&standby_db_str).await;
     let request_rate_limit: Option<String> =
         sqlx::query_scalar("SELECT value FROM meta WHERE key = 'request_rate_limit_v1'")
@@ -908,7 +1195,7 @@ async fn ha_sync_transports_system_settings_meta_only() {
             .fetch_optional(&standby_pool)
             .await
             .expect("read unsynced updated meta");
-    assert_eq!(request_rate_limit.as_deref(), Some("55"));
+    assert_eq!(request_rate_limit.as_deref(), Some("42"));
     assert!(local_only.is_none());
     standby_pool.close().await;
 
@@ -922,8 +1209,9 @@ async fn ha_standby_sync_does_not_repeat_zero_watermark_baseline() {
     let events_count = Arc::new(AtomicUsize::new(0));
     let baseline_ndjson = [
         serde_json::json!({
-            "schemaVersion": 1,
+            "schemaVersion": 2,
             "kind": "baseline_start",
+            "channel": "control",
             "nodeId": "active-empty",
             "generatedAt": Utc::now().timestamp(),
             "highWatermark": 0,
@@ -931,8 +1219,9 @@ async fn ha_standby_sync_does_not_repeat_zero_watermark_baseline() {
         })
         .to_string(),
         serde_json::json!({
-            "schemaVersion": 1,
+            "schemaVersion": 2,
             "kind": "baseline_end",
+            "channel": "control",
             "nodeId": "active-empty",
             "highWatermark": 0,
             "rowCount": 0
@@ -942,15 +1231,17 @@ async fn ha_standby_sync_does_not_repeat_zero_watermark_baseline() {
     .join("\n");
     let events_ndjson = [
         serde_json::json!({
-            "schemaVersion": 1,
+            "schemaVersion": 2,
             "kind": "events_start",
+            "channel": "control",
             "after": 0,
             "limit": 1000
         })
         .to_string(),
         serde_json::json!({
-            "schemaVersion": 1,
+            "schemaVersion": 2,
             "kind": "events_end",
+            "channel": "control",
             "lastSeq": 0,
             "eventCount": 0
         })
@@ -1038,18 +1329,18 @@ async fn ha_standby_sync_does_not_repeat_zero_watermark_baseline() {
         .await
         .expect("second standby sync");
 
-    assert_eq!(baseline_count.load(Ordering::SeqCst), 1);
-    assert_eq!(events_count.load(Ordering::SeqCst), 2);
+    assert_eq!(baseline_count.load(Ordering::SeqCst), 3);
+    assert_eq!(events_count.load(Ordering::SeqCst), 6);
     assert_eq!(
         proxy
-            .get_ha_sync_watermark("standby_applied_seq")
+            .get_ha_sync_watermark("standby_control_applied_seq")
             .await
             .expect("read applied seq"),
         Some(0)
     );
     assert_eq!(
         proxy
-            .get_ha_sync_watermark("standby_baseline_applied")
+            .get_ha_sync_watermark("standby_control_baseline_applied")
             .await
             .expect("read baseline marker"),
         Some(1)
@@ -1076,7 +1367,7 @@ async fn ha_events_ack_records_peer_watermark() {
     let addr = spawn_ha_admin_server(proxy, ha, true).await;
     let response = Client::new()
         .post(format!("http://{addr}/api/admin/ha/events/ack"))
-        .json(&serde_json::json!({"peerNodeId":"standby-a","ackedSeq":42}))
+        .json(&serde_json::json!({"channel":"control","peerNodeId":"standby-a","ackedSeq":42}))
         .send()
         .await
         .expect("ack request");
@@ -1084,7 +1375,7 @@ async fn ha_events_ack_records_peer_watermark() {
 
     let pool = connect_sqlite_test_pool(&db_str).await;
     let acked: i64 =
-        sqlx::query_scalar("SELECT acked_seq FROM ha_peer_watermarks WHERE peer_node_id = 'standby-a'")
+        sqlx::query_scalar("SELECT acked_seq FROM ha_peer_watermarks WHERE peer_node_id = 'standby-a' AND channel = 'control'")
             .fetch_one(&pool)
             .await
             .expect("fetch peer watermark");
@@ -1107,7 +1398,7 @@ async fn ha_sync_watermark_reads_pending_overlay_before_flush() {
 
     proxy
         .persist_ha_sync_watermark(
-            "standby_applied_seq",
+            "standby_control_applied_seq",
             Some("source-a"),
             Some("target-a"),
             42,
@@ -1118,7 +1409,7 @@ async fn ha_sync_watermark_reads_pending_overlay_before_flush() {
 
     assert_eq!(
         proxy
-            .get_ha_sync_watermark("standby_applied_seq")
+            .get_ha_sync_watermark("standby_control_applied_seq")
             .await
             .expect("read pending watermark"),
         Some(42)
@@ -1131,7 +1422,7 @@ async fn ha_sync_watermark_reads_pending_overlay_before_flush() {
 
     assert_eq!(
         proxy
-            .get_ha_sync_watermark("standby_applied_seq")
+            .get_ha_sync_watermark("standby_control_applied_seq")
             .await
             .expect("read flushed watermark"),
         Some(42)
@@ -1204,12 +1495,14 @@ async fn ha_event_apply_preserves_foreign_keys_and_composite_deletes() {
     pool.close().await;
 
     let events = serde_json::json!([
-        {"schemaVersion":1,"kind":"events_start","after":0,"limit":10},
+        {"schemaVersion":2,"kind":"events_start","channel":"control","after":0,"limit":10},
         {
-            "schemaVersion":1,
+            "schemaVersion":2,
             "kind":"event",
+            "channel":"control",
             "event":{
                 "seq":1,
+                "channel":"control",
                 "kind":"state",
                 "resource":"api_keys",
                 "resourceId":"key-ha-apply",
@@ -1226,10 +1519,12 @@ async fn ha_event_apply_preserves_foreign_keys_and_composite_deletes() {
             }
         },
         {
-            "schemaVersion":1,
+            "schemaVersion":2,
             "kind":"event",
+            "channel":"control",
             "event":{
                 "seq":2,
+                "channel":"control",
                 "kind":"state",
                 "resource":"token_api_key_bindings",
                 "resourceId":"not-the-standby-rowid",
@@ -1243,10 +1538,12 @@ async fn ha_event_apply_preserves_foreign_keys_and_composite_deletes() {
             }
         },
         {
-            "schemaVersion":1,
+            "schemaVersion":2,
             "kind":"event",
+            "channel":"control",
             "event":{
                 "seq":3,
+                "channel":"control",
                 "kind":"state",
                 "resource":"api_key_maintenance_records",
                 "resourceId":"maint-ha-apply",
@@ -1266,7 +1563,7 @@ async fn ha_event_apply_preserves_foreign_keys_and_composite_deletes() {
                 "checksum":null
             }
         },
-        {"schemaVersion":1,"kind":"events_end","lastSeq":3,"eventCount":3}
+        {"schemaVersion":2,"kind":"events_end","channel":"control","lastSeq":3,"eventCount":3}
     ]);
     let ndjson = events
         .as_array()
@@ -1277,7 +1574,7 @@ async fn ha_event_apply_preserves_foreign_keys_and_composite_deletes() {
         .join("\n")
         + "\n";
     let result = proxy
-        .apply_ha_events_ndjson(&ndjson)
+        .apply_ha_events_ndjson(tavily_hikari::HaSyncChannel::Control, &ndjson)
         .await
         .expect("apply ha events");
     assert_eq!(result.high_watermark, 3);

@@ -410,16 +410,68 @@ impl TavilyProxy {
         I: IntoIterator<Item = S>,
         S: Into<String>,
     {
-        Self::with_options_and_time(keys, upstream, database_path, options, BackendTime::system())
+        Self::with_options_in_ha_mode(
+            keys,
+            upstream,
+            database_path,
+            options,
+            HaMode::Single,
+        )
+        .await
+    }
+
+    pub async fn with_options_in_ha_mode<I, S>(
+        keys: I,
+        upstream: &str,
+        database_path: &str,
+        options: TavilyProxyOptions,
+        ha_mode: HaMode,
+    ) -> Result<Self, ProxyError>
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<String>,
+    {
+        Self::with_options_and_time_in_ha_mode(
+            keys,
+            upstream,
+            database_path,
+            options,
+            BackendTime::system(),
+            ha_mode,
+        )
             .await
     }
 
+    #[allow(dead_code)]
     pub(crate) async fn with_options_and_time<I, S>(
         keys: I,
         upstream: &str,
         database_path: &str,
         options: TavilyProxyOptions,
         backend_time: BackendTime,
+    ) -> Result<Self, ProxyError>
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<String>,
+    {
+        Self::with_options_and_time_in_ha_mode(
+            keys,
+            upstream,
+            database_path,
+            options,
+            backend_time,
+            HaMode::Single,
+        )
+        .await
+    }
+
+    pub(crate) async fn with_options_and_time_in_ha_mode<I, S>(
+        keys: I,
+        upstream: &str,
+        database_path: &str,
+        options: TavilyProxyOptions,
+        backend_time: BackendTime,
+        ha_mode: HaMode,
     ) -> Result<Self, ProxyError>
     where
         I: IntoIterator<Item = S>,
@@ -436,6 +488,7 @@ impl TavilyProxy {
 
         let key_store_started = Instant::now();
         let key_store = KeyStore::new_with_time(database_path, backend_time.clone()).await?;
+        key_store.configure_ha_event_writes(ha_mode).await?;
         eprintln!(
             "forward-proxy startup: sqlite initialized in {}ms",
             key_store_started.elapsed().as_millis()

@@ -28,6 +28,7 @@ struct HaRecoveryImportRequest {
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct HaEventsQuery {
+    channel: Option<String>,
     after: Option<i64>,
     limit: Option<i64>,
 }
@@ -35,6 +36,7 @@ struct HaEventsQuery {
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct HaEventsAckRequest {
+    channel: String,
     peer_node_id: String,
     acked_seq: i64,
 }
@@ -47,6 +49,16 @@ struct HaEventResponseItem {
 
 const HA_BASELINE_MAX_COMPRESSED_BYTES: usize = 64 * 1024 * 1024;
 const HA_EVENTS_MAX_COMPRESSED_BYTES: usize = 4 * 1024 * 1024;
+
+fn parse_ha_channel(raw: Option<&str>) -> Result<tavily_hikari::HaSyncChannel, (StatusCode, String)> {
+    let value = raw.unwrap_or("control");
+    tavily_hikari::HaSyncChannel::parse(value).ok_or_else(|| {
+        (
+            StatusCode::BAD_REQUEST,
+            format!("invalid HA channel: {value}"),
+        )
+    })
+}
 
 fn is_ha_admin_or_internal(state: &AppState, headers: &HeaderMap) -> bool {
     if is_admin_request(state, headers) {
@@ -192,6 +204,7 @@ fn gone_ha_snapshot_response() -> Result<Response<Body>, (StatusCode, String)> {
 async fn get_admin_ha_baseline(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
+    Query(query): Query<HaEventsQuery>,
 ) -> Result<Response<Body>, (StatusCode, String)> {
     if !is_ha_admin_or_internal(state.as_ref(), &headers) {
         return Err((StatusCode::FORBIDDEN, "forbidden".to_string()));
@@ -206,9 +219,10 @@ async fn get_admin_ha_baseline(
             ),
         ));
     }
+    let channel = parse_ha_channel(query.channel.as_deref())?;
     let export = state
         .proxy
-        .export_ha_baseline_ndjson(&status.node_id)
+        .export_ha_baseline_ndjson(channel, &status.node_id)
         .await
         .map_err(|err| (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()))?;
     let compressed = encode_zstd_limited(&export.ndjson, HA_BASELINE_MAX_COMPRESSED_BYTES)?;
@@ -216,7 +230,8 @@ async fn get_admin_ha_baseline(
         .status(StatusCode::OK)
         .header(CONTENT_TYPE, "application/x-ndjson")
         .header("content-encoding", "zstd")
-        .header("x-ha-schema-version", "1")
+        .header("x-ha-schema-version", "2")
+        .header("x-ha-channel", channel.as_str())
         .header("x-ha-high-watermark", export.high_watermark.to_string())
         .header("x-ha-row-count", export.row_count.to_string())
         .body(Body::from(compressed))
@@ -241,11 +256,12 @@ async fn get_admin_ha_events(
             ),
         ));
     }
+    let channel = parse_ha_channel(query.channel.as_deref())?;
     let after = query.after.unwrap_or(0).max(0);
     let limit = query.limit.unwrap_or(100).clamp(1, 1000);
     let events = state
         .proxy
-        .list_ha_outbox_events_after(after, limit)
+        .list_ha_events_after(channel, after, limit)
         .await
         .map_err(|err| {
             let message = err.to_string();
@@ -260,18 +276,21 @@ async fn get_admin_ha_events(
         .map(|event| HaEventResponseItem {
             seq: event.seq,
             value: json!({
-                "schemaVersion": 1,
+                "schemaVersion": 2,
                 "kind": "event",
+                "channel": channel,
                 "event": event
             }),
         })
         .collect::<Vec<_>>();
-    let encoded = encode_ha_events_limited(after, limit, &event_items, HA_EVENTS_MAX_COMPRESSED_BYTES)?;
+    let encoded =
+        encode_ha_events_limited(channel, after, limit, &event_items, HA_EVENTS_MAX_COMPRESSED_BYTES)?;
     Response::builder()
         .status(StatusCode::OK)
         .header(CONTENT_TYPE, "application/x-ndjson")
         .header("content-encoding", "zstd")
-        .header("x-ha-schema-version", "1")
+        .header("x-ha-schema-version", "2")
+        .header("x-ha-channel", channel.as_str())
         .header("x-ha-last-seq", encoded.last_seq.to_string())
         .header("x-ha-event-count", encoded.event_count.to_string())
         .body(Body::from(encoded.compressed))
@@ -285,6 +304,7 @@ struct EncodedHaEvents {
 }
 
 fn encode_ha_events_limited(
+    channel: tavily_hikari::HaSyncChannel,
     after: i64,
     limit: i64,
     events: &[HaEventResponseItem],
@@ -295,7 +315,7 @@ fn encode_ha_events_limited(
         let selected = &events[..event_count];
         let mut ndjson = String::new();
         let mut last_seq = after;
-        append_ha_events_ndjson(&mut ndjson, after, limit, selected, &mut last_seq)?;
+        append_ha_events_ndjson(&mut ndjson, channel, after, limit, selected, &mut last_seq)?;
         let compressed = zstd::stream::encode_all(ndjson.as_bytes(), 3)
             .map_err(|err| (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()))?;
         if compressed.len() <= max_compressed_bytes {
@@ -320,6 +340,7 @@ fn encode_ha_events_limited(
 
 fn append_ha_events_ndjson(
     ndjson: &mut String,
+    channel: tavily_hikari::HaSyncChannel,
     after: i64,
     limit: i64,
     events: &[HaEventResponseItem],
@@ -327,8 +348,9 @@ fn append_ha_events_ndjson(
 ) -> Result<(), (StatusCode, String)> {
     ndjson.push_str(
         &serde_json::to_string(&json!({
-            "schemaVersion": 1,
+            "schemaVersion": 2,
             "kind": "events_start",
+            "channel": channel,
             "after": after,
             "limit": limit
         }))
@@ -345,8 +367,9 @@ fn append_ha_events_ndjson(
     }
     ndjson.push_str(
         &serde_json::to_string(&json!({
-            "schemaVersion": 1,
+            "schemaVersion": 2,
             "kind": "events_end",
+            "channel": channel,
             "lastSeq": *last_seq,
             "eventCount": events.len()
         }))
@@ -364,13 +387,15 @@ async fn post_admin_ha_events_ack(
     if !is_ha_admin_or_internal(state.as_ref(), &headers) {
         return Err((StatusCode::FORBIDDEN, "forbidden".to_string()));
     }
+    let channel = parse_ha_channel(Some(payload.channel.as_str()))?;
     state
         .proxy
-        .ack_ha_peer_watermark(&payload.peer_node_id, payload.acked_seq)
+        .ack_ha_peer_watermark(channel, &payload.peer_node_id, payload.acked_seq)
         .await
         .map_err(|err| (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()))?;
     Ok(Json(json!({
         "ok": true,
+        "channel": channel,
         "peerNodeId": payload.peer_node_id,
         "ackedSeq": payload.acked_seq.max(0)
     })))

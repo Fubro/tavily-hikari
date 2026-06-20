@@ -368,8 +368,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         ),
         health_readiness_grace_period: std::time::Duration::from_secs(90),
     };
-    let proxy =
-        TavilyProxy::with_options(cli.keys, &cli.upstream, &cli.db_path, proxy_options).await?;
+    let ha_mode = HaMode::parse(&cli.ha_mode);
+    let proxy = TavilyProxy::with_options_in_ha_mode(
+        cli.keys,
+        &cli.upstream,
+        &cli.db_path,
+        proxy_options,
+        ha_mode,
+    )
+    .await?;
     let addr: SocketAddr = format!("{}:{}", cli.bind, cli.port).parse()?;
 
     let forward_auth_header = parse_header_name(cli.forward_auth_header, "FORWARD_AUTH_HEADER")?;
@@ -534,7 +541,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         test_price_enabled: cli.linuxdo_credit_test_price_enabled,
     };
     let ha_config = HaConfig {
-        mode: HaMode::parse(&cli.ha_mode),
+        mode: ha_mode,
         node_id: cli.node_id.trim().to_string(),
         database_path: Some(cli.db_path.clone()),
         source_kind: cli

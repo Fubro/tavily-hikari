@@ -111,6 +111,19 @@ brief contention visible as HTTP 500s or failed background bookkeeping.
   rebuildable/eventually consistent views rather than HA-trigger-replicated truth. SQLite attached
   database triggers cannot safely write back into `main`, so the HA outbox should stay focused on
   core control-plane and billing truth tables.
+- Do not reuse one HA whitelist for both baseline export and change-event triggers. In this codebase
+  that caused `billing_ledger` and runtime quota tables to bloat `ha_outbox` even in effectively
+  single-node production. Keep HA channels explicit: `control` small-state, `billing` dedicated
+  ledger truth, and `runtime` minimal correctness state.
+- Keep `HA_MODE=single` truly silent for HA replication writes. Leaving replication triggers enabled
+  on a single live node creates unbounded local-only backlog with no standby consumer.
+- Treat large retained HA event cleanup like request-log cleanup: bounded online GC for freshness,
+  explicit offline one-shot cleanup for backlog removal, and optional later compaction only when
+  reclaimable bytes justify it.
+- When offline maintenance proof depends on a production-derived SQLite copy, define the input as a
+  full DB set instead of a single file. In this service that means the core DB plus the
+  observability sibling sidecar; copying only `tavily_proxy.db` would miss the attached
+  request-log/read-model layout that production actually serves.
 - Once observability tables move into a sidecar, test helpers and admin/read paths must become
   sidecar-aware too. Unqualified schema probes or direct core-only SQLite opens can silently stop
   covering `request_logs` even though production still reads that table through the attached
@@ -149,6 +162,12 @@ brief contention visible as HTTP 500s or failed background bookkeeping.
 - Provide the same offline path for compaction. Manual HTTP trigger endpoints are still useful, but
   operators need a `db_compaction_once`-style bypass for maintenance windows when the online job
   gate is busy.
+- For HA maintenance windows, the safe order is `ha_outbox_cleanup_once` first, `db_compaction_once`
+  second. Reversing that order vacuums retained dead rows too early and can waste I/O without
+  reclaiming the real backlog yet.
+- If the live system stores the main DB and observability data in sibling SQLite files, export the
+  offline validation input with SQLite `.backup` per file and carry forward SHA-256 plus
+  `PRAGMA integrity_check` evidence for each member of the set.
 - Avoid high-resource retention catch-up tactics such as rebuilding large log tables or producing a
   large WAL. If the backlog is very large, run repeated bounded cleanup windows and verify progress
   with row counts and resource telemetry.
@@ -193,6 +212,8 @@ brief contention visible as HTTP 500s or failed background bookkeeping.
 
 - `src/store/mod.rs`
 - `src/bin/request_logs_gc_once.rs`
+- `src/bin/ha_outbox_cleanup_once.rs`
+- `scripts/export-live-db-snapshot-to-testbox.sh`
 - `src/store/key_store_users_and_oauth.rs`
 - `src/store/key_store_request_logs_and_dashboard.rs`
 - `src/tavily_proxy/proxy_auth_and_oauth.rs`
