@@ -1182,7 +1182,7 @@ export default function SystemSettingsModule({
 
               <div className="system-settings-field">
                 <label className="text-sm font-medium" htmlFor="system-settings-auth-token-log-retention-days">
-                  auth_token_logs 保留天数
+                  {strings.form.authTokenLogRetentionDaysLabel}
                 </label>
                 <div className="system-settings-range-control grid gap-3 md:grid-cols-[minmax(0,1fr),64px] md:items-center">
                   <input
@@ -1208,7 +1208,7 @@ export default function SystemSettingsModule({
                   <span className="text-right font-mono text-sm">{draftAuthTokenLogRetentionDays}d</span>
                 </div>
                 <p className="system-settings-field-hint text-xs text-muted-foreground">
-                  仅控制 auth_token_logs 的默认保留窗口；后台持久化值优先于环境变量默认值。
+                  {strings.form.authTokenLogRetentionDaysHint}
                 </p>
               </div>
 

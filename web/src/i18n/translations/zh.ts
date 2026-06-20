@@ -630,6 +630,8 @@ export const ZH: TranslationShape = {
           blockedKeyBaseLimitLabel: '封禁数基础值',
           blockedKeyBaseLimitHint: '作为所有用户封禁数限额的全局基础值；用户隐藏附加额度可正可负，最终有效值不会低于 0。',
           currentBlockedKeyBaseLimitValue: '当前基础值：{count}',
+          authTokenLogRetentionDaysLabel: 'auth_token_logs 保留天数',
+          authTokenLogRetentionDaysHint: '仅控制 auth_token_logs 的默认保留窗口；后台持久化值优先于环境变量默认值。',
           globalIpLimitLabel: '全局 IP 数限制', globalIpLimitHint: '仅用于管理端最近 24 小时 IP 数标红提示，不会拦截请求。',
           currentGlobalIpLimitValue: '当前限制：{count}',
           applyScopeHint: '设置会立即作用于新创建的 MCP session；已有 session 会继续保持当前上游 key。', autosaveHint: '更改后会在失焦或按 Enter 时自动保存。',

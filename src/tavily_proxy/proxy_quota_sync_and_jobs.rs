@@ -373,7 +373,10 @@ impl TavilyProxy {
             .key_store
             .effective_auth_token_log_retention_days()
             .await?;
-        let threshold = shift_local_day_start_utc_ts(current_local_day_start, -(retention_days as i32));
+        let threshold = shift_local_day_start_utc_ts(
+            current_local_day_start,
+            -((retention_days - 1) as i32),
+        );
         let deleted = self.key_store.delete_old_auth_token_logs(threshold).await?;
         if deleted > 0 {
             // Keep the scheduler path lightweight: reclaim WAL frames opportunistically without

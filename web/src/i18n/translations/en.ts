@@ -631,6 +631,8 @@ export const EN: TranslationShape = {
           blockedKeyBaseLimitLabel: 'Blocked-key base limit',
           blockedKeyBaseLimitHint: 'Global base for every user blocked-key limit. Hidden user deltas may be positive or negative; the effective limit never drops below 0.',
           currentBlockedKeyBaseLimitValue: 'Current base: {count}',
+          authTokenLogRetentionDaysLabel: 'auth_token_logs retention days',
+          authTokenLogRetentionDaysHint: 'Only controls the default auth_token_logs retention window; persisted admin settings override the environment default.',
           globalIpLimitLabel: 'Global IP limit', globalIpLimitHint: 'Only highlights 24-hour IP counts in admin UI. It does not block requests.',
           currentGlobalIpLimitValue: 'Current limit: {count}',
           applyScopeHint: 'Applies immediately to newly created MCP sessions only. Existing sessions keep their current upstream key.', autosaveHint: 'Changes save automatically on blur or when you press Enter.',

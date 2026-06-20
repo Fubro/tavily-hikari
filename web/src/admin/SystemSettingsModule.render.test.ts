@@ -8,7 +8,8 @@ import SystemSettingsModule, {
 } from './SystemSettingsModule'
 import { translations } from '../i18n'
 
-const strings = translations.zh.admin.systemSettings
+const zhStrings = translations.zh.admin.systemSettings
+const enStrings = translations.en.admin.systemSettings
 
 describe('SystemSettingsModule rendering', () => {
   it('toggles trusted client IP header presets at the end of the ordered draft', () => {
@@ -33,7 +34,7 @@ describe('SystemSettingsModule rendering', () => {
   it('renders the help trigger while keeping explanatory copy inside the tooltip bubble', () => {
     const markup = renderToStaticMarkup(
       createElement(SystemSettingsModule, {
-        strings,
+        strings: zhStrings,
         settings: {
           requestRateLimit: 100,
           authTokenLogRetentionDays: 92,
@@ -65,39 +66,77 @@ describe('SystemSettingsModule rendering', () => {
       }),
     )
 
-    expect(markup).toContain(strings.title)
-    expect(markup).toContain(strings.helpLabel)
-    expect(markup).toContain(strings.form.displayDensityTitle)
-    expect(markup).toContain(strings.form.displayDensityComfortable)
-    expect(markup).toContain(strings.form.displayDensityCompact)
+    expect(markup).toContain(zhStrings.title)
+    expect(markup).toContain(zhStrings.helpLabel)
+    expect(markup).toContain(zhStrings.form.displayDensityTitle)
+    expect(markup).toContain(zhStrings.form.displayDensityComfortable)
+    expect(markup).toContain(zhStrings.form.displayDensityCompact)
     expect(markup.match(/system-settings-help-trigger/g)?.length).toBe(1)
-    expect(markup).toContain(strings.form.currentRequestRateLimitValue.replace('{count}', '100'))
-    expect(markup).toContain(strings.form.requestRateLimitHint)
-    expect(markup).toContain(strings.form.currentValue.replace('{count}', '5'))
-    expect(markup).toContain(strings.form.currentPercentValue.replace('{percent}', '100'))
-    expect(markup).toContain(strings.form.currentApiRebalancePercentValue.replace('{percent}', '0'))
-    expect(markup).toContain(strings.form.apiRebalancePercentDisabledHint)
-    expect(markup).toContain(strings.form.rechargeFeatureLabel)
-    expect(markup).toContain(strings.form.rechargeUserLabel)
-    expect(markup).toContain(strings.form.activeUsersDefaultLabel)
-    expect(markup).toContain(strings.form.activeUsersDefaultCount.replace('{active}', '128').replace('{total}', '346'))
-    expect(markup).toContain(strings.form.currentBlockedKeyBaseLimitValue.replace('{count}', '5'))
-    expect(markup).toContain(strings.form.blockedKeyBaseLimitHint)
-    expect(markup).toContain(strings.form.currentGlobalIpLimitValue.replace('{count}', '5'))
-    expect(markup).toContain(strings.form.globalIpLimitHint)
+    expect(markup).toContain(zhStrings.form.currentRequestRateLimitValue.replace('{count}', '100'))
+    expect(markup).toContain(zhStrings.form.requestRateLimitHint)
+    expect(markup).toContain(zhStrings.form.currentValue.replace('{count}', '5'))
+    expect(markup).toContain(zhStrings.form.currentPercentValue.replace('{percent}', '100'))
+    expect(markup).toContain(zhStrings.form.currentApiRebalancePercentValue.replace('{percent}', '0'))
+    expect(markup).toContain(zhStrings.form.apiRebalancePercentDisabledHint)
+    expect(markup).toContain(zhStrings.form.rechargeFeatureLabel)
+    expect(markup).toContain(zhStrings.form.rechargeUserLabel)
+    expect(markup).toContain(zhStrings.form.activeUsersDefaultLabel)
+    expect(markup).toContain(zhStrings.form.activeUsersDefaultCount.replace('{active}', '128').replace('{total}', '346'))
+    expect(markup).toContain(zhStrings.form.currentBlockedKeyBaseLimitValue.replace('{count}', '5'))
+    expect(markup).toContain(zhStrings.form.blockedKeyBaseLimitHint)
+    expect(markup).toContain(zhStrings.form.currentGlobalIpLimitValue.replace('{count}', '5'))
+    expect(markup).toContain(zhStrings.form.globalIpLimitHint)
     expect(markup).toContain('配置可信 IP')
     expect(markup).not.toContain('system-settings-apply')
-    expect(markup).not.toContain(strings.description)
-    expect(markup).not.toContain(strings.form.description)
-    expect(markup).not.toContain(strings.form.countHint)
-    expect(markup).not.toContain(strings.form.percentHint)
-    expect(markup).not.toContain(strings.form.applyScopeHint)
+    expect(markup).not.toContain(zhStrings.description)
+    expect(markup).not.toContain(zhStrings.form.description)
+    expect(markup).not.toContain(zhStrings.form.countHint)
+    expect(markup).not.toContain(zhStrings.form.percentHint)
+    expect(markup).not.toContain(zhStrings.form.applyScopeHint)
+  })
+
+  it('renders the auth token retention copy from the provided translation set', () => {
+    const markup = renderToStaticMarkup(
+      createElement(SystemSettingsModule, {
+        strings: enStrings,
+        settings: {
+          requestRateLimit: 100,
+          authTokenLogRetentionDays: 14,
+          mcpSessionAffinityKeyCount: 5,
+          rebalanceMcpEnabled: false,
+          rebalanceMcpSessionPercent: 100,
+          apiRebalanceEnabled: false,
+          apiRebalancePercent: 0,
+          rechargeFeatureEnabled: true,
+          rechargeUserEnabled: true,
+          adminDefaultActiveUsersOnly: false,
+          userBlockedKeyBaseLimit: 5,
+          globalIpLimit: 5,
+          trustedProxyCidrs: ["127.0.0.0/8", "::1/128"],
+          trustedClientIpHeaders: ["cf-connecting-ip", "x-forwarded-for"],
+          requestLogRetention: {
+            maxLogRetentionDays: 32,
+            heavyUsageThresholdPercent: 80,
+            global: { businessBodyDays: 7, nonBusinessBodyDays: 0, nonSuccessBodyDays: 3 },
+            heavyUsage: { businessBodyDays: 3, nonBusinessBodyDays: 0, nonSuccessBodyDays: 1 },
+            debugShared: { businessBodyDays: 14, nonBusinessBodyDays: 1, nonSuccessBodyDays: 7 },
+          },
+        },
+        loadState: 'ready',
+        error: null,
+        saving: false,
+        onApply: () => {},
+      }),
+    )
+
+    expect(markup).toContain(enStrings.form.authTokenLogRetentionDaysLabel)
+    expect(markup).toContain(enStrings.form.authTokenLogRetentionDaysHint)
   })
 
   it('renders the saving state copy when apply is in progress', () => {
     const markup = renderToStaticMarkup(
       createElement(SystemSettingsModule, {
-        strings,
+        strings: zhStrings,
         settings: {
           requestRateLimit: 100,
           authTokenLogRetentionDays: 92,
@@ -128,13 +167,13 @@ describe('SystemSettingsModule rendering', () => {
       }),
     )
 
-    expect(markup).toContain(strings.actions.applying)
+    expect(markup).toContain(zhStrings.actions.applying)
   })
 
   it('shows the locked hint when rebalance is disabled', () => {
     const markup = renderToStaticMarkup(
       createElement(SystemSettingsModule, {
-        strings,
+        strings: zhStrings,
         settings: {
           requestRateLimit: 100,
           authTokenLogRetentionDays: 92,
@@ -165,7 +204,7 @@ describe('SystemSettingsModule rendering', () => {
       }),
     )
 
-    expect(markup).toContain(strings.form.percentDisabledHint)
-    expect(markup).toContain(strings.form.apiRebalancePercentDisabledHint)
+    expect(markup).toContain(zhStrings.form.percentDisabledHint)
+    expect(markup).toContain(zhStrings.form.apiRebalancePercentDisabledHint)
   })
 })
