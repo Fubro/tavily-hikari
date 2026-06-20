@@ -66,6 +66,8 @@ const guideProofLabels = [
   { id: 'claude', label: 'Claude Code' },
   { id: 'vscode', label: 'VS Code' },
 ] as const
+const removedTokenQuotaLabels = ['配额窗口', 'Quota Windows', '任意请求(1h)', 'Any Req (1h)']
+const removedTokenQuotaLabelsMobile = [...removedTokenQuotaLabels, '小时', '日', '月']
 
 function createRequestRate(
   used: number,
@@ -79,6 +81,69 @@ function createRequestRate(
     windowMinutes,
     scope,
   }
+}
+
+async function expectTokenListProof(
+  canvasElement: HTMLElement,
+  selector: string,
+  removed: string[],
+  expectedGroups: string[][],
+  errorPrefix: string,
+): Promise<void> {
+  await new Promise((resolve) => window.setTimeout(resolve, 140))
+
+  const container = canvasElement.querySelector(selector)
+  if (container == null) {
+    throw new Error(`Expected ${errorPrefix} to render ${selector}.`)
+  }
+
+  const proofText = container.textContent ?? ''
+  for (const removedLabel of removed) {
+    if (proofText.includes(removedLabel)) {
+      throw new Error(`Expected ${errorPrefix} to remove ${removedLabel} from the token list.`)
+    }
+  }
+
+  for (const expectedGroup of expectedGroups) {
+    if (!expectedGroup.some((expected) => proofText.includes(expected))) {
+      throw new Error(`Expected ${errorPrefix} to keep one of ${expectedGroup.join(' / ')} visible.`)
+    }
+  }
+}
+
+const mobileViewport = { viewport: { defaultViewport: '0390-device-iphone-14' } } as const
+
+const consoleHomeOverviewArgs: UserConsoleStoryArgs = {
+  consoleView: 'Console Home',
+  isAdmin: false,
+  landingFocus: 'Overview Focus',
+  tokenListState: 'Single Token',
+  tokenDetailPreview: 'Overview',
+}
+
+const consoleHomeAdminOverviewArgs: UserConsoleStoryArgs = {
+  ...consoleHomeOverviewArgs,
+  isAdmin: true,
+}
+
+const consoleHomeTokenFocusArgs: UserConsoleStoryArgs = {
+  ...consoleHomeOverviewArgs,
+  landingFocus: 'Token Focus',
+}
+
+const consoleHomeAdminTokenFocusArgs: UserConsoleStoryArgs = {
+  ...consoleHomeTokenFocusArgs,
+  isAdmin: true,
+}
+
+const tokenDetailOverviewArgs: UserConsoleStoryArgs = {
+  ...consoleHomeOverviewArgs,
+  consoleView: 'Token Detail',
+}
+
+const tokenDetailAdminOverviewArgs: UserConsoleStoryArgs = {
+  ...tokenDetailOverviewArgs,
+  isAdmin: true,
 }
 
 const dashboardSample: UserDashboard = {
@@ -1076,13 +1141,7 @@ const meta = {
     layout: 'fullscreen',
     viewport: { defaultViewport: '1440-device-desktop' },
   },
-  args: {
-    consoleView: 'Console Home',
-    isAdmin: false,
-    landingFocus: 'Overview Focus',
-    tokenListState: 'Single Token',
-    tokenDetailPreview: 'Overview',
-  },
+  args: consoleHomeOverviewArgs,
   argTypes: {
     consoleView: {
       name: 'Console view',
@@ -1453,14 +1512,8 @@ export const ConsoleHomeAnnouncementHistory: Story = {
 
 export const ConsoleHomeAdminMobile: Story = {
   name: 'Console Home Admin Mobile',
-  args: {
-    consoleView: 'Console Home',
-    isAdmin: true,
-    landingFocus: 'Overview Focus',
-  },
-  parameters: {
-    viewport: { defaultViewport: '0390-device-iphone-14' },
-  },
+  args: consoleHomeAdminOverviewArgs,
+  parameters: mobileViewport,
   play: async ({ canvasElement }) => {
     await new Promise((resolve) => window.setTimeout(resolve, 120))
 
@@ -1496,17 +1549,13 @@ export const ConsoleHomeAdminMobile: Story = {
 
 export const ConsoleHomeDarkMobile: Story = {
   name: 'Console Home Dark Mobile',
-  args: {
-    consoleView: 'Console Home',
-    isAdmin: true,
-    landingFocus: 'Overview Focus',
-  },
+  args: consoleHomeAdminOverviewArgs,
   globals: {
     language: 'zh',
     themeMode: 'dark',
   },
   parameters: {
-    viewport: { defaultViewport: '0390-device-iphone-14' },
+    ...mobileViewport,
     docs: {
       description: {
         story:
@@ -1520,42 +1569,59 @@ export const ConsoleHomeDarkMobile: Story = {
 export const ConsoleHomeAdminMobileMenuOpen: Story = {
   name: 'Console Home Admin Mobile Menu Open',
   args: {
-    consoleView: 'Console Home',
-    isAdmin: true,
-    landingFocus: 'Overview Focus',
+    ...consoleHomeAdminOverviewArgs,
     autoOpenAccountMenu: true,
   },
-  parameters: {
-    viewport: { defaultViewport: '0390-device-iphone-14' },
-  },
+  parameters: mobileViewport,
 }
 
 export const ConsoleHomeTokensFocus: Story = {
   name: 'Console Home Tokens Focus',
-  args: {
-    consoleView: 'Console Home',
-    isAdmin: false,
-    landingFocus: 'Token Focus',
-    tokenListState: 'Single Token',
+  args: consoleHomeTokenFocusArgs,
+  play: async ({ canvasElement }) => {
+    await expectTokenListProof(
+      canvasElement,
+      '.user-console-tokens-table',
+      removedTokenQuotaLabels,
+      [
+        ['Status', '状态与最近使用'],
+        ['Last Used', '最近使用'],
+        ['Daily Success', '今日成功'],
+      ],
+      'token-focus landing proof',
+    )
   },
 }
 
 export const ConsoleHomeTokensFocusAdmin: Story = {
   name: 'Console Home Tokens Focus Admin',
-  args: {
-    consoleView: 'Console Home',
-    isAdmin: true,
-    landingFocus: 'Token Focus',
-    tokenListState: 'Single Token',
+  args: consoleHomeAdminTokenFocusArgs,
+}
+
+export const ConsoleHomeTokensFocusMobile: Story = {
+  name: 'Console Home Tokens Focus Mobile',
+  args: consoleHomeTokenFocusArgs,
+  parameters: mobileViewport,
+  play: async ({ canvasElement }) => {
+    await expectTokenListProof(
+      canvasElement,
+      '.user-console-mobile-card',
+      removedTokenQuotaLabelsMobile,
+      [
+        ['状态与最近使用', 'Status & Activity'],
+        ['最近使用', 'Last Used'],
+        ['今日成功', 'Daily Success'],
+        ['详情', 'Details'],
+      ],
+      'token-focus mobile proof',
+    )
   },
 }
 
 export const ConsoleHomeMultipleTokens: Story = {
   name: 'Console Home Multiple Tokens',
   args: {
-    consoleView: 'Console Home',
-    isAdmin: false,
-    landingFocus: 'Token Focus',
+    ...consoleHomeTokenFocusArgs,
     tokenListState: 'Multiple Tokens',
   },
 }
@@ -1563,43 +1629,26 @@ export const ConsoleHomeMultipleTokens: Story = {
 export const ConsoleHomeEmptyTokens: Story = {
   name: 'Console Home Empty Tokens',
   args: {
-    consoleView: 'Console Home',
-    isAdmin: false,
-    landingFocus: 'Token Focus',
+    ...consoleHomeTokenFocusArgs,
     tokenListState: 'Empty',
   },
 }
 
 export const ConsoleHomeCopyFailureRecovery: Story = {
   name: 'Console Home Copy Failure Recovery',
-  args: {
-    consoleView: 'Console Home',
-    isAdmin: false,
-    landingFocus: 'Token Focus',
-    tokenListState: 'Single Token',
-  },
+  args: consoleHomeTokenFocusArgs,
   render: (args) => <UserConsoleStory {...args} copyRecoveryMode="list-manual-bubble" />,
 }
 
 export const ConsoleHomeGuideTokenRevealed: Story = {
   name: 'Console Home Guide Token Revealed',
-  args: {
-    consoleView: 'Console Home',
-    isAdmin: false,
-    landingFocus: 'Token Focus',
-    tokenListState: 'Single Token',
-  },
+  args: consoleHomeTokenFocusArgs,
   render: (args) => <UserConsoleStory {...args} guideRevealMode="landing-guide" />,
 }
 
 export const TokenDetailOverview: Story = {
   name: 'Token Detail Overview',
-  args: {
-    consoleView: 'Token Detail',
-    isAdmin: false,
-    landingFocus: 'Overview Focus',
-    tokenDetailPreview: 'Overview',
-  },
+  args: tokenDetailOverviewArgs,
   play: async ({ canvasElement }) => {
     await new Promise((resolve) => window.setTimeout(resolve, 160))
 
@@ -1656,17 +1705,12 @@ export const TokenDetailOverview: Story = {
 
 export const TokenDetailMobileCredits: Story = {
   name: 'Token Detail Mobile Logs Entry',
-  args: {
-    consoleView: 'Token Detail',
-    isAdmin: false,
-    landingFocus: 'Overview Focus',
-    tokenDetailPreview: 'Overview',
-  },
+  args: tokenDetailOverviewArgs,
   globals: {
     language: 'zh',
   },
   parameters: {
-    viewport: { defaultViewport: '0390-device-iphone-14' },
+    ...mobileViewport,
     docs: {
       description: {
         story:
@@ -1696,17 +1740,14 @@ export const TokenDetailMobileCredits: Story = {
 export const TokenLogsMobile: Story = {
   name: 'Token Logs Mobile',
   args: {
-    consoleView: 'Token Detail',
-    isAdmin: false,
-    landingFocus: 'Overview Focus',
-    tokenDetailPreview: 'Overview',
+    ...tokenDetailOverviewArgs,
     routePathOverride: `${TOKEN_DETAIL_PATH}/logs`,
   },
   globals: {
     language: 'zh',
   },
   parameters: {
-    viewport: { defaultViewport: '0390-device-iphone-14' },
+    ...mobileViewport,
     docs: {
       description: {
         story:
@@ -1731,12 +1772,7 @@ export const TokenLogsMobile: Story = {
 
 export const TokenDetailDark: Story = {
   name: 'Token Detail Dark',
-  args: {
-    consoleView: 'Token Detail',
-    isAdmin: false,
-    landingFocus: 'Overview Focus',
-    tokenDetailPreview: 'Overview',
-  },
+  args: tokenDetailOverviewArgs,
   globals: {
     language: 'zh',
     themeMode: 'dark',
@@ -1755,21 +1791,13 @@ export const TokenDetailDark: Story = {
 
 export const TokenDetailLiveLogs: Story = {
   name: 'Token Detail Live Logs',
-  args: {
-    consoleView: 'Token Detail',
-    isAdmin: false,
-    landingFocus: 'Overview Focus',
-    tokenDetailPreview: 'Overview',
-  },
+  args: tokenDetailOverviewArgs,
 }
 
 export const TokenDetailPushWarning: Story = {
   name: 'Token Detail Push Warning',
   args: {
-    consoleView: 'Token Detail',
-    isAdmin: false,
-    landingFocus: 'Overview Focus',
-    tokenDetailPreview: 'Overview',
+    ...tokenDetailOverviewArgs,
     pushStatusPreview: 'Reconnecting',
     pushStatusBubbleOpen: true,
   },
@@ -1777,12 +1805,7 @@ export const TokenDetailPushWarning: Story = {
 
 export const TokenDetailCopyFailureRecovery: Story = {
   name: 'Token Detail Copy Failure Recovery',
-  args: {
-    consoleView: 'Token Detail',
-    isAdmin: false,
-    landingFocus: 'Overview Focus',
-    tokenDetailPreview: 'Overview',
-  },
+  args: tokenDetailOverviewArgs,
   render: (args) => <UserConsoleStory {...args} copyRecoveryMode="detail-inline" />,
 }
 
@@ -1797,36 +1820,21 @@ export const TokenRevealed: Story = {
 
 export const TokenDetailGuideTokenRevealed: Story = {
   name: 'Token Detail Guide Token Revealed',
-  args: {
-    consoleView: 'Token Detail',
-    isAdmin: false,
-    tokenDetailPreview: 'Overview',
-  },
+  args: tokenDetailOverviewArgs,
   render: (args) => <UserConsoleStory {...args} guideRevealMode="detail-guide" />,
 }
 
 export const TokenDetailAdmin: Story = {
   name: 'Token Detail Admin',
-  args: {
-    consoleView: 'Token Detail',
-    isAdmin: true,
-    landingFocus: 'Overview Focus',
-    tokenDetailPreview: 'Overview',
-  },
+  args: tokenDetailAdminOverviewArgs,
 }
 
 export const MobileGuideMenuProof: Story = {
   name: 'Mobile Guide Menu Proof',
-  args: {
-    consoleView: 'Console Home',
-    isAdmin: false,
-    landingFocus: 'Overview Focus',
-    tokenListState: 'Single Token',
-    tokenDetailPreview: 'Overview',
-  },
+  args: consoleHomeOverviewArgs,
   render: () => <UserConsoleMobileGuideMenuProof />,
   parameters: {
     layout: 'padded',
-    viewport: { defaultViewport: '0390-device-iphone-14' },
+    ...mobileViewport,
   },
 }

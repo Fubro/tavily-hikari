@@ -20,22 +20,22 @@
 
 .user-console-tokens-table th:nth-child(1),
 .user-console-tokens-table td:nth-child(1) {
-  width: 14%;
+  width: 20%;
 }
 
 .user-console-tokens-table th:nth-child(2),
 .user-console-tokens-table td:nth-child(2) {
-  width: 42%;
+  width: 24%;
 }
 
 .user-console-tokens-table th:nth-child(3),
 .user-console-tokens-table td:nth-child(3) {
-  width: 27%;
+  width: 34%;
 }
 
 .user-console-tokens-table th:nth-child(4),
 .user-console-tokens-table td:nth-child(4) {
-  width: 18%;
+  width: 22%;
 }
 
 .user-console-logs-table th:nth-child(1),
@@ -146,9 +146,20 @@
   border-bottom: 1px solid hsl(var(--border) / 0.4);
 }
 
+.user-console-token-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.user-console-token-meta code {
+  overflow-wrap: anywhere;
+}
+
 .user-console-tokens-section .user-console-cell-stack {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(1, minmax(0, 1fr));
   gap: 8px;
 }
 
