@@ -163,3 +163,46 @@ async fn public_success_breakdown_flushes_when_newer_pending_rollup_is_inside_wi
 
     let _ = std::fs::remove_file(db_path);
 }
+
+#[tokio::test]
+async fn public_success_breakdown_flushes_when_pending_rollup_is_outside_day_but_inside_month() {
+    let db_path = temp_db_path("public-success-breakdown-month-only-pending");
+    let db_str = db_path.to_string_lossy().to_string();
+
+    let proxy = TavilyProxy::with_endpoint(
+        vec!["tvly-public-success-month-only-pending".to_string()],
+        DEFAULT_UPSTREAM,
+        &db_str,
+    )
+    .await
+    .expect("proxy created");
+
+    let key_id = proxy
+        .list_api_key_metrics()
+        .await
+        .expect("list key metrics")
+        .into_iter()
+        .next()
+        .expect("seeded key")
+        .id;
+    let now = Utc::now();
+    let month_start = start_of_month(now).timestamp();
+    let day_window = server_local_day_window_utc(now.with_timezone(&Local));
+    let pending_created_at = day_window.start.saturating_sub(120);
+    assert!(pending_created_at >= month_start);
+
+    proxy
+        .key_store
+        .enqueue_request_stats_rollup_for_test(Some(&key_id), pending_created_at, OUTCOME_SUCCESS)
+        .await;
+
+    let public = proxy
+        .success_breakdown(Some(day_window))
+        .await
+        .expect("public success breakdown");
+
+    assert_eq!(public.monthly_success, 1);
+    assert_eq!(public.daily_success, 0);
+
+    let _ = std::fs::remove_file(db_path);
+}

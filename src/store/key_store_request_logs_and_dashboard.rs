@@ -3016,7 +3016,7 @@ impl KeyStore {
         day_start: i64,
         day_end: i64,
     ) -> Result<SuccessBreakdown, ProxyError> {
-        self.flush_request_stats_writes_if_public_metrics_stale(day_start, day_end)
+        self.flush_request_stats_writes_if_public_metrics_stale(month_start, day_start, day_end)
             .await?;
         let now = self.backend_time.now_ts();
         let month_request_log_floor = self
