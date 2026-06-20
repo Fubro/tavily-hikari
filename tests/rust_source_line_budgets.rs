@@ -11,8 +11,8 @@ const EXCEPTIONS: &[(&str, usize, &str)] = &[
     ),
     (
         "src/tests/jobs_and_request_log_retention.rs",
-        3360,
-        "Retention, GC, and compaction-path coverage still lives in the consolidated jobs/request-log regression suite while the new auth-token retention cases land before a broader test extraction pass.",
+        3100,
+        "Request-log retention and scheduled-job regression coverage still lives in the consolidated jobs/request-log suite while the remaining extraction work lands in follow-up slices.",
     ),
     (
         "src/store/key_store_request_logs_and_dashboard.rs",
