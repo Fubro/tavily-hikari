@@ -16,6 +16,7 @@ use super::upstream_support_and_manual_jobs::*;
         proxy
             .set_system_settings(&tavily_hikari::SystemSettings {
                 request_rate_limit: 88,
+                auth_token_log_retention_days: tavily_hikari::AUTH_TOKEN_LOG_RETENTION_DAYS_DEFAULT,
                 mcp_session_affinity_key_count: 5,
                 rebalance_mcp_enabled: false,
                 rebalance_mcp_session_percent: 100,
@@ -141,6 +142,81 @@ use super::upstream_support_and_manual_jobs::*;
             body.contains("mcp_session_affinity_key_count"),
             "expected range validation error, got {body}"
         );
+
+        let _ = std::fs::remove_file(db_path);
+    }
+
+    #[tokio::test]
+    async fn admin_system_settings_reads_auth_token_retention_from_env_until_persisted_override() {
+        let _env_guard = EnvVarGuard::set("AUTH_TOKEN_LOG_RETENTION_DAYS", "14");
+        let db_path = temp_db_path("admin-system-settings-auth-token-retention-env");
+        let db_str = db_path.to_string_lossy().to_string();
+        let proxy = TavilyProxy::with_endpoint::<Vec<String>, String>(Vec::new(), DEFAULT_UPSTREAM, &db_str)
+            .await
+            .expect("create proxy");
+
+        let initial = proxy
+            .get_system_settings()
+            .await
+            .expect("load settings from env default");
+        assert_eq!(initial.auth_token_log_retention_days, 14);
+
+        let mut updated = initial.clone();
+        updated.auth_token_log_retention_days = 32;
+        proxy
+            .set_system_settings(&updated)
+            .await
+            .expect("persist auth token retention");
+
+        let persisted = proxy.get_system_settings().await.expect("reload persisted settings");
+        assert_eq!(persisted.auth_token_log_retention_days, 32);
+
+        let _ = std::fs::remove_file(db_path);
+    }
+
+    #[tokio::test]
+    async fn admin_system_settings_startup_rejects_invalid_auth_token_retention_env_without_override() {
+        let _env_guard = EnvVarGuard::set("AUTH_TOKEN_LOG_RETENTION_DAYS", "30");
+        let db_path = temp_db_path("admin-system-settings-auth-token-retention-invalid-env");
+        let db_str = db_path.to_string_lossy().to_string();
+        let err = TavilyProxy::with_endpoint::<Vec<String>, String>(Vec::new(), DEFAULT_UPSTREAM, &db_str)
+            .await
+            .expect_err("invalid env should block startup");
+        let message = err.to_string();
+        assert!(
+            message.contains("AUTH_TOKEN_LOG_RETENTION_DAYS"),
+            "expected env validation error, got {message}"
+        );
+
+        let _ = std::fs::remove_file(db_path);
+    }
+
+    #[tokio::test]
+    async fn admin_system_settings_persisted_auth_token_retention_overrides_invalid_env() {
+        let db_path = temp_db_path("admin-system-settings-auth-token-retention-persisted-invalid-env");
+        let db_str = db_path.to_string_lossy().to_string();
+        let proxy = TavilyProxy::with_endpoint::<Vec<String>, String>(Vec::new(), DEFAULT_UPSTREAM, &db_str)
+            .await
+            .expect("create proxy");
+
+        let mut settings = proxy.get_system_settings().await.expect("load initial settings");
+        settings.auth_token_log_retention_days = 32;
+        proxy
+            .set_system_settings(&settings)
+            .await
+            .expect("persist auth token retention override");
+        drop(proxy);
+
+        let _env_guard = EnvVarGuard::set("AUTH_TOKEN_LOG_RETENTION_DAYS", "30");
+        let reopened =
+            TavilyProxy::with_endpoint::<Vec<String>, String>(Vec::new(), DEFAULT_UPSTREAM, &db_str)
+                .await
+                .expect("startup should use persisted override");
+        let loaded = reopened
+            .get_system_settings()
+            .await
+            .expect("load settings with persisted override");
+        assert_eq!(loaded.auth_token_log_retention_days, 32);
 
         let _ = std::fs::remove_file(db_path);
     }
@@ -1773,6 +1849,7 @@ use super::upstream_support_and_manual_jobs::*;
         proxy
             .set_system_settings(&tavily_hikari::SystemSettings {
                 request_rate_limit: request_rate_limit(),
+                auth_token_log_retention_days: tavily_hikari::AUTH_TOKEN_LOG_RETENTION_DAYS_DEFAULT,
                 mcp_session_affinity_key_count: 5,
                 rebalance_mcp_enabled: true,
                 rebalance_mcp_session_percent: 100,
@@ -2054,6 +2131,7 @@ use super::upstream_support_and_manual_jobs::*;
         proxy
             .set_system_settings(&tavily_hikari::SystemSettings {
                 request_rate_limit: request_rate_limit(),
+                auth_token_log_retention_days: tavily_hikari::AUTH_TOKEN_LOG_RETENTION_DAYS_DEFAULT,
                 mcp_session_affinity_key_count: 5,
                 rebalance_mcp_enabled: true,
                 rebalance_mcp_session_percent: 100,
@@ -2195,6 +2273,7 @@ use super::upstream_support_and_manual_jobs::*;
         proxy
             .set_system_settings(&tavily_hikari::SystemSettings {
                 request_rate_limit: request_rate_limit(),
+                auth_token_log_retention_days: tavily_hikari::AUTH_TOKEN_LOG_RETENTION_DAYS_DEFAULT,
                 mcp_session_affinity_key_count: 5,
                 rebalance_mcp_enabled: true,
                 rebalance_mcp_session_percent: 100,

@@ -918,7 +918,7 @@ impl KeyStore {
         });
 
         Ok(AlertCatalog {
-            retention_days: effective_auth_token_log_retention_days(),
+            retention_days: self.effective_auth_token_log_retention_days().await?,
             types,
             request_kind_options,
             users,

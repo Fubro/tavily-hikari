@@ -65,9 +65,9 @@ impl KeyStore {
     ) -> Result<Vec<UserRankingRow>, ProxyError> {
         let bucket_kind = match metric_kind {
             AccountUsageRollupMetricKind::BusinessCredits => AccountUsageRollupBucketKind::Hour,
-            AccountUsageRollupMetricKind::PrimarySuccess | AccountUsageRollupMetricKind::RequestCount => {
-                AccountUsageRollupBucketKind::FiveMinute
-            }
+            AccountUsageRollupMetricKind::PrimarySuccess
+            | AccountUsageRollupMetricKind::SecondarySuccess
+            | AccountUsageRollupMetricKind::RequestCount => AccountUsageRollupBucketKind::FiveMinute,
         };
 
         let bucket_secs = match bucket_kind {
@@ -164,9 +164,24 @@ impl KeyStore {
             return Ok(());
         }
 
+        let request_body_expr = if self.table_exists("request_logs").await?
+            && self
+                .table_column_exists("request_logs", "request_body")
+                .await?
+        {
+            "rl.request_body"
+        } else {
+            "NULL"
+        };
+        let request_value_bucket_sql = request_value_bucket_for_stored_request_log_sql(
+            "atl.request_kind_key",
+            request_body_expr,
+            "atl.counts_business_quota",
+        );
+
         match metric_kind {
             AccountUsageRollupMetricKind::PrimarySuccess => {
-                let rows = sqlx::query_as::<_, (String, i64)>(
+                let rows = sqlx::query_as::<_, (String, i64)>(&format!(
                     r#"
                     SELECT
                         COALESCE(
@@ -180,6 +195,7 @@ impl KeyStore {
                         COUNT(*) AS total
                     FROM auth_token_logs atl
                     LEFT JOIN user_token_bindings b ON b.token_id = atl.token_id
+                    LEFT JOIN request_logs rl ON rl.id = atl.request_log_id
                     WHERE atl.created_at >= ?
                       AND atl.created_at < ?
                       AND atl.result_status = ?
@@ -191,15 +207,53 @@ impl KeyStore {
                             END,
                             b.user_id
                         ) IS NOT NULL
-                      AND (
-                            (atl.request_kind_key LIKE 'api:%')
-                            OR atl.request_kind_key IN ('mcp:search', 'mcp:extract', 'mcp:crawl', 'mcp:map', 'mcp:research')
-                            OR (atl.request_kind_key = 'mcp:batch' AND COALESCE(atl.counts_business_quota, 0) <> 0)
-                      )
+                      AND ({request_value_bucket_sql}) = 'valuable'
                     GROUP BY user_id
                     HAVING total > 0
                     "#,
-                )
+                ))
+                .bind(start_at)
+                .bind(end_at)
+                .bind(OUTCOME_SUCCESS)
+                .fetch_all(&self.pool)
+                .await?;
+
+                for (user_id, value) in rows {
+                    *totals.entry(user_id).or_default() += value;
+                }
+            }
+            AccountUsageRollupMetricKind::SecondarySuccess => {
+                let rows = sqlx::query_as::<_, (String, i64)>(&format!(
+                    r#"
+                    SELECT
+                        COALESCE(
+                            atl.request_user_id,
+                            CASE
+                                WHEN atl.billing_subject LIKE 'account:%' THEN SUBSTR(atl.billing_subject, 9)
+                                ELSE NULL
+                            END,
+                            b.user_id
+                        ) AS user_id,
+                        COUNT(*) AS total
+                    FROM auth_token_logs atl
+                    LEFT JOIN user_token_bindings b ON b.token_id = atl.token_id
+                    LEFT JOIN request_logs rl ON rl.id = atl.request_log_id
+                    WHERE atl.created_at >= ?
+                      AND atl.created_at < ?
+                      AND atl.result_status = ?
+                      AND COALESCE(
+                            atl.request_user_id,
+                            CASE
+                                WHEN atl.billing_subject LIKE 'account:%' THEN SUBSTR(atl.billing_subject, 9)
+                                ELSE NULL
+                            END,
+                            b.user_id
+                        ) IS NOT NULL
+                      AND ({request_value_bucket_sql}) = 'other'
+                    GROUP BY user_id
+                    HAVING total > 0
+                    "#,
+                ))
                 .bind(start_at)
                 .bind(end_at)
                 .bind(OUTCOME_SUCCESS)

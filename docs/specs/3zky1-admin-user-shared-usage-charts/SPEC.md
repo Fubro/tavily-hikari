@@ -13,6 +13,7 @@
 - 运营还缺少一套真实 user 维度的“业务调用 rolling 1h”口径，无法在 `/admin/users/usage` 与 `/admin/users/:id` 之间稳定核对某个账户最近 1 小时实际上游的业务调用压力。
 - 现有临时 bucket 与即时扫日志不适合支撑最近 7 天 / 12 个月的稳定图表，因此需要持久化 rollup 读模型。
 - 图表上限线若直接复用“当前额度”，会把账户历史额度变更抹平，无法正确解释历史 bucket 的真实阈值。
+- `account_usage_rollup_buckets` 当前仅作为用户中心读模型，后续 dashboard 若要做固定分组分析，必须走独立读模型，不继续挤进这张表。
 
 ## Goals
 
@@ -57,6 +58,8 @@
 - 主键：`(user_id, metric_kind, bucket_kind, bucket_start)`
 - `metric_kind`:
   - `request_count`
+  - `primary_success`
+  - `secondary_success`
   - `business_credits`
 - `bucket_kind`:
   - `five_minute`
@@ -85,7 +88,8 @@
 
 ### 写入路径
 
-- 每次已认证请求命中已绑定用户时，累加 `request_count/five_minute`。
+- 每次已认证请求命中已绑定用户时，累加 `request_count/five_minute` 与 `request_count/day`。
+- 每次成功请求按现有分类累加 `primary_success` 或 `secondary_success` 的 `five_minute/day`。
 - 每次账户计费结算完成时，累加 `business_credits/hour|day|month`。
 - 全局请求频率阈值变更时，追加 `request_rate_limit_snapshots`。
 - 用户有效额度发生变化时（基础额度、标签绑定、标签定义或系统标签同步影响），追加 `account_quota_limit_snapshots`。

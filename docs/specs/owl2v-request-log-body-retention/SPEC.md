@@ -53,7 +53,7 @@
   共享调试和全局策略仍在写入时决定是否立即保存 body。
 - 同一日志同时命中多个维度时，采用明确优先级：共享调试用户 > 高频调用用户 > 全局默认。
   这样共享调试能延长排障窗口，高频调用用户也能覆盖全局默认以降低 body 增长。
-- `auth_token_logs` 继续保留现有 90 天摘要审计策略，不按本轮设置拆分。
+- `auth_token_logs` 使用独立 retention 配置，默认 92 天；环境变量只提供默认值，后台持久化设置优先。
 
 ## UI
 
@@ -80,7 +80,7 @@
 - Given 日志行超过最大行保留窗口
   Then 自动 GC 删除该 `request_logs` 行并维持现有外键 unlink 行为。
 - Given `auth_token_logs`
-  Then 仍按现有 90 天摘要策略保留，不受本轮 request body 设置拆分。
+  Then 仍按独立摘要策略保留，不受 request body 设置拆分，但 retention 天数可由后台配置覆盖默认值。
 
 ## Test Plan
 

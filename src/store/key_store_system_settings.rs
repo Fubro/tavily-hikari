@@ -1,4 +1,15 @@
 impl KeyStore {
+    pub(crate) async fn effective_auth_token_log_retention_days(&self) -> Result<i64, ProxyError> {
+        if let Some(value) = self
+            .get_meta_i64(META_KEY_AUTH_TOKEN_LOG_RETENTION_DAYS_V1)
+            .await?
+            .and_then(normalize_auth_token_log_retention_days)
+        {
+            return Ok(value);
+        }
+        effective_auth_token_log_retention_days()
+    }
+
     pub(crate) async fn allow_registration(&self) -> Result<bool, ProxyError> {
         Ok(self
             .get_meta_i64(META_KEY_ALLOW_REGISTRATION_V1)
@@ -19,6 +30,7 @@ impl KeyStore {
             .await?
             .unwrap_or(REQUEST_RATE_LIMIT)
             .max(REQUEST_RATE_LIMIT_MIN);
+        let auth_token_log_retention_days = self.effective_auth_token_log_retention_days().await?;
         let count = self
             .get_meta_i64(META_KEY_MCP_SESSION_AFFINITY_KEY_COUNT_V1)
             .await?
@@ -143,6 +155,7 @@ impl KeyStore {
         )?;
         let settings = SystemSettings {
             request_rate_limit,
+            auth_token_log_retention_days,
             mcp_session_affinity_key_count: count,
             rebalance_mcp_enabled,
             rebalance_mcp_session_percent,
@@ -175,12 +188,14 @@ impl KeyStore {
         &self,
         settings: &SystemSettings,
     ) -> Result<SystemSettings, ProxyError> {
+        let current_settings = self.get_system_settings().await?;
         if settings.request_rate_limit < REQUEST_RATE_LIMIT_MIN {
             return Err(ProxyError::Other(format!(
                 "request_rate_limit must be at least {}",
                 REQUEST_RATE_LIMIT_MIN,
             )));
         }
+        validate_auth_token_log_retention_days(settings.auth_token_log_retention_days)?;
         if !(MCP_SESSION_AFFINITY_KEY_COUNT_MIN..=MCP_SESSION_AFFINITY_KEY_COUNT_MAX)
             .contains(&settings.mcp_session_affinity_key_count)
         {
@@ -219,12 +234,19 @@ impl KeyStore {
             trusted_proxy_cidrs: settings.trusted_proxy_cidrs.clone(),
             trusted_client_ip_headers: settings.trusted_client_ip_headers.clone(),
         })?;
-        let previous_request_log_retention =
-            self.get_system_settings().await?.request_log_retention;
+        let previous_request_log_retention = current_settings.request_log_retention;
         let request_log_retention =
             normalize_request_log_retention_settings(&settings.request_log_retention)?;
+        if settings.auth_token_log_retention_days < current_settings.auth_token_log_retention_days {
+            self.rebuild_account_usage_rollup_buckets_v1().await?;
+        }
         self.set_meta_i64(META_KEY_REQUEST_RATE_LIMIT_V1, settings.request_rate_limit)
             .await?;
+        self.set_meta_i64(
+            META_KEY_AUTH_TOKEN_LOG_RETENTION_DAYS_V1,
+            settings.auth_token_log_retention_days,
+        )
+        .await?;
         self.set_meta_i64(
             META_KEY_MCP_SESSION_AFFINITY_KEY_COUNT_V1,
             settings.mcp_session_affinity_key_count,
@@ -346,6 +368,7 @@ impl KeyStore {
         .await?;
         let saved_settings = SystemSettings {
             request_rate_limit: settings.request_rate_limit,
+            auth_token_log_retention_days: settings.auth_token_log_retention_days,
             mcp_session_affinity_key_count: settings.mcp_session_affinity_key_count,
             rebalance_mcp_enabled: settings.rebalance_mcp_enabled,
             rebalance_mcp_session_percent: settings.rebalance_mcp_session_percent,

@@ -3358,6 +3358,7 @@ function createEmptyForwardProxySettings(): ForwardProxySettings {
 function createEmptySystemSettings(): SystemSettings {
   return {
     requestRateLimit: 100,
+    authTokenLogRetentionDays: 92,
     mcpSessionAffinityKeyCount: 5,
     rebalanceMcpEnabled: false,
     rebalanceMcpSessionPercent: 100,

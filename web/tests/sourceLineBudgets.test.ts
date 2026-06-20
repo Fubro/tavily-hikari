@@ -25,59 +25,65 @@ const EXCEPTIONS = new Map<string, { max: number; reason: string }>([
   [
     'src/admin/storySupport/AdminPagesStoryRuntime.tsx',
     {
-      max: 7523,
-      reason: 'Storybook proof runtime remains centralized temporarily while active-user admin states stay on the shared Admin/Pages proof shell.',
+      max: 7524,
+      reason:
+        'Storybook proof runtime remains centralized temporarily while active-user admin states and system-settings proof data stay on the shared Admin/Pages proof shell.',
     },
   ],
   [
     'src/api/runtime.ts',
     {
-      max: 3505,
+      max: 3506,
       reason:
-        'API barrel still carries HA source settings, admin settings, user-list contracts, source dialog failure normalization, and user-console overview APIs until the proxy API surface is split out.',
+        'API barrel still carries HA source settings, admin settings, auth-token retention contracts, user-list contracts, source dialog failure normalization, and user-console overview APIs until the proxy API surface is split out.',
     },
   ],
   [
     'src/api/demo.ts',
     {
-      max: 1820,
-      reason: 'Demo API fixtures now cover user-console overview snapshots, SSE proof states, and recharge availability evidence on the shared demo shell.',
+      max: 1826,
+      reason:
+        'Demo API fixtures now cover user-console overview snapshots, SSE proof states, auth-token retention settings, and recharge availability evidence on the shared demo shell.',
     },
   ],
   [
     'src/api.test.ts',
     {
-      max: 1580,
-      reason: 'Shared API contract coverage now includes the user-console overview snapshot, events surface, and admin rankings endpoint until the largest runtime suites are split out.',
+      max: 1586,
+      reason:
+        'Shared API contract coverage now includes auth-token retention settings, the user-console overview snapshot, events surface, and admin rankings endpoint until the largest runtime suites are split out.',
     },
   ],
   [
     'src/admin/SystemSettingsModule.tsx',
     {
-      max: 1560,
-      reason: 'System settings currently keeps the active-user default control and supporting copy in the existing module pending a broader settings split.',
+      max: 1573,
+      reason:
+        'System settings currently keeps the active-user default control, auth-token retention control, and supporting copy in the existing module pending a broader settings split.',
     },
   ],
   [
     'src/i18n/translations/en.ts',
     {
-      max: 1560,
-      reason: 'Admin jobs maintenance copy and the expanded admin rankings live-status/accessibility strings are still stored in the shared English runtime catalog.',
+      max: 1561,
+      reason:
+        'Admin jobs maintenance copy, the expanded admin rankings live-status/accessibility strings, and the auth-token retention settings copy are still stored in the shared English runtime catalog.',
     },
   ],
   [
     'src/i18n/translations/zh.ts',
     {
-      max: 1559,
-      reason: 'Admin jobs maintenance copy and the expanded admin rankings live-status/accessibility strings are still stored in the shared Chinese runtime catalog.',
+      max: 1560,
+      reason:
+        'Admin jobs maintenance copy, the expanded admin rankings live-status/accessibility strings, and the auth-token retention settings copy are still stored in the shared Chinese runtime catalog.',
     },
   ],
   [
     'src/i18n/types.ts',
     {
-      max: 1635,
+      max: 1636,
       reason:
-        'HA source settings mode-specific failure copy, admin jobs maintenance strings, and the expanded admin rankings translation contract remain in the shared catalog contract.',
+        'HA source settings mode-specific failure copy, admin jobs maintenance strings, the expanded admin rankings contract, and auth-token retention settings copy remain in the shared catalog contract.',
     },
   ],
   [

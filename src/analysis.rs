@@ -1957,6 +1957,27 @@ pub(crate) fn request_value_bucket_sql(request_kind_expr: &str, body_expr: &str)
     )
 }
 
+pub(crate) fn request_value_bucket_for_stored_request_log_sql(
+    request_kind_expr: &str,
+    body_expr: &str,
+    counts_business_quota_expr: &str,
+) -> String {
+    let normalized = format!("LOWER(TRIM(COALESCE({request_kind_expr}, '')))");
+    let live_bucket = request_value_bucket_sql(request_kind_expr, body_expr);
+    format!(
+        "
+        CASE
+            WHEN {normalized} = 'mcp:batch' AND {body_expr} IS NULL
+                THEN CASE
+                    WHEN COALESCE({counts_business_quota_expr}, 0) <> 0 THEN 'valuable'
+                    ELSE 'other'
+                END
+            ELSE ({live_bucket})
+        END
+        "
+    )
+}
+
 pub(crate) fn token_log_operational_class_case_sql(
     request_kind_expr: &str,
     counts_business_quota_expr: &str,

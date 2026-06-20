@@ -25,6 +25,23 @@ use super::upstream_support_and_manual_jobs::*;
         );
     }
 
+    fn assert_account_usage_rollup_metric_index_plan(details: &[String]) {
+        let joined = details.join("\n");
+        assert!(
+            joined.contains("idx_account_usage_rollup_metric_lookup"),
+            "expected metric-first account usage rollup index in query plan, got:\n{joined}"
+        );
+    }
+
+    fn assert_account_usage_rollup_user_lookup_plan(details: &[String]) {
+        let joined = details.join("\n");
+        assert!(
+            joined.contains("idx_account_usage_rollup_lookup")
+                || joined.contains("sqlite_autoindex_account_usage_rollup_buckets_1"),
+            "expected user-first account usage rollup lookup in query plan, got:\n{joined}"
+        );
+    }
+
     #[tokio::test]
     async fn admin_dashboard_sse_snapshot_refreshes_when_disabled_token_feed_breaks() {
         let db_path = temp_db_path("admin-dashboard-snapshot-disabled-token-feed-error");
@@ -161,6 +178,82 @@ use super::upstream_support_and_manual_jobs::*;
         );
 
         drop(events_resp);
+        let _ = std::fs::remove_file(db_path);
+    }
+
+    #[tokio::test]
+    async fn account_usage_rollup_queries_use_bounded_indexes_for_active_user_ranking_and_series() {
+        let db_path = temp_db_path("account-usage-rollup-query-plan");
+        let db_str = db_path.to_string_lossy().to_string();
+        let _proxy = TavilyProxy::with_endpoint(
+            vec!["tvly-account-usage-rollup-query-plan".to_string()],
+            DEFAULT_UPSTREAM,
+            &db_str,
+        )
+        .await
+        .expect("proxy created");
+        let pool = SqlitePoolOptions::new()
+            .min_connections(1)
+            .max_connections(1)
+            .connect_with(
+                SqliteConnectOptions::new()
+                    .filename(&db_str)
+                    .create_if_missing(true)
+                    .journal_mode(SqliteJournalMode::Wal)
+                    .busy_timeout(Duration::from_secs(5)),
+            )
+            .await
+            .expect("open query plan pool");
+
+        let active_users_plan = explain_query_plan_details(
+            &pool,
+            r#"
+            EXPLAIN QUERY PLAN
+            SELECT COUNT(DISTINCT user_id)
+            FROM account_usage_rollup_buckets
+            WHERE metric_kind = 'request_count'
+              AND bucket_kind = 'day'
+              AND bucket_start >= 0
+              AND value > 0
+            "#,
+        )
+        .await;
+        assert_account_usage_rollup_metric_index_plan(&active_users_plan);
+
+        let ranking_plan = explain_query_plan_details(
+            &pool,
+            r#"
+            EXPLAIN QUERY PLAN
+            SELECT user_id, COALESCE(SUM(value), 0) AS total
+            FROM account_usage_rollup_buckets
+            WHERE metric_kind = 'primary_success'
+              AND bucket_kind = 'five_minute'
+              AND bucket_start >= 0
+              AND bucket_start < 4102444800
+            GROUP BY user_id
+            HAVING total > 0
+            "#,
+        )
+        .await;
+        assert_account_usage_rollup_metric_index_plan(&ranking_plan);
+
+        let user_series_plan = explain_query_plan_details(
+            &pool,
+            r#"
+            EXPLAIN QUERY PLAN
+            SELECT bucket_start, value
+            FROM account_usage_rollup_buckets
+            WHERE user_id = 'alice-user'
+              AND metric_kind = 'request_count'
+              AND bucket_kind = 'five_minute'
+              AND bucket_start >= 0
+              AND bucket_start < 4102444800
+            ORDER BY bucket_start ASC
+            "#,
+        )
+        .await;
+        assert_account_usage_rollup_user_lookup_plan(&user_series_plan);
+
         let _ = std::fs::remove_file(db_path);
     }
 
@@ -393,6 +486,20 @@ use super::upstream_support_and_manual_jobs::*;
         .execute(&pool)
         .await
         .expect("normalize non-charlie log activity time");
+        proxy
+            .record_token_attempt(
+                &bob_token.id,
+                &Method::POST,
+                "/mcp",
+                None,
+                Some(200),
+                Some(200),
+                true,
+                "success",
+                None,
+            )
+            .await
+            .expect("record bob active request");
         for (client_ip, created_at, visibility) in [
             ("203.0.113.7", now - 300, "visible"),
             ("198.51.100.10", now - 3_600, "visible"),
@@ -677,20 +784,20 @@ use super::upstream_support_and_manual_jobs::*;
             active_only_resp.json().await.expect("active-only list json");
         assert_eq!(
             active_only_body.get("total").and_then(|value| value.as_i64()),
-            Some(1)
+            Some(2)
         );
         let active_only_items = active_only_body
             .get("items")
             .and_then(|value| value.as_array())
             .expect("active-only items array");
-        assert_eq!(active_only_items.len(), 1);
-        assert_eq!(
-            active_only_items
-                .first()
-                .and_then(|item| item.get("userId"))
-                .and_then(|value| value.as_str()),
-            Some(alice.user_id.as_str())
-        );
+        assert_eq!(active_only_items.len(), 2);
+        let active_only_user_ids = active_only_items
+            .iter()
+            .filter_map(|item| item.get("userId").and_then(|value| value.as_str()))
+            .collect::<Vec<_>>();
+        assert!(active_only_user_ids.contains(&alice.user_id.as_str()));
+        assert!(active_only_user_ids.contains(&bob.user_id.as_str()));
+        assert!(!active_only_user_ids.contains(&charlie.user_id.as_str()));
 
         let active_only_search_url = format!(
             "http://{}/api/users?page=1&per_page=20&q={}&activityScope=active90d",
@@ -739,17 +846,17 @@ use super::upstream_support_and_manual_jobs::*;
             active_only_quota_sort_body
                 .get("total")
                 .and_then(|value| value.as_i64()),
-            Some(1)
+            Some(2)
         );
-        assert_eq!(
-            active_only_quota_sort_body
-                .get("items")
-                .and_then(|value| value.as_array())
-                .and_then(|items| items.first())
-                .and_then(|item| item.get("userId"))
-                .and_then(|value| value.as_str()),
-            Some(alice.user_id.as_str())
-        );
+        let active_only_quota_sort_user_ids = active_only_quota_sort_body
+            .get("items")
+            .and_then(|value| value.as_array())
+            .expect("active-only quota sort items")
+            .iter()
+            .filter_map(|item| item.get("userId").and_then(|value| value.as_str()))
+            .collect::<Vec<_>>();
+        assert!(active_only_quota_sort_user_ids.contains(&alice.user_id.as_str()));
+        assert!(active_only_quota_sort_user_ids.contains(&bob.user_id.as_str()));
 
         let order_only_url = format!("http://{}/api/users?page=1&per_page=20&order=asc", addr);
         let order_only_resp = client

@@ -715,6 +715,8 @@ export interface AdminTranslationsShape {
       blockedKeyBaseLimitLabel: string
       blockedKeyBaseLimitHint: string
       currentBlockedKeyBaseLimitValue: string
+      authTokenLogRetentionDaysLabel: string
+      authTokenLogRetentionDaysHint: string
       globalIpLimitLabel: string
       globalIpLimitHint: string
       currentGlobalIpLimitValue: string

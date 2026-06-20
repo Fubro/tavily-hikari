@@ -13,6 +13,7 @@ const strings = translations.zh.admin.systemSettings
 
 const initialSettings: SystemSettings = {
   requestRateLimit: 100,
+  authTokenLogRetentionDays: 92,
   mcpSessionAffinityKeyCount: 5,
   rebalanceMcpEnabled: false,
   rebalanceMcpSessionPercent: 100,

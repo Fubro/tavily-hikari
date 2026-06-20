@@ -231,6 +231,207 @@ async fn scheduled_job_claim_abandons_stale_quota_sync_running_job() {
 }
 
 #[tokio::test]
+async fn auth_token_logs_gc_runs_passive_checkpoint_after_deletes() {
+    let db_path = temp_db_path("auth-token-logs-gc-passive-checkpoint");
+    let db_str = db_path.to_string_lossy().to_string();
+    let proxy = TavilyProxy::with_endpoint(Vec::<String>::new(), DEFAULT_UPSTREAM, &db_str)
+        .await
+        .expect("proxy created");
+    let user = proxy
+        .upsert_oauth_account(&OAuthAccountProfile {
+            provider: "github".to_string(),
+            provider_user_id: "auth-token-logs-gc-passive-checkpoint".to_string(),
+            username: Some("auth_token_logs_gc_checkpoint".to_string()),
+            name: Some("Auth Token Logs GC Checkpoint".to_string()),
+            avatar_template: None,
+            active: true,
+            trust_level: None,
+            raw_payload_json: None,
+        })
+        .await
+        .expect("upsert user");
+    let token = proxy
+        .ensure_user_token_binding(&user.user_id, Some("auth-token-logs-gc-passive-checkpoint"))
+        .await
+        .expect("bind token");
+
+    let stale_created_at = Utc::now().timestamp().saturating_sub(120 * SECS_PER_DAY);
+    for offset in 0..8 {
+        sqlx::query(
+            r#"
+            INSERT INTO auth_token_logs (
+                token_id,
+                request_user_id,
+                method,
+                path,
+                query,
+                http_status,
+                mcp_status,
+                result_status,
+                error_message,
+                created_at,
+                counts_business_quota,
+                business_credits,
+                billing_subject,
+                billing_state,
+                request_kind_key,
+                request_kind_label
+            ) VALUES (?, ?, 'POST', '/api/tavily/search', NULL, 200, 200, 'success', NULL, ?, 1, 1, ?, 'charged', 'api:search', 'API | search')
+            "#,
+        )
+        .bind(&token.id)
+        .bind(&user.user_id)
+        .bind(stale_created_at + offset)
+        .bind(format!("account:{}", user.user_id))
+        .execute(&proxy.key_store.pool)
+        .await
+        .expect("insert stale auth token log");
+    }
+
+    let before_gc: (i64, i64, i64) = sqlx::query_as("PRAGMA wal_checkpoint(NOOP)")
+        .fetch_one(&proxy.key_store.pool)
+        .await
+        .expect("read wal checkpoint stats before gc");
+    assert!(
+        before_gc.1 >= before_gc.2,
+        "expected WAL frames before passive checkpoint, got {before_gc:?}"
+    );
+
+    let deleted = proxy
+        .gc_auth_token_logs()
+        .await
+        .expect("run auth token logs gc");
+    assert_eq!(deleted, 8);
+
+    let remaining: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM auth_token_logs")
+        .fetch_one(&proxy.key_store.pool)
+        .await
+        .expect("count remaining auth token logs");
+    assert_eq!(remaining, 0);
+
+    let after_gc: (i64, i64, i64) = sqlx::query_as("PRAGMA wal_checkpoint(NOOP)")
+        .fetch_one(&proxy.key_store.pool)
+        .await
+        .expect("read wal checkpoint stats after gc");
+    assert_eq!(
+        after_gc.0, 0,
+        "expected passive checkpoint not to report busy"
+    );
+    assert_eq!(
+        after_gc.1, after_gc.2,
+        "expected auth token logs gc to checkpoint all visible WAL frames, got {after_gc:?}"
+    );
+
+    let _ = std::fs::remove_file(&db_path);
+    let _ = std::fs::remove_file(db_path.with_extension("db-shm"));
+    let _ = std::fs::remove_file(db_path.with_extension("db-wal"));
+}
+
+#[tokio::test]
+async fn auth_token_logs_gc_keeps_exact_configured_local_day_count() {
+    let (backend_time, manual_clock) = crate::BackendTime::manual_from_ts(1_700_000_000);
+    let db_path = temp_db_path("auth-token-logs-gc-exact-local-day-count");
+    let db_str = db_path.to_string_lossy().to_string();
+    let proxy = TavilyProxy::with_options_and_time(
+        Vec::<String>::new(),
+        DEFAULT_UPSTREAM,
+        &db_str,
+        crate::TavilyProxyOptions::from_database_path(&db_str),
+        backend_time,
+    )
+    .await
+    .expect("proxy created");
+    let user = proxy
+        .upsert_oauth_account(&OAuthAccountProfile {
+            provider: "github".to_string(),
+            provider_user_id: "auth-token-logs-gc-exact-local-day-count".to_string(),
+            username: Some("auth_token_logs_gc_exact_local_day_count".to_string()),
+            name: Some("Auth Token Logs GC Exact Local Day Count".to_string()),
+            avatar_template: None,
+            active: true,
+            trust_level: None,
+            raw_payload_json: None,
+        })
+        .await
+        .expect("upsert user");
+    let token = proxy
+        .ensure_user_token_binding(
+            &user.user_id,
+            Some("auth-token-logs-gc-exact-local-day-count"),
+        )
+        .await
+        .expect("bind token");
+
+    let mut settings = proxy.get_system_settings().await.expect("load settings");
+    settings.auth_token_log_retention_days = 1;
+    proxy
+        .set_system_settings(&settings)
+        .await
+        .expect("set auth token retention to 1 day");
+
+    let current_local_day_start = local_day_bucket_start_utc_ts(manual_clock.now_ts());
+    let previous_local_day_start = shift_local_day_start_utc_ts(current_local_day_start, -1);
+    let two_days_ago_local_day_start = shift_local_day_start_utc_ts(current_local_day_start, -2);
+    let previous_day_created_at = previous_local_day_start + 12 * SECS_PER_HOUR;
+    let current_day_created_at = current_local_day_start + 60;
+    let stale_day_created_at = two_days_ago_local_day_start + 12 * SECS_PER_HOUR;
+
+    for created_at in [
+        stale_day_created_at,
+        previous_day_created_at,
+        current_day_created_at,
+    ] {
+        sqlx::query(
+            r#"
+            INSERT INTO auth_token_logs (
+                token_id,
+                request_user_id,
+                method,
+                path,
+                query,
+                http_status,
+                mcp_status,
+                result_status,
+                error_message,
+                created_at,
+                counts_business_quota,
+                business_credits,
+                billing_subject,
+                billing_state,
+                request_kind_key,
+                request_kind_label
+            ) VALUES (?, ?, 'POST', '/api/tavily/search', NULL, 200, 200, 'success', NULL, ?, 1, 1, ?, 'charged', 'api:search', 'API | search')
+            "#,
+        )
+        .bind(&token.id)
+        .bind(&user.user_id)
+        .bind(created_at)
+        .bind(format!("account:{}", user.user_id))
+        .execute(&proxy.key_store.pool)
+        .await
+        .expect("insert auth token log");
+    }
+
+    manual_clock.set_now_ts(current_local_day_start + 15 * SECS_PER_HOUR);
+    let deleted = proxy
+        .gc_auth_token_logs()
+        .await
+        .expect("run auth token logs gc");
+    assert_eq!(deleted, 2);
+
+    let remaining_created_at: Vec<i64> =
+        sqlx::query_scalar("SELECT created_at FROM auth_token_logs ORDER BY created_at ASC")
+            .fetch_all(&proxy.key_store.pool)
+            .await
+            .expect("load remaining auth token logs");
+    assert_eq!(remaining_created_at, vec![current_day_created_at]);
+
+    let _ = std::fs::remove_file(&db_path);
+    let _ = std::fs::remove_file(db_path.with_extension("db-shm"));
+    let _ = std::fs::remove_file(db_path.with_extension("db-wal"));
+}
+
+#[tokio::test]
 async fn scheduled_job_claim_keeps_fresh_quota_sync_running_job() {
     let db_path = temp_db_path("scheduled-job-claim-keeps-fresh-quota-sync");
     let db_str = db_path.to_string_lossy().to_string();

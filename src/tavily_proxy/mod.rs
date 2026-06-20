@@ -1187,6 +1187,34 @@ impl TokenQuota {
                 .await?;
             self.store
                 .delete_old_account_usage_rollup_buckets(
+                    AccountUsageRollupMetricKind::RequestCount,
+                    AccountUsageRollupBucketKind::Day,
+                    now_ts.saturating_sub(ACCOUNT_USAGE_ROLLUP_REQUEST_DAY_RETENTION_SECS),
+                )
+                .await?;
+            self.store
+                .delete_old_account_usage_rollup_buckets(
+                    AccountUsageRollupMetricKind::PrimarySuccess,
+                    AccountUsageRollupBucketKind::Day,
+                    now_ts.saturating_sub(ACCOUNT_USAGE_ROLLUP_REQUEST_DAY_RETENTION_SECS),
+                )
+                .await?;
+            self.store
+                .delete_old_account_usage_rollup_buckets(
+                    AccountUsageRollupMetricKind::SecondarySuccess,
+                    AccountUsageRollupBucketKind::FiveMinute,
+                    now_ts.saturating_sub(ACCOUNT_USAGE_ROLLUP_FIVE_MINUTE_RETENTION_SECS),
+                )
+                .await?;
+            self.store
+                .delete_old_account_usage_rollup_buckets(
+                    AccountUsageRollupMetricKind::SecondarySuccess,
+                    AccountUsageRollupBucketKind::Day,
+                    now_ts.saturating_sub(ACCOUNT_USAGE_ROLLUP_REQUEST_DAY_RETENTION_SECS),
+                )
+                .await?;
+            self.store
+                .delete_old_account_usage_rollup_buckets(
                     AccountUsageRollupMetricKind::BusinessCredits,
                     AccountUsageRollupBucketKind::Hour,
                     now_ts.saturating_sub(ACCOUNT_USAGE_ROLLUP_HOUR_RETENTION_SECS),

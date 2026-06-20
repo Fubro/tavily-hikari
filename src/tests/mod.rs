@@ -22,6 +22,7 @@ use std::time::Duration;
 use tokio::net::TcpListener;
 
 mod account_quota_and_billing;
+mod account_usage_rollup_request_days;
 mod dashboard_month_series;
 mod jobs_and_request_log_retention;
 mod linuxdo_credit_recharge;

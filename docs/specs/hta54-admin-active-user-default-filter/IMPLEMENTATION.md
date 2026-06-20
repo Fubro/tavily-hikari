@@ -2,11 +2,14 @@
 
 - Backend:
   - `SystemSettings` 新增 `admin_default_active_users_only` 持久化字段。
+  - `SystemSettings` 新增 `auth_token_log_retention_days` 持久化字段，环境变量 `AUTH_TOKEN_LOG_RETENTION_DAYS` 只提供默认值。
   - `/api/settings` 聚合响应新增只读 `admin_user_list_stats`。
   - `/api/users` 新增 `activity_scope` 查询参数，并在默认分页、排序分页、排序回退查询路径统一接入活跃过滤。
-  - 活跃统计与过滤统一使用 `auth_token_logs.request_user_id + result_status='success' + created_at >= now - 90 days`。
+  - 活跃统计与过滤统一使用 `account_usage_rollup_buckets(request_count, day)`，口径为最近 90 个服务器本地自然日内至少一次可归属调用。
+  - `auth_token_logs_gc` 保持原任务名与调度链路，只切换到新的 effective retention，并在实际删行后追加轻量 `PASSIVE` checkpoint；重型 compaction 继续走独立 `db_compaction` 维护链路。
+  - `account_usage_rollup_buckets` 新增请求类 `day` bucket 与 `secondary_success` metric，并补 `metric_kind/bucket_kind/bucket_start DESC/user_id` 辅助索引。
 - Frontend:
-  - 系统设置页新增活跃用户默认展示开关、活跃/总用户统计与说明文案。
+  - 系统设置页新增活跃用户默认展示开关、活跃/总用户统计、auth token retention 控件与说明文案。
   - 用户列表与用户用量页空搜索时遵守系统设置；非空搜索时强制切回全量集合。
   - 状态提示、i18n、Storybook 状态、渲染测试与交互测试已补齐。
   - 用户用量页进一步压缩为页面级标题左侧、搜索右置的紧凑头部，移除返回按钮，并在窄视口下将搜索下移到标题说明下方整行，同时保留默认活跃过滤提示。

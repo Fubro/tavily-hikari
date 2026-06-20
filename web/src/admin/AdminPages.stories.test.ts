@@ -217,12 +217,12 @@ describe('AdminPages Storybook proofs', () => {
     const usageActiveOnlyMarkup = renderMarkup(renderUsageActiveOnly!)
     const usageSearchAllMarkup = renderMarkup(renderUsageSearchAll!)
 
-    expect(usersActiveOnlyMarkup).toContain('默认仅展示近 90 天内成功调用过接口的活跃用户。')
+    expect(usersActiveOnlyMarkup).toContain('默认仅展示近 90 天内调用过接口的活跃用户。')
     expect(usersActiveOnlyMarkup).not.toContain('Charlie Li')
     expect(usersSearchAllMarkup).toContain('搜索已扩展到全部用户集合，避免遗漏非活跃用户。')
     expect(usersSearchAllMarkup).toContain('Charlie Li')
 
-    expect(usageActiveOnlyMarkup).toContain('默认仅展示近 90 天内成功调用过接口的活跃用户。')
+    expect(usageActiveOnlyMarkup).toContain('默认仅展示近 90 天内调用过接口的活跃用户。')
     expect(usageActiveOnlyMarkup).not.toContain('Charlie Li')
     expect(usageActiveOnlyMarkup.indexOf('data-testid="users-filter-status"')).toBeGreaterThan(-1)
     expect(usageActiveOnlyMarkup.indexOf('<section class="surface panel">')).toBeGreaterThan(-1)

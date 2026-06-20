@@ -58,6 +58,7 @@ type NormalSystemSettingsOverrides = Partial<
   Pick<
     SystemSettings,
     | 'requestRateLimit'
+    | 'authTokenLogRetentionDays'
     | 'mcpSessionAffinityKeyCount'
     | 'rebalanceMcpEnabled'
     | 'rebalanceMcpSessionPercent'
@@ -73,6 +74,7 @@ type NormalSystemSettingsOverrides = Partial<
 >
 
 const requestLogRetentionDayStops = [0, 1, 2, 3, 7, 14, 32, 62, 92] as const
+const authTokenLogRetentionDayStops = [1, 2, 3, 7, 14, 32, 62, 92] as const
 
 const defaultRequestLogRetention: RequestLogRetentionSettings = {
   maxLogRetentionDays: 32,
@@ -99,6 +101,18 @@ function dayStopIndex(value: number): number {
   let best = 0
   requestLogRetentionDayStops.forEach((stop, index) => {
     if (Math.abs(stop - value) < Math.abs(requestLogRetentionDayStops[best] - value)) best = index
+  })
+  return best
+}
+
+function authTokenLogRetentionDayStopIndex(value: number): number {
+  const exact = authTokenLogRetentionDayStops.indexOf(
+    value as (typeof authTokenLogRetentionDayStops)[number],
+  )
+  if (exact >= 0) return exact
+  let best = 0
+  authTokenLogRetentionDayStops.forEach((stop, index) => {
+    if (Math.abs(stop - value) < Math.abs(authTokenLogRetentionDayStops[best] - value)) best = index
   })
   return best
 }
@@ -244,6 +258,9 @@ export default function SystemSettingsModule({
   const [draftRequestRateLimit, setDraftRequestRateLimit] = useState(() =>
     settings ? String(settings.requestRateLimit) : '100',
   )
+  const [draftAuthTokenLogRetentionDays, setDraftAuthTokenLogRetentionDays] = useState(
+    settings?.authTokenLogRetentionDays ?? 92,
+  )
   const [draftCount, setDraftCount] = useState(() => (settings ? String(settings.mcpSessionAffinityKeyCount) : ''))
   const [draftRebalanceEnabled, setDraftRebalanceEnabled] = useState(settings?.rebalanceMcpEnabled ?? false)
   const [draftPercent, setDraftPercent] = useState(() =>
@@ -285,6 +302,7 @@ export default function SystemSettingsModule({
 
   useEffect(() => {
     setDraftRequestRateLimit(settings ? String(settings.requestRateLimit) : '100')
+    setDraftAuthTokenLogRetentionDays(settings?.authTokenLogRetentionDays ?? 92)
     setDraftCount(settings ? String(settings.mcpSessionAffinityKeyCount) : '')
     setDraftRebalanceEnabled(settings?.rebalanceMcpEnabled ?? false)
     setDraftPercent(settings ? String(settings.rebalanceMcpSessionPercent) : '100')
@@ -302,6 +320,7 @@ export default function SystemSettingsModule({
     }
   }, [
     settings?.requestRateLimit,
+    settings?.authTokenLogRetentionDays,
     settings?.mcpSessionAffinityKeyCount,
     settings?.rebalanceMcpEnabled,
     settings?.rebalanceMcpSessionPercent,
@@ -434,6 +453,7 @@ export default function SystemSettingsModule({
     parsedBlockedKeyBaseLimit != null &&
     parsedGlobalIpLimit != null &&
     (parsedRequestRateLimit !== settings.requestRateLimit ||
+      draftAuthTokenLogRetentionDays !== settings.authTokenLogRetentionDays ||
       parsedCount !== settings.mcpSessionAffinityKeyCount ||
       draftRebalanceEnabled !== settings.rebalanceMcpEnabled ||
       parsedPercent !== settings.rebalanceMcpSessionPercent ||
@@ -497,6 +517,8 @@ export default function SystemSettingsModule({
       return null
     return {
       requestRateLimit: overrides.requestRateLimit ?? parsedRequestRateLimit,
+      authTokenLogRetentionDays:
+        overrides.authTokenLogRetentionDays ?? draftAuthTokenLogRetentionDays,
       mcpSessionAffinityKeyCount: overrides.mcpSessionAffinityKeyCount ?? parsedCount,
       rebalanceMcpEnabled: overrides.rebalanceMcpEnabled ?? draftRebalanceEnabled,
       rebalanceMcpSessionPercent: overrides.rebalanceMcpSessionPercent ?? parsedPercent,
@@ -517,6 +539,7 @@ export default function SystemSettingsModule({
   const normalPayloadChanged = (payload: SystemSettings): boolean =>
     settings != null &&
     (payload.requestRateLimit !== settings.requestRateLimit ||
+      payload.authTokenLogRetentionDays !== settings.authTokenLogRetentionDays ||
       payload.mcpSessionAffinityKeyCount !== settings.mcpSessionAffinityKeyCount ||
       payload.rebalanceMcpEnabled !== settings.rebalanceMcpEnabled ||
       payload.rebalanceMcpSessionPercent !== settings.rebalanceMcpSessionPercent ||
@@ -1154,6 +1177,38 @@ export default function SystemSettingsModule({
                 )}
                 <p className="system-settings-field-hint text-xs text-muted-foreground">
                   {strings.form.blockedKeyBaseLimitHint}
+                </p>
+              </div>
+
+              <div className="system-settings-field">
+                <label className="text-sm font-medium" htmlFor="system-settings-auth-token-log-retention-days">
+                  {strings.form.authTokenLogRetentionDaysLabel}
+                </label>
+                <div className="system-settings-range-control grid gap-3 md:grid-cols-[minmax(0,1fr),64px] md:items-center">
+                  <input
+                    id="system-settings-auth-token-log-retention-days"
+                    className="range"
+                    type="range"
+                    min={0}
+                    max={authTokenLogRetentionDayStops.length - 1}
+                    step={1}
+                    value={authTokenLogRetentionDayStopIndex(draftAuthTokenLogRetentionDays)}
+                    disabled={saving}
+                    onChange={(event) => {
+                      const retentionDays =
+                        authTokenLogRetentionDayStops[Number.parseInt(event.target.value, 10)] ?? 92
+                      setDraftAuthTokenLogRetentionDays(retentionDays)
+                    }}
+                    onBlur={() => {
+                      void commitNormalSettings({
+                        authTokenLogRetentionDays: draftAuthTokenLogRetentionDays,
+                      })
+                    }}
+                  />
+                  <span className="text-right font-mono text-sm">{draftAuthTokenLogRetentionDays}d</span>
+                </div>
+                <p className="system-settings-field-hint text-xs text-muted-foreground">
+                  {strings.form.authTokenLogRetentionDaysHint}
                 </p>
               </div>
 

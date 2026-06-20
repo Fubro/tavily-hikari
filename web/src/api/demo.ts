@@ -739,6 +739,7 @@ function createDemoForwardProxy() {
 function createDemoSystemSettings() {
   return {
     requestRateLimit: 180,
+    authTokenLogRetentionDays: 92,
     mcpSessionAffinityKeyCount: 4,
     rebalanceMcpEnabled: true,
     rebalanceMcpSessionPercent: 35,
@@ -751,6 +752,13 @@ function createDemoSystemSettings() {
     globalIpLimit: 8,
     trustedProxyCidrs: ['127.0.0.0/8', '10.0.0.0/8'],
     trustedClientIpHeaders: ['cf-connecting-ip', 'x-real-ip', 'x-forwarded-for'],
+    requestLogRetention: {
+      maxLogRetentionDays: 32,
+      heavyUsageThresholdPercent: 80,
+      global: { businessBodyDays: 7, nonBusinessBodyDays: 0, nonSuccessBodyDays: 3 },
+      heavyUsage: { businessBodyDays: 3, nonBusinessBodyDays: 0, nonSuccessBodyDays: 1 },
+      debugShared: { businessBodyDays: 14, nonBusinessBodyDays: 1, nonSuccessBodyDays: 7 },
+    },
   }
 }
 

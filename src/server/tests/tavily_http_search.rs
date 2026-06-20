@@ -855,6 +855,7 @@ use super::upstream_support_and_manual_jobs::*;
         proxy
             .set_system_settings(&tavily_hikari::SystemSettings {
                 request_rate_limit: configured_limit,
+                auth_token_log_retention_days: tavily_hikari::AUTH_TOKEN_LOG_RETENTION_DAYS_DEFAULT,
                 mcp_session_affinity_key_count:
                     tavily_hikari::MCP_SESSION_AFFINITY_KEY_COUNT_DEFAULT,
                 rebalance_mcp_enabled: tavily_hikari::REBALANCE_MCP_ENABLED_DEFAULT,
@@ -1077,6 +1078,7 @@ use super::upstream_support_and_manual_jobs::*;
         proxy
             .set_system_settings(&tavily_hikari::SystemSettings {
                 request_rate_limit: configured_limit,
+                auth_token_log_retention_days: tavily_hikari::AUTH_TOKEN_LOG_RETENTION_DAYS_DEFAULT,
                 mcp_session_affinity_key_count:
                     tavily_hikari::MCP_SESSION_AFFINITY_KEY_COUNT_DEFAULT,
                 rebalance_mcp_enabled: tavily_hikari::REBALANCE_MCP_ENABLED_DEFAULT,
@@ -1173,6 +1175,7 @@ use super::upstream_support_and_manual_jobs::*;
         proxy
             .set_system_settings(&tavily_hikari::SystemSettings {
                 request_rate_limit: 2,
+                auth_token_log_retention_days: tavily_hikari::AUTH_TOKEN_LOG_RETENTION_DAYS_DEFAULT,
                 mcp_session_affinity_key_count:
                     tavily_hikari::MCP_SESSION_AFFINITY_KEY_COUNT_DEFAULT,
                 rebalance_mcp_enabled: tavily_hikari::REBALANCE_MCP_ENABLED_DEFAULT,
@@ -2604,6 +2607,7 @@ use super::upstream_support_and_manual_jobs::*;
         proxy
             .set_system_settings(&tavily_hikari::SystemSettings {
                 request_rate_limit: 1,
+                auth_token_log_retention_days: tavily_hikari::AUTH_TOKEN_LOG_RETENTION_DAYS_DEFAULT,
                 mcp_session_affinity_key_count:
                     tavily_hikari::MCP_SESSION_AFFINITY_KEY_COUNT_DEFAULT,
                 rebalance_mcp_enabled: tavily_hikari::REBALANCE_MCP_ENABLED_DEFAULT,

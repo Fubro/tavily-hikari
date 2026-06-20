@@ -359,7 +359,7 @@ impl KeyStore {
             .fetch_token_log_facet_options(token_id, since, until, "api_key_id", true, filters)
             .await?;
         let catalog = RequestLogsCatalog {
-            retention_days: effective_auth_token_log_retention_days(),
+            retention_days: self.effective_auth_token_log_retention_days().await?,
             request_kind_options,
             facets: RequestLogPageFacets {
                 results,

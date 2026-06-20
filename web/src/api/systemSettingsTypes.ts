@@ -2,6 +2,7 @@ import type { RequestLogRetentionSettings } from './requestLogRetention'
 
 export interface SystemSettings {
   requestRateLimit: number
+  authTokenLogRetentionDays: number
   mcpSessionAffinityKeyCount: number
   rebalanceMcpEnabled: boolean
   rebalanceMcpSessionPercent: number
@@ -31,6 +32,7 @@ export interface ForwardProxySettingsEnvelope {
 
 export interface UpdateSystemSettingsPayload {
   requestRateLimit: number
+  authTokenLogRetentionDays: number
   mcpSessionAffinityKeyCount: number
   rebalanceMcpEnabled: boolean
   rebalanceMcpSessionPercent: number

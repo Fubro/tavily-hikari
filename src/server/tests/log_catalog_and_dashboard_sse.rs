@@ -84,7 +84,7 @@ use super::upstream_support_and_manual_jobs::*;
             empty_token_catalog
                 .get("retentionDays")
                 .and_then(|value| value.as_i64()),
-            Some(effective_auth_token_log_retention_days())
+            Some(effective_auth_token_log_retention_days().expect("effective auth token retention"))
         );
         assert_eq!(
             empty_token_catalog

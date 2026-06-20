@@ -861,6 +861,7 @@ const REQUEST_LOGS_MIN_RETENTION_DAYS: i64 = 32;
 pub const REQUEST_LOG_RETENTION_DAYS_MIN: i64 = 0;
 pub const REQUEST_LOG_RETENTION_DAYS_MAX: i64 = 92;
 pub const REQUEST_LOG_RETENTION_MAX_DAYS_DEFAULT: i64 = 32;
+pub const AUTH_TOKEN_LOG_RETENTION_DAYS_DEFAULT: i64 = 92;
 pub const REQUEST_LOG_RETENTION_HEAVY_THRESHOLD_PERCENT_DEFAULT: i64 = 80;
 pub const REQUEST_LOG_RETENTION_HEAVY_THRESHOLD_PERCENT_MIN: i64 = 50;
 pub const REQUEST_LOG_RETENTION_HEAVY_THRESHOLD_PERCENT_MAX: i64 = 150;
@@ -889,10 +890,6 @@ const SECS_PER_HOUR: i64 = 3600;
 const SECS_PER_DAY: i64 = 24 * SECS_PER_HOUR;
 const TOKEN_USAGE_STATS_BUCKET_SECS: i64 = SECS_PER_HOUR;
 
-// Time-based retention for per-token access logs (auth_token_logs).
-// This is purely time-driven and must not depend on access token enable/disable/delete status,
-// to preserve auditability.
-const AUTH_TOKEN_LOG_RETENTION_SECS: i64 = 90 * SECS_PER_DAY;
 pub const ADMIN_ACTIVE_USERS_WINDOW_SECS: i64 = ADMIN_ACTIVE_USERS_WINDOW_DAYS * SECS_PER_DAY;
 
 const META_KEY_DATA_CONSISTENCY_DONE: &str = "data_consistency_v1_done";
@@ -917,6 +914,8 @@ const META_KEY_FORCE_USER_RELOGIN_V1: &str = "force_user_relogin_v1";
 const META_KEY_ACCOUNT_USAGE_ROLLUP_V1_DONE: &str = "account_usage_rollup_v1_done";
 const META_KEY_ACCOUNT_USAGE_ROLLUP_RATE5M_COVERAGE_START: &str =
     "account_usage_rollup_rate5m_coverage_start";
+const META_KEY_ACCOUNT_USAGE_ROLLUP_REQUEST_DAY_COVERAGE_START: &str =
+    "account_usage_rollup_request_day_coverage_start";
 const META_KEY_ACCOUNT_USAGE_ROLLUP_QUOTA1H_COVERAGE_START: &str =
     "account_usage_rollup_quota1h_coverage_start";
 const META_KEY_ACCOUNT_USAGE_ROLLUP_QUOTA24H_COVERAGE_START: &str =
@@ -934,6 +933,7 @@ const META_KEY_ADMIN_TOTP_ENABLED_AT_V1: &str = "admin_totp_enabled_at_v1";
 const META_KEY_ADMIN_TOTP_FAILURE_COUNT_V1: &str = "admin_totp_failure_count_v1";
 const META_KEY_ADMIN_TOTP_LOCKED_UNTIL_V1: &str = "admin_totp_locked_until_v1";
 const META_KEY_REQUEST_RATE_LIMIT_V1: &str = "request_rate_limit_v1";
+const META_KEY_AUTH_TOKEN_LOG_RETENTION_DAYS_V1: &str = "auth_token_log_retention_days_v1";
 const META_KEY_MCP_SESSION_AFFINITY_KEY_COUNT_V1: &str = "mcp_session_affinity_key_count_v1";
 const META_KEY_REBALANCE_MCP_ENABLED_V1: &str = "rebalance_mcp_enabled_v1";
 const META_KEY_REBALANCE_MCP_SESSION_PERCENT_V1: &str = "rebalance_mcp_session_percent_v1";
@@ -987,10 +987,12 @@ const META_KEY_API_KEY_CREATED_AT_BACKFILL_V1: &str = "api_key_created_at_backfi
 const META_KEY_BUSINESS_QUOTA_CREDITS_CUTOVER_V1: &str = "business_quota_credits_cutover_v1";
 const META_KEY_BUSINESS_QUOTA_MONTHLY_REBASE_V1: &str = "business_quota_monthly_rebase_v1";
 const ACCOUNT_USAGE_ROLLUP_REQUEST_BACKFILL_SECS: i64 = 35 * SECS_PER_DAY;
+const ACCOUNT_USAGE_ROLLUP_REQUEST_DAY_BACKFILL_SECS: i64 = 92 * SECS_PER_DAY;
 const ACCOUNT_USAGE_ROLLUP_BUSINESS_BACKFILL_SECS: i64 = 90 * SECS_PER_DAY;
 const ACCOUNT_USAGE_ROLLUP_MONTH_CHART_MONTHS: i32 = 12;
 const ACCOUNT_USAGE_ROLLUP_FIVE_MINUTE_RETENTION_SECS: i64 = 35 * SECS_PER_DAY;
 const ACCOUNT_USAGE_ROLLUP_HOUR_RETENTION_SECS: i64 = 8 * SECS_PER_DAY;
+const ACCOUNT_USAGE_ROLLUP_REQUEST_DAY_RETENTION_SECS: i64 = 92 * SECS_PER_DAY;
 const ACCOUNT_USAGE_ROLLUP_DAY_RETENTION_SECS: i64 = 400 * SECS_PER_DAY;
 const ACCOUNT_USAGE_ROLLUP_MONTH_RETENTION_MONTHS: i32 = 24;
 const API_KEY_UPSERT_TRANSIENT_RETRY_BACKOFF_MS: [u64; 2] = [20, 50];
@@ -1101,6 +1103,65 @@ pub fn default_request_log_retention_settings() -> RequestLogRetentionSettings {
     }
 }
 
+pub const AUTH_TOKEN_LOG_RETENTION_DAY_STOPS: &[i64] = &[1, 2, 3, 7, 14, 32, 62, 92];
+
+pub fn normalize_auth_token_log_retention_days(value: i64) -> Option<i64> {
+    AUTH_TOKEN_LOG_RETENTION_DAY_STOPS
+        .iter()
+        .copied()
+        .find(|candidate| *candidate == value)
+}
+
+fn parse_auth_token_log_retention_days_env() -> Result<Option<i64>, String> {
+    match std::env::var("AUTH_TOKEN_LOG_RETENTION_DAYS") {
+        Ok(raw) => {
+            let trimmed = raw.trim();
+            if trimmed.is_empty() {
+                return Ok(None);
+            }
+            let parsed = trimmed.parse::<i64>().map_err(|err| {
+                format!("AUTH_TOKEN_LOG_RETENTION_DAYS must be an integer: {err}")
+            })?;
+            normalize_auth_token_log_retention_days(parsed)
+                .map(Some)
+                .ok_or_else(|| {
+                    let allowed = AUTH_TOKEN_LOG_RETENTION_DAY_STOPS
+                        .iter()
+                        .map(i64::to_string)
+                        .collect::<Vec<_>>()
+                        .join("/");
+                    format!("AUTH_TOKEN_LOG_RETENTION_DAYS must be one of {allowed}")
+                })
+        }
+        Err(_) => Ok(None),
+    }
+}
+
+pub fn default_auth_token_log_retention_days() -> i64 {
+    match parse_auth_token_log_retention_days_env() {
+        Ok(Some(value)) => value,
+        Ok(None) => AUTH_TOKEN_LOG_RETENTION_DAYS_DEFAULT,
+        Err(err) => {
+            eprintln!("{err}; falling back to {AUTH_TOKEN_LOG_RETENTION_DAYS_DEFAULT}");
+            AUTH_TOKEN_LOG_RETENTION_DAYS_DEFAULT
+        }
+    }
+}
+
+pub fn validate_auth_token_log_retention_days(value: i64) -> Result<(), ProxyError> {
+    if normalize_auth_token_log_retention_days(value).is_none() {
+        let allowed = AUTH_TOKEN_LOG_RETENTION_DAY_STOPS
+            .iter()
+            .map(i64::to_string)
+            .collect::<Vec<_>>()
+            .join("/");
+        return Err(ProxyError::Other(format!(
+            "auth_token_log_retention_days must be one of {allowed}"
+        )));
+    }
+    Ok(())
+}
+
 fn validate_request_log_retention_days(field: &str, value: i64) -> Result<(), ProxyError> {
     if !(REQUEST_LOG_RETENTION_DAYS_MIN..=REQUEST_LOG_RETENTION_DAYS_MAX).contains(&value) {
         return Err(ProxyError::Other(format!(
@@ -1172,8 +1233,10 @@ pub fn normalize_request_log_retention_settings(
     })
 }
 
-pub fn effective_auth_token_log_retention_days() -> i64 {
-    AUTH_TOKEN_LOG_RETENTION_SECS / SECS_PER_DAY
+pub fn effective_auth_token_log_retention_days() -> Result<i64, ProxyError> {
+    parse_auth_token_log_retention_days_env()
+        .map(|value| value.unwrap_or(AUTH_TOKEN_LOG_RETENTION_DAYS_DEFAULT))
+        .map_err(ProxyError::Other)
 }
 
 /// Effective hourly quota limit per access token, including environment overrides.
