@@ -51,7 +51,12 @@ const HA_BASELINE_MAX_COMPRESSED_BYTES: usize = 64 * 1024 * 1024;
 const HA_EVENTS_MAX_COMPRESSED_BYTES: usize = 4 * 1024 * 1024;
 
 fn parse_ha_channel(raw: Option<&str>) -> Result<tavily_hikari::HaSyncChannel, (StatusCode, String)> {
-    let value = raw.unwrap_or("control");
+    let Some(value) = raw else {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            "missing required HA channel".to_string(),
+        ));
+    };
     tavily_hikari::HaSyncChannel::parse(value).ok_or_else(|| {
         (
             StatusCode::BAD_REQUEST,

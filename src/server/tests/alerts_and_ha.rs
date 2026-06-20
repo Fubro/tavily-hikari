@@ -907,6 +907,112 @@ async fn ha_events_endpoint_returns_zstd_ndjson() {
     let _ = std::fs::remove_file(db_path);
 }
 
+#[tokio::test]
+async fn ha_events_endpoint_skips_legacy_non_control_rows_without_cursor_stall() {
+    let db_path = temp_db_path("ha-events-legacy-control-cursor");
+    let db_str = db_path.to_string_lossy().to_string();
+    let proxy = TavilyProxy::with_endpoint(
+        vec!["tvly-ha-events-legacy-cursor-key".to_string()],
+        DEFAULT_UPSTREAM,
+        &db_str,
+    )
+    .await
+    .expect("proxy created");
+    let pool = connect_sqlite_test_pool(&db_str).await;
+    let now = Utc::now().timestamp();
+    sqlx::query(
+        r#"
+        INSERT INTO ha_outbox (
+            kind, resource, resource_id, op, payload_json, created_at, checksum
+        ) VALUES ('state', 'request_logs', 'legacy-1', 'upsert', '{"path":"/legacy-1"}', ?, 'legacy-1')
+        "#,
+    )
+    .bind(now)
+    .execute(&pool)
+    .await
+    .expect("insert first legacy row");
+    sqlx::query(
+        r#"
+        INSERT INTO ha_outbox (
+            kind, resource, resource_id, op, payload_json, created_at, checksum
+        ) VALUES ('state', 'request_logs', 'legacy-2', 'upsert', '{"path":"/legacy-2"}', ?, 'legacy-2')
+        "#,
+    )
+    .bind(now + 1)
+    .execute(&pool)
+    .await
+    .expect("insert second legacy row");
+    let allowed_seq = sqlx::query(
+        r#"
+        INSERT INTO ha_outbox (
+            kind, resource, resource_id, op, payload_json, created_at, checksum
+        ) VALUES ('state', 'api_keys', 'key-2', 'upsert', '{"id":"key-2"}', ?, 'allowed')
+        "#,
+    )
+    .bind(now + 2)
+    .execute(&pool)
+    .await
+    .expect("insert allowed row")
+    .last_insert_rowid();
+    pool.close().await;
+
+    let events = proxy
+        .list_ha_events_after(tavily_hikari::HaSyncChannel::Control, 0, 2)
+        .await
+        .expect("list control events should skip legacy rows");
+    assert_eq!(events.len(), 1);
+    assert_eq!(events[0].seq, allowed_seq);
+    assert_eq!(events[0].resource, "api_keys");
+
+    let _ = std::fs::remove_file(db_path);
+}
+
+#[tokio::test]
+async fn ha_endpoints_require_explicit_channel_query() {
+    let db_path = temp_db_path("ha-channel-required");
+    let db_str = db_path.to_string_lossy().to_string();
+    let proxy = TavilyProxy::with_endpoint(
+        vec!["tvly-ha-channel-required-key".to_string()],
+        DEFAULT_UPSTREAM,
+        &db_str,
+    )
+    .await
+    .expect("proxy created");
+    let ha = tavily_hikari::HaRuntime::new(tavily_hikari::HaConfig {
+        node_id: "node-channel-required".to_string(),
+        database_path: Some(db_str.clone()),
+        ..tavily_hikari::HaConfig::default()
+    });
+    let addr = spawn_ha_admin_server(proxy, ha, true).await;
+    let client = Client::new();
+
+    let baseline = client
+        .get(format!("http://{addr}/api/admin/ha/baseline"))
+        .send()
+        .await
+        .expect("baseline request");
+    assert_eq!(baseline.status(), reqwest::StatusCode::BAD_REQUEST);
+    let baseline_body = baseline.text().await.expect("baseline body");
+    assert!(
+        baseline_body.contains("missing required HA channel"),
+        "unexpected baseline error body: {baseline_body}"
+    );
+
+    let events = client
+        .get(format!("http://{addr}/api/admin/ha/events?after=0&limit=10"))
+        .send()
+        .await
+        .expect("events request");
+    assert_eq!(events.status(), reqwest::StatusCode::BAD_REQUEST);
+    let events_body = events.text().await.expect("events body");
+    assert!(
+        events_body.contains("missing required HA channel"),
+        "unexpected events error body: {events_body}"
+    );
+
+    let _ = std::fs::remove_file(db_path);
+}
+
 #[test]
 fn ha_events_encoder_chunks_oversized_batches() {
     let events = (1..=4)

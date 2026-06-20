@@ -613,8 +613,13 @@ impl KeyStore {
     ) -> Result<Vec<HaEventRecord>, ProxyError> {
         let table = quote_sqlite_identifier(ha_channel_event_table(channel));
         let threshold = self.backend_time.now_ts() - ha_channel_retention_secs(channel);
+        let allowed_resources = ha_channel_event_tables(channel)
+            .iter()
+            .map(|resource| quote_sqlite_string(resource))
+            .collect::<Vec<_>>()
+            .join(", ");
         let min_seq: Option<i64> = sqlx::query_scalar(&format!(
-            "SELECT MIN(seq) FROM {table} WHERE created_at >= ?"
+            "SELECT MIN(seq) FROM {table} WHERE created_at >= ? AND resource IN ({allowed_resources})"
         ))
             .bind(threshold)
             .fetch_one(&self.pool)
@@ -644,6 +649,7 @@ impl KeyStore {
               FROM {table}
              WHERE seq > ?
                AND created_at >= ?
+               AND resource IN ({allowed_resources})
              ORDER BY seq ASC
              LIMIT ?
             "#
@@ -658,9 +664,6 @@ impl KeyStore {
         let mut events = Vec::new();
         for row in rows {
             let resource: String = row.try_get("resource")?;
-            if !ha_resource_allowed_for_channel(channel, &resource) {
-                continue;
-            }
             let payload_raw: String = row.try_get("payload_json")?;
             let payload = serde_json::from_str(&payload_raw)
                 .map_err(|err| ProxyError::Other(format!("invalid HA outbox payload: {err}")))?;
