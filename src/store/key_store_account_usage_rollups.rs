@@ -346,6 +346,12 @@ impl KeyStore {
         let request_backfill_start = now_ts.saturating_sub(ACCOUNT_USAGE_ROLLUP_REQUEST_BACKFILL_SECS);
         let request_day_backfill_start =
             local_day_bucket_start_utc_ts(now_ts.saturating_sub(ACCOUNT_USAGE_ROLLUP_REQUEST_DAY_BACKFILL_SECS));
+        let effective_auth_token_log_retention_days =
+            self.effective_auth_token_log_retention_days().await?;
+        let request_source_coverage_start = local_day_bucket_start_utc_ts(
+            now_ts.saturating_sub(effective_auth_token_log_retention_days.saturating_mul(SECS_PER_DAY)),
+        );
+        let request_day_rebuild_start = request_day_backfill_start.max(request_source_coverage_start);
         let business_backfill_start = now_ts.saturating_sub(ACCOUNT_USAGE_ROLLUP_BUSINESS_BACKFILL_SECS);
         let monthly_coverage_start =
             shift_month_start_utc_ts(start_of_month(now).timestamp(), -(ACCOUNT_USAGE_ROLLUP_MONTH_CHART_MONTHS - 1));
@@ -425,7 +431,7 @@ impl KeyStore {
         ))
         .bind(SECS_PER_FIVE_MINUTES)
         .bind(SECS_PER_FIVE_MINUTES)
-        .bind(request_day_backfill_start)
+        .bind(request_day_rebuild_start)
         .fetch_all(&self.pool)
         .await?;
         let FoldedRequestRollupRecords {
@@ -438,7 +444,7 @@ impl KeyStore {
         } = fold_request_rollup_rows(
             request_rows,
             request_backfill_start,
-            request_day_backfill_start,
+            request_day_rebuild_start,
         );
 
         let business_rows = sqlx::query_as::<_, (String, i64, i64)>(
@@ -649,7 +655,7 @@ impl KeyStore {
             )
             .bind(metric_kind.as_str())
             .bind(AccountUsageRollupBucketKind::Day.as_str())
-            .bind(request_day_backfill_start)
+            .bind(request_day_rebuild_start)
             .execute(&mut *tx)
             .await?;
         }
@@ -780,8 +786,8 @@ impl KeyStore {
 
         let rate5m_coverage = request_backfill_start;
         let request_day_coverage = existing_request_day_coverage
-            .map(|value| value.min(request_day_backfill_start))
-            .unwrap_or(request_day_backfill_start);
+            .map(|value| value.min(request_day_rebuild_start))
+            .unwrap_or(request_day_rebuild_start);
         let quota1h_coverage = existing_quota1h_coverage
             .map(|value| value.min(business_backfill_start))
             .unwrap_or(business_backfill_start);

@@ -1112,15 +1112,39 @@ pub fn normalize_auth_token_log_retention_days(value: i64) -> Option<i64> {
         .find(|candidate| *candidate == value)
 }
 
-pub fn default_auth_token_log_retention_days() -> i64 {
+fn parse_auth_token_log_retention_days_env() -> Result<Option<i64>, String> {
     match std::env::var("AUTH_TOKEN_LOG_RETENTION_DAYS") {
-        Ok(raw) => raw
-            .trim()
-            .parse::<i64>()
-            .ok()
-            .and_then(normalize_auth_token_log_retention_days)
-            .unwrap_or(AUTH_TOKEN_LOG_RETENTION_DAYS_DEFAULT),
-        Err(_) => AUTH_TOKEN_LOG_RETENTION_DAYS_DEFAULT,
+        Ok(raw) => {
+            let trimmed = raw.trim();
+            if trimmed.is_empty() {
+                return Ok(None);
+            }
+            let parsed = trimmed.parse::<i64>().map_err(|err| {
+                format!("AUTH_TOKEN_LOG_RETENTION_DAYS must be an integer: {err}")
+            })?;
+            normalize_auth_token_log_retention_days(parsed)
+                .map(Some)
+                .ok_or_else(|| {
+                    let allowed = AUTH_TOKEN_LOG_RETENTION_DAY_STOPS
+                        .iter()
+                        .map(i64::to_string)
+                        .collect::<Vec<_>>()
+                        .join("/");
+                    format!("AUTH_TOKEN_LOG_RETENTION_DAYS must be one of {allowed}")
+                })
+        }
+        Err(_) => Ok(None),
+    }
+}
+
+pub fn default_auth_token_log_retention_days() -> i64 {
+    match parse_auth_token_log_retention_days_env() {
+        Ok(Some(value)) => value,
+        Ok(None) => AUTH_TOKEN_LOG_RETENTION_DAYS_DEFAULT,
+        Err(err) => {
+            eprintln!("{err}; falling back to {AUTH_TOKEN_LOG_RETENTION_DAYS_DEFAULT}");
+            AUTH_TOKEN_LOG_RETENTION_DAYS_DEFAULT
+        }
     }
 }
 
@@ -1209,8 +1233,10 @@ pub fn normalize_request_log_retention_settings(
     })
 }
 
-pub fn effective_auth_token_log_retention_days() -> i64 {
-    default_auth_token_log_retention_days()
+pub fn effective_auth_token_log_retention_days() -> Result<i64, ProxyError> {
+    parse_auth_token_log_retention_days_env()
+        .map(|value| value.unwrap_or(AUTH_TOKEN_LOG_RETENTION_DAYS_DEFAULT))
+        .map_err(ProxyError::Other)
 }
 
 /// Effective hourly quota limit per access token, including environment overrides.

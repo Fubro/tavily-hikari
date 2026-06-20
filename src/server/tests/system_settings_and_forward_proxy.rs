@@ -175,6 +175,53 @@ use super::upstream_support_and_manual_jobs::*;
     }
 
     #[tokio::test]
+    async fn admin_system_settings_startup_rejects_invalid_auth_token_retention_env_without_override() {
+        let _env_guard = EnvVarGuard::set("AUTH_TOKEN_LOG_RETENTION_DAYS", "30");
+        let db_path = temp_db_path("admin-system-settings-auth-token-retention-invalid-env");
+        let db_str = db_path.to_string_lossy().to_string();
+        let err = TavilyProxy::with_endpoint::<Vec<String>, String>(Vec::new(), DEFAULT_UPSTREAM, &db_str)
+            .await
+            .expect_err("invalid env should block startup");
+        let message = err.to_string();
+        assert!(
+            message.contains("AUTH_TOKEN_LOG_RETENTION_DAYS"),
+            "expected env validation error, got {message}"
+        );
+
+        let _ = std::fs::remove_file(db_path);
+    }
+
+    #[tokio::test]
+    async fn admin_system_settings_persisted_auth_token_retention_overrides_invalid_env() {
+        let db_path = temp_db_path("admin-system-settings-auth-token-retention-persisted-invalid-env");
+        let db_str = db_path.to_string_lossy().to_string();
+        let proxy = TavilyProxy::with_endpoint::<Vec<String>, String>(Vec::new(), DEFAULT_UPSTREAM, &db_str)
+            .await
+            .expect("create proxy");
+
+        let mut settings = proxy.get_system_settings().await.expect("load initial settings");
+        settings.auth_token_log_retention_days = 32;
+        proxy
+            .set_system_settings(&settings)
+            .await
+            .expect("persist auth token retention override");
+        drop(proxy);
+
+        let _env_guard = EnvVarGuard::set("AUTH_TOKEN_LOG_RETENTION_DAYS", "30");
+        let reopened =
+            TavilyProxy::with_endpoint::<Vec<String>, String>(Vec::new(), DEFAULT_UPSTREAM, &db_str)
+                .await
+                .expect("startup should use persisted override");
+        let loaded = reopened
+            .get_system_settings()
+            .await
+            .expect("load settings with persisted override");
+        assert_eq!(loaded.auth_token_log_retention_days, 32);
+
+        let _ = std::fs::remove_file(db_path);
+    }
+
+    #[tokio::test]
     async fn health_keeps_startup_grace_then_fails_when_xray_relay_is_not_ready() {
         let share_link =
             "vless://0688fa59-e971-4278-8c03-4b35821a71dc@health-xray.example.com:443?encryption=none#Health";

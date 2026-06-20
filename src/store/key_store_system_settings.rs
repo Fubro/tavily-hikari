@@ -1,10 +1,13 @@
 impl KeyStore {
     pub(crate) async fn effective_auth_token_log_retention_days(&self) -> Result<i64, ProxyError> {
-        Ok(self
+        if let Some(value) = self
             .get_meta_i64(META_KEY_AUTH_TOKEN_LOG_RETENTION_DAYS_V1)
             .await?
             .and_then(normalize_auth_token_log_retention_days)
-            .unwrap_or_else(default_auth_token_log_retention_days))
+        {
+            return Ok(value);
+        }
+        effective_auth_token_log_retention_days()
     }
 
     pub(crate) async fn allow_registration(&self) -> Result<bool, ProxyError> {
@@ -27,11 +30,7 @@ impl KeyStore {
             .await?
             .unwrap_or(REQUEST_RATE_LIMIT)
             .max(REQUEST_RATE_LIMIT_MIN);
-        let auth_token_log_retention_days = self
-            .get_meta_i64(META_KEY_AUTH_TOKEN_LOG_RETENTION_DAYS_V1)
-            .await?
-            .and_then(normalize_auth_token_log_retention_days)
-            .unwrap_or_else(default_auth_token_log_retention_days);
+        let auth_token_log_retention_days = self.effective_auth_token_log_retention_days().await?;
         let count = self
             .get_meta_i64(META_KEY_MCP_SESSION_AFFINITY_KEY_COUNT_V1)
             .await?

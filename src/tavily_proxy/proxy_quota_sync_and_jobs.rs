@@ -368,12 +368,12 @@ impl TavilyProxy {
     /// This uses a fixed retention window and never looks at token status,
     /// to avoid impacting auditability.
     pub async fn gc_auth_token_logs(&self) -> Result<i64, ProxyError> {
-        let now_ts = self.backend_time.now_ts();
+        let current_local_day_start = local_day_bucket_start_utc_ts(self.backend_time.now_ts());
         let retention_days = self
             .key_store
             .effective_auth_token_log_retention_days()
             .await?;
-        let threshold = now_ts.saturating_sub(retention_days.saturating_mul(SECS_PER_DAY));
+        let threshold = shift_local_day_start_utc_ts(current_local_day_start, -(retention_days as i32));
         let deleted = self.key_store.delete_old_auth_token_logs(threshold).await?;
         if deleted > 0 {
             // Keep the scheduler path lightweight: reclaim WAL frames opportunistically without

@@ -2464,6 +2464,121 @@ async fn account_usage_rollup_active90d_counts_exact_server_local_day_window() {
 }
 
 #[tokio::test]
+async fn account_usage_rollup_rebuild_preserves_existing_request_day_buckets_beyond_token_log_retention()
+ {
+    let db_path = temp_db_path("account-usage-rollup-preserve-request-day-beyond-token-retention");
+    let db_str = db_path.to_string_lossy().to_string();
+    let proxy = TavilyProxy::with_endpoint(Vec::<String>::new(), DEFAULT_UPSTREAM, &db_str)
+        .await
+        .expect("proxy created");
+
+    let user = proxy
+        .upsert_oauth_account(&OAuthAccountProfile {
+            provider: "github".to_string(),
+            provider_user_id: "preserve-day-rollup-user".to_string(),
+            username: Some("preserve_day_rollup".to_string()),
+            name: Some("Preserve Day Rollup".to_string()),
+            avatar_template: None,
+            active: true,
+            trust_level: None,
+            raw_payload_json: None,
+        })
+        .await
+        .expect("upsert user");
+    let token = proxy
+        .ensure_user_token_binding(&user.user_id, Some("preserve-day-rollup"))
+        .await
+        .expect("bind token");
+
+    let historical_created_at = Utc::now().timestamp().saturating_sub(60 * SECS_PER_DAY);
+    let historical_day_bucket_start = local_day_bucket_start_utc_ts(historical_created_at);
+    sqlx::query(
+        r#"
+        INSERT INTO account_usage_rollup_buckets (user_id, metric_kind, bucket_kind, bucket_start, value, updated_at)
+        VALUES (?, ?, ?, ?, 1, ?)
+        ON CONFLICT(user_id, metric_kind, bucket_kind, bucket_start)
+        DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at
+        "#,
+    )
+    .bind(&user.user_id)
+    .bind(AccountUsageRollupMetricKind::RequestCount.as_str())
+    .bind(AccountUsageRollupBucketKind::Day.as_str())
+    .bind(historical_day_bucket_start)
+    .bind(Utc::now().timestamp())
+    .execute(&proxy.key_store.pool)
+    .await
+    .expect("seed historical request day bucket");
+    sqlx::query(
+        r#"
+        INSERT INTO auth_token_logs (
+            token_id,
+            method,
+            path,
+            query,
+            http_status,
+            mcp_status,
+            request_kind_key,
+            request_kind_label,
+            result_status,
+            key_effect_code,
+            binding_effect_code,
+            selection_effect_code,
+            counts_business_quota,
+            billing_state,
+            request_user_id,
+            created_at
+        ) VALUES (?, 'POST', '/api/tavily/search', NULL, 200, 200, 'api:search', 'API | search', 'success', 'none', 'none', 'none', 1, 'none', ?, ?)
+        "#,
+    )
+    .bind(&token.id)
+    .bind(&user.user_id)
+    .bind(historical_created_at)
+    .execute(&proxy.key_store.pool)
+    .await
+    .expect("insert historical auth token log");
+    proxy
+        .key_store
+        .set_meta_i64(META_KEY_AUTH_TOKEN_LOG_RETENTION_DAYS_V1, 14)
+        .await
+        .expect("set shorter auth token retention");
+    let previous_coverage_start = proxy
+        .key_store
+        .get_meta_i64(META_KEY_ACCOUNT_USAGE_ROLLUP_REQUEST_DAY_COVERAGE_START)
+        .await
+        .expect("load previous request day coverage start")
+        .expect("previous request day coverage start");
+
+    proxy
+        .key_store
+        .rebuild_account_usage_rollup_buckets_v1()
+        .await
+        .expect("rebuild account usage rollups");
+
+    let day_values = proxy
+        .key_store
+        .fetch_account_usage_rollup_values(
+            &user.user_id,
+            AccountUsageRollupMetricKind::RequestCount,
+            AccountUsageRollupBucketKind::Day,
+            historical_day_bucket_start,
+            historical_day_bucket_start + SECS_PER_DAY,
+        )
+        .await
+        .expect("load preserved request day bucket");
+    assert_eq!(day_values.get(&historical_day_bucket_start), Some(&1));
+
+    let coverage_start = proxy
+        .key_store
+        .get_meta_i64(META_KEY_ACCOUNT_USAGE_ROLLUP_REQUEST_DAY_COVERAGE_START)
+        .await
+        .expect("load request day coverage start")
+        .expect("request day coverage start");
+    assert_eq!(coverage_start, previous_coverage_start);
+
+    let _ = std::fs::remove_file(db_path);
+}
+
+#[tokio::test]
 async fn account_usage_rollup_rebuild_preserves_mcp_batch_successes_when_request_body_is_unavailable()
  {
     let db_path = temp_db_path("account-usage-rollup-mcp-batch-fallback-successes");
