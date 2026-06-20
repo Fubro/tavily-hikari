@@ -2204,8 +2204,22 @@ colo=LAX
 
         let refreshed_snapshot_chunk = read_sse_event_until(
             &mut response,
-            |chunk| chunk.contains("event: snapshot"),
-            "user dashboard events refreshed snapshot",
+            |chunk| {
+                if !chunk.contains("event: snapshot") {
+                    return false;
+                }
+                let snapshot_data = chunk
+                    .lines()
+                    .filter_map(|line| line.strip_prefix("data:"))
+                    .map(str::trim)
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                serde_json::from_str::<serde_json::Value>(&snapshot_data)
+                    .ok()
+                    .and_then(|snapshot| snapshot["summary"]["debugInfoShared"].as_bool())
+                    == Some(true)
+            },
+            "user dashboard events refreshed snapshot with debug sharing enabled",
         )
         .await;
         let refreshed_snapshot_data = refreshed_snapshot_chunk
