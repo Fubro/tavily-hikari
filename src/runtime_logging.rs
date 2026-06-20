@@ -4,7 +4,7 @@ use clap::ValueEnum;
 use tracing::Dispatch;
 use tracing_subscriber::{EnvFilter, fmt::MakeWriter};
 
-const DEFAULT_RUNTIME_LOG_FILTER: &str = "warn,sqlx::query=warn";
+const DEFAULT_RUNTIME_LOG_FILTER: &str = "warn,tavily_hikari=info,sqlx::query=warn";
 
 static RUNTIME_LOGGING_INIT: OnceLock<()> = OnceLock::new();
 static LOG_TRACER_INIT: OnceLock<()> = OnceLock::new();
@@ -260,6 +260,31 @@ mod tests {
         assert_eq!(payload["event"], "startup");
         assert_eq!(payload["message"], "json-ready");
         assert!(payload.get("level").is_some());
+    }
+
+    #[test]
+    fn default_runtime_log_filter_keeps_crate_info_visible() {
+        let output = capture_tracing_output(
+            RuntimeLogFormat::Json,
+            EnvFilter::new(DEFAULT_RUNTIME_LOG_FILTER),
+            || {
+                emit_legacy_stdio_event(
+                    LegacyStdIoLevel::Info,
+                    "tavily_hikari::runtime_logging::tests",
+                    file!(),
+                    line!(),
+                    format_args!("startup-visible"),
+                );
+                tracing::info!(
+                    target: "external_lib",
+                    component = "foreign",
+                    event = "filtered",
+                    message = "noise"
+                );
+            },
+        );
+        assert!(output.contains("startup-visible"));
+        assert!(!output.contains("\"target\":\"external_lib\""));
     }
 
     #[test]
