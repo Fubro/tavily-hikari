@@ -1,5 +1,6 @@
 #[derive(Clone, Debug)]
 pub struct HaBaselineExport {
+    pub channel: HaSyncChannel,
     pub ndjson: String,
     pub high_watermark: i64,
     pub row_count: usize,
@@ -7,7 +8,8 @@ pub struct HaBaselineExport {
 
 #[derive(Clone, Debug, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct HaOutboxEventRecord {
+pub struct HaEventRecord {
+    pub channel: HaSyncChannel,
     pub seq: i64,
     pub kind: String,
     pub resource: String,
@@ -20,53 +22,83 @@ pub struct HaOutboxEventRecord {
 
 #[derive(Clone, Debug)]
 pub struct HaApplyResult {
+    pub channel: HaSyncChannel,
     pub high_watermark: i64,
     pub row_count: usize,
 }
 
-const HA_BASELINE_SCHEMA_VERSION: i64 = 1;
-const HA_OUTBOX_RETENTION_SECS: i64 = 72 * 60 * 60;
+const HA_SCHEMA_VERSION: i64 = 2;
+const HA_CONTROL_OUTBOX_RETENTION_SECS: i64 = 72 * 60 * 60;
+const HA_CHANNEL_EXPORT_RETENTION_SECS: i64 = 92 * 24 * 60 * 60;
 
-const HA_BASELINE_TABLES: &[&str] = &[
-    "account_monthly_quota",
-    "account_quota_limit_snapshots",
-    "account_quota_limits",
-    "account_usage_buckets",
-    "account_usage_rollup_buckets",
+const HA_CONTROL_BASELINE_TABLES: &[&str] = &[
     "announcements",
     "api_key_low_quota_depletions",
     "api_key_maintenance_records",
     "api_key_quarantines",
-    "api_key_quota_sync_samples",
-    "api_key_transient_backoffs",
-    "api_key_user_usage_buckets",
     "api_keys",
-    "auth_token_quota",
     "auth_tokens",
-    "billing_ledger",
-    "forward_proxy_key_affinity",
-    "forward_proxy_node_overrides",
     "forward_proxy_settings",
-    "http_project_api_key_affinity",
     "linuxdo_credit_recharge_entitlements",
     "linuxdo_credit_recharge_orders",
     "meta",
-    "mcp_sessions",
     "oauth_accounts",
-    "quota_subject_locks",
-    "request_rate_limit_snapshots",
-    "scheduled_jobs",
-    "subject_key_breakages",
     "token_api_key_bindings",
-    "token_primary_api_key_affinity",
-    "token_usage_buckets",
-    "token_usage_stats",
     "user_api_key_bindings",
-    "user_primary_api_key_affinity",
     "user_tag_bindings",
     "user_tags",
     "user_token_bindings",
     "users",
+];
+
+const HA_CONTROL_EVENT_TABLES: &[&str] = &[
+    "announcements",
+    "api_key_low_quota_depletions",
+    "api_key_maintenance_records",
+    "api_key_quarantines",
+    "api_keys",
+    "auth_tokens",
+    "forward_proxy_settings",
+    "linuxdo_credit_recharge_entitlements",
+    "linuxdo_credit_recharge_orders",
+    "meta",
+    "oauth_accounts",
+    "token_api_key_bindings",
+    "user_api_key_bindings",
+    "user_tag_bindings",
+    "user_tags",
+    "user_token_bindings",
+    "users",
+];
+
+const HA_BILLING_BASELINE_TABLES: &[&str] = &["billing_ledger"];
+
+const HA_RUNTIME_BASELINE_TABLES: &[&str] = &[
+    "account_monthly_quota",
+    "account_quota_limits",
+    "account_usage_buckets",
+    "auth_token_quota",
+    "forward_proxy_key_affinity",
+    "forward_proxy_node_overrides",
+    "http_project_api_key_affinity",
+    "mcp_sessions",
+    "token_primary_api_key_affinity",
+    "token_usage_buckets",
+    "user_primary_api_key_affinity",
+];
+
+const HA_RUNTIME_EVENT_TABLES: &[&str] = &[
+    "account_monthly_quota",
+    "account_quota_limits",
+    "account_usage_buckets",
+    "auth_token_quota",
+    "forward_proxy_key_affinity",
+    "forward_proxy_node_overrides",
+    "http_project_api_key_affinity",
+    "mcp_sessions",
+    "token_primary_api_key_affinity",
+    "token_usage_buckets",
+    "user_primary_api_key_affinity",
 ];
 
 const HA_META_KEYS: &[&str] = &[
@@ -84,6 +116,51 @@ const HA_META_KEYS: &[&str] = &[
     "trusted_proxy_cidrs_v1",
     "user_blocked_key_base_limit_v1",
 ];
+
+fn ha_baseline_tables(channel: HaSyncChannel) -> &'static [&'static str] {
+    match channel {
+        HaSyncChannel::Control => HA_CONTROL_BASELINE_TABLES,
+        HaSyncChannel::Billing => HA_BILLING_BASELINE_TABLES,
+        HaSyncChannel::Runtime => HA_RUNTIME_BASELINE_TABLES,
+    }
+}
+
+fn ha_resource_allowed_for_channel(channel: HaSyncChannel, resource: &str) -> bool {
+    if ha_baseline_tables(channel).contains(&resource) {
+        return true;
+    }
+    if channel == HaSyncChannel::Control && resource == "meta" {
+        return true;
+    }
+    false
+}
+
+fn ha_channel_event_table(channel: HaSyncChannel) -> &'static str {
+    match channel {
+        HaSyncChannel::Control => "ha_outbox",
+        HaSyncChannel::Billing => "ha_billing_outbox",
+        HaSyncChannel::Runtime => "ha_runtime_outbox",
+    }
+}
+
+fn ha_channel_sequence_name(channel: HaSyncChannel) -> &'static str {
+    ha_channel_event_table(channel)
+}
+
+fn ha_channel_event_tables(channel: HaSyncChannel) -> &'static [&'static str] {
+    match channel {
+        HaSyncChannel::Control => HA_CONTROL_EVENT_TABLES,
+        HaSyncChannel::Billing => HA_BILLING_BASELINE_TABLES,
+        HaSyncChannel::Runtime => HA_RUNTIME_EVENT_TABLES,
+    }
+}
+
+fn ha_channel_retention_secs(channel: HaSyncChannel) -> i64 {
+    match channel {
+        HaSyncChannel::Control => HA_CONTROL_OUTBOX_RETENTION_SECS,
+        HaSyncChannel::Billing | HaSyncChannel::Runtime => HA_CHANNEL_EXPORT_RETENTION_SECS,
+    }
+}
 
 impl KeyStore {
     pub(crate) async fn persist_ha_node_state(
@@ -235,15 +312,17 @@ impl KeyStore {
 
     pub(crate) async fn export_ha_baseline_ndjson(
         &self,
+        channel: HaSyncChannel,
         node_id: &str,
     ) -> Result<HaBaselineExport, ProxyError> {
-        let high_watermark = self.ha_outbox_high_watermark().await?;
+        let high_watermark = self.ha_channel_high_watermark(channel).await?;
         let mut ndjson = String::new();
         let mut row_count = 0_usize;
         ndjson.push_str(
             &serde_json::to_string(&serde_json::json!({
-                "schemaVersion": HA_BASELINE_SCHEMA_VERSION,
+                "schemaVersion": HA_SCHEMA_VERSION,
                 "kind": "baseline_start",
+                "channel": channel,
                 "nodeId": node_id,
                 "generatedAt": self.backend_time.now_ts(),
                 "highWatermark": high_watermark,
@@ -253,7 +332,7 @@ impl KeyStore {
         );
         ndjson.push('\n');
 
-        for table in HA_BASELINE_TABLES {
+        for table in ha_baseline_tables(channel) {
             if !self.table_exists(table).await? {
                 continue;
             }
@@ -263,8 +342,9 @@ impl KeyStore {
                 let row = sanitize_ha_resource_payload(table, row);
                 ndjson.push_str(
                     &serde_json::to_string(&serde_json::json!({
-                        "schemaVersion": HA_BASELINE_SCHEMA_VERSION,
+                        "schemaVersion": HA_SCHEMA_VERSION,
                         "kind": "resource",
+                        "channel": channel,
                         "resource": table,
                         "op": "upsert",
                         "data": row
@@ -277,8 +357,9 @@ impl KeyStore {
 
         ndjson.push_str(
             &serde_json::to_string(&serde_json::json!({
-                "schemaVersion": HA_BASELINE_SCHEMA_VERSION,
+                "schemaVersion": HA_SCHEMA_VERSION,
                 "kind": "baseline_end",
+                "channel": channel,
                 "nodeId": node_id,
                 "highWatermark": high_watermark,
                 "rowCount": row_count
@@ -287,15 +368,22 @@ impl KeyStore {
         );
         ndjson.push('\n');
         Ok(HaBaselineExport {
+            channel,
             ndjson,
             high_watermark,
             row_count,
         })
     }
 
-    pub(crate) async fn ha_outbox_high_watermark(&self) -> Result<i64, ProxyError> {
+    pub(crate) async fn ha_channel_high_watermark(
+        &self,
+        channel: HaSyncChannel,
+    ) -> Result<i64, ProxyError> {
         Ok(
-            sqlx::query_scalar::<_, Option<i64>>("SELECT MAX(seq) FROM ha_outbox")
+            sqlx::query_scalar::<_, Option<i64>>(&format!(
+                "SELECT MAX(seq) FROM {}",
+                quote_sqlite_identifier(ha_channel_event_table(channel))
+            ))
                 .fetch_one(&self.pool)
                 .await?
                 .unwrap_or(0),
@@ -316,6 +404,7 @@ impl KeyStore {
 
     pub(crate) async fn apply_ha_baseline_ndjson(
         &self,
+        channel: HaSyncChannel,
         ndjson: &str,
     ) -> Result<HaApplyResult, ProxyError> {
         let mut high_watermark = 0_i64;
@@ -344,7 +433,7 @@ impl KeyStore {
                         .ok_or_else(|| {
                             ProxyError::Other("HA baseline resource is missing".to_string())
                         })?;
-                    ensure_ha_resource_whitelisted(resource)?;
+                    ensure_ha_resource_whitelisted(channel, resource)?;
                     let data = value.get("data").cloned().ok_or_else(|| {
                         ProxyError::Other("HA baseline resource data is missing".to_string())
                     })?;
@@ -379,7 +468,7 @@ impl KeyStore {
         sqlx::query("BEGIN IMMEDIATE").execute(&mut *conn).await?;
         let result = async {
             insert_ha_outbox_suppression_on_conn(&mut conn).await?;
-            for table in HA_BASELINE_TABLES {
+            for table in ha_baseline_tables(channel) {
                 if self.table_exists(table).await? {
                     let sql = if *table == "meta" {
                         format!(
@@ -394,7 +483,7 @@ impl KeyStore {
                 }
             }
             for (resource, data) in &resources {
-                insert_json_row_on_conn(&mut conn, resource, data).await?;
+                insert_json_row_on_conn(&mut conn, channel, resource, data).await?;
                 row_count += 1;
             }
             clear_ha_outbox_suppression_on_conn(&mut conn).await?;
@@ -408,6 +497,7 @@ impl KeyStore {
                     .execute(&mut *conn)
                     .await?;
                 Ok(HaApplyResult {
+                    channel,
                     high_watermark,
                     row_count,
                 })
@@ -424,6 +514,7 @@ impl KeyStore {
 
     pub(crate) async fn apply_ha_events_ndjson(
         &self,
+        channel: HaSyncChannel,
         ndjson: &str,
     ) -> Result<HaApplyResult, ProxyError> {
         let mut last_seq = 0_i64;
@@ -442,7 +533,7 @@ impl KeyStore {
                         .get("resource")
                         .and_then(serde_json::Value::as_str)
                         .ok_or_else(|| ProxyError::Other("HA event resource is missing".to_string()))?;
-                    ensure_ha_resource_whitelisted(resource)?;
+                    ensure_ha_resource_whitelisted(channel, resource)?;
                     let op = event.get("op").and_then(serde_json::Value::as_str).unwrap_or("upsert");
                     let resource_id = event
                         .get("resourceId")
@@ -480,9 +571,12 @@ impl KeyStore {
             for (resource, resource_id, op, payload) in &events {
                 match op.as_str() {
                     "delete" => {
-                        delete_json_row_on_conn(&mut conn, resource, resource_id, payload).await?
+                        delete_json_row_on_conn(&mut conn, channel, resource, resource_id, payload)
+                            .await?
                     }
-                    "upsert" => insert_json_row_on_conn(&mut conn, resource, payload).await?,
+                    "upsert" => {
+                        insert_json_row_on_conn(&mut conn, channel, resource, payload).await?
+                    }
                     other => {
                         return Err(ProxyError::Other(format!(
                             "unsupported HA event operation: {other}"
@@ -499,6 +593,7 @@ impl KeyStore {
             Ok(()) => {
                 sqlx::query("COMMIT").execute(&mut *conn).await?;
                 Ok(HaApplyResult {
+                    channel,
                     high_watermark: last_seq,
                     row_count,
                 })
@@ -510,22 +605,34 @@ impl KeyStore {
         }
     }
 
-    pub(crate) async fn list_ha_outbox_events_after(
+    pub(crate) async fn list_ha_events_after(
         &self,
+        channel: HaSyncChannel,
         after_seq: i64,
         limit: i64,
-    ) -> Result<Vec<HaOutboxEventRecord>, ProxyError> {
-        self.prune_ha_outbox_retention().await?;
-        let min_seq: Option<i64> = sqlx::query_scalar("SELECT MIN(seq) FROM ha_outbox")
+    ) -> Result<Vec<HaEventRecord>, ProxyError> {
+        let table = quote_sqlite_identifier(ha_channel_event_table(channel));
+        let threshold = self.backend_time.now_ts() - ha_channel_retention_secs(channel);
+        let allowed_resources = ha_channel_event_tables(channel)
+            .iter()
+            .map(|resource| quote_sqlite_string(resource))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let min_seq: Option<i64> = sqlx::query_scalar(&format!(
+            "SELECT MIN(seq) FROM {table} WHERE created_at >= ? AND resource IN ({allowed_resources})"
+        ))
+            .bind(threshold)
             .fetch_one(&self.pool)
             .await?;
-        let last_seq: Option<i64> =
-            sqlx::query_scalar("SELECT seq FROM sqlite_sequence WHERE name = 'ha_outbox'")
+        let last_seq: Option<i64> = sqlx::query_scalar(&format!(
+            "SELECT seq FROM sqlite_sequence WHERE name = {}",
+            quote_sqlite_string(ha_channel_sequence_name(channel))
+        ))
                 .fetch_optional(&self.pool)
                 .await?;
         if min_seq.is_none() && after_seq > 0 && last_seq.unwrap_or(0) > after_seq {
             return Err(ProxyError::Other(
-                "HA outbox cursor is older than retention window".to_string(),
+                format!("HA {} cursor is older than retention window", channel.as_str()),
             ));
         }
         if let Some(min_seq) = min_seq
@@ -533,66 +640,66 @@ impl KeyStore {
             && after_seq < min_seq.saturating_sub(1)
         {
             return Err(ProxyError::Other(
-                "HA outbox cursor is older than retention window".to_string(),
+                format!("HA {} cursor is older than retention window", channel.as_str()),
             ));
         }
-        let whitelist_sql = HA_BASELINE_TABLES
-            .iter()
-            .map(|table| quote_sqlite_string(table))
-            .collect::<Vec<_>>()
-            .join(", ");
         let sql = format!(
             r#"
             SELECT seq, kind, resource, resource_id, op, payload_json, created_at, checksum
-              FROM ha_outbox
+              FROM {table}
              WHERE seq > ?
-               AND resource IN ({whitelist_sql})
+               AND created_at >= ?
+               AND resource IN ({allowed_resources})
              ORDER BY seq ASC
              LIMIT ?
             "#
         );
         let rows = sqlx::query(&sql)
-        .bind(after_seq.max(0))
-        .bind(limit.clamp(1, 1000))
-        .fetch_all(&self.pool)
-        .await?;
+            .bind(after_seq.max(0))
+            .bind(threshold)
+            .bind(limit.clamp(1, 1000))
+            .fetch_all(&self.pool)
+            .await?;
 
-        rows.into_iter()
-            .map(|row| {
-                let payload_raw: String = row.try_get("payload_json")?;
-                let payload = serde_json::from_str(&payload_raw)
-                    .map_err(|err| ProxyError::Other(format!("invalid HA outbox payload: {err}")))?;
-                let resource: String = row.try_get("resource")?;
-                let payload = sanitize_ha_resource_payload(&resource, payload);
-                Ok(HaOutboxEventRecord {
-                    seq: row.try_get("seq")?,
-                    kind: row.try_get("kind")?,
-                    resource,
-                    resource_id: row.try_get("resource_id")?,
-                    op: row.try_get("op")?,
-                    payload,
-                    created_at: row.try_get("created_at")?,
-                    checksum: row.try_get("checksum")?,
-                })
-            })
-            .collect()
+        let mut events = Vec::new();
+        for row in rows {
+            let resource: String = row.try_get("resource")?;
+            let payload_raw: String = row.try_get("payload_json")?;
+            let payload = serde_json::from_str(&payload_raw)
+                .map_err(|err| ProxyError::Other(format!("invalid HA outbox payload: {err}")))?;
+            let payload = sanitize_ha_resource_payload(&resource, payload);
+            events.push(HaEventRecord {
+                channel,
+                seq: row.try_get("seq")?,
+                kind: row.try_get("kind")?,
+                resource,
+                resource_id: row.try_get("resource_id")?,
+                op: row.try_get("op")?,
+                payload,
+                created_at: row.try_get("created_at")?,
+                checksum: row.try_get("checksum")?,
+            });
+        }
+        Ok(events)
     }
 
     pub(crate) async fn ack_ha_peer_watermark(
         &self,
+        channel: HaSyncChannel,
         peer_node_id: &str,
         acked_seq: i64,
     ) -> Result<(), ProxyError> {
         sqlx::query(
             r#"
-            INSERT INTO ha_peer_watermarks (peer_node_id, acked_seq, updated_at)
-            VALUES (?, ?, ?)
-            ON CONFLICT(peer_node_id) DO UPDATE SET
+            INSERT INTO ha_peer_watermarks (peer_node_id, channel, acked_seq, updated_at)
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT(peer_node_id, channel) DO UPDATE SET
                 acked_seq = MAX(ha_peer_watermarks.acked_seq, excluded.acked_seq),
                 updated_at = excluded.updated_at
             "#,
         )
         .bind(peer_node_id)
+        .bind(channel.as_str())
         .bind(acked_seq.max(0))
         .bind(self.backend_time.now_ts())
         .execute(&self.pool)
@@ -603,13 +710,14 @@ impl KeyStore {
     #[allow(dead_code)]
     pub(crate) async fn insert_ha_outbox_event(
         &self,
+        channel: HaSyncChannel,
         kind: &str,
         resource: &str,
         resource_id: &str,
         op: &str,
         payload: &serde_json::Value,
     ) -> Result<i64, ProxyError> {
-        if !HA_BASELINE_TABLES.contains(&resource) {
+        if ensure_ha_resource_whitelisted(channel, resource).is_err() {
             return Err(ProxyError::Other(format!(
                 "HA outbox resource is not whitelisted: {resource}"
             )));
@@ -617,13 +725,16 @@ impl KeyStore {
         let payload_json =
             serde_json::to_string(payload).map_err(|err| ProxyError::Other(err.to_string()))?;
         let checksum = sha256_hex_bytes(payload_json.as_bytes());
+        let table = quote_sqlite_identifier(ha_channel_event_table(channel));
         let result = sqlx::query(
-            r#"
-            INSERT INTO ha_outbox (
+            &format!(
+                r#"
+            INSERT INTO {table} (
                 kind, resource, resource_id, op, payload_json, created_at, checksum
             )
             VALUES (?, ?, ?, ?, ?, ?, ?)
-            "#,
+            "#
+            ),
         )
         .bind(kind)
         .bind(resource)
@@ -821,9 +932,27 @@ impl KeyStore {
         Self::table_columns_on_conn(&mut conn, table).await
     }
 
-    pub(crate) async fn ensure_ha_outbox_triggers(&self) -> Result<(), ProxyError> {
+    pub(crate) async fn configure_ha_event_writes(&self, mode: HaMode) -> Result<(), ProxyError> {
+        self.drop_ha_channel_triggers(HaSyncChannel::Control).await?;
+        self.drop_ha_channel_triggers(HaSyncChannel::Billing).await?;
+        self.drop_ha_channel_triggers(HaSyncChannel::Runtime).await?;
+        if mode == HaMode::Single {
+            return Ok(());
+        }
+        self.ensure_ha_channel_outbox_triggers(HaSyncChannel::Control)
+            .await?;
+        self.ensure_ha_channel_outbox_triggers(HaSyncChannel::Billing)
+            .await?;
+        self.ensure_ha_channel_outbox_triggers(HaSyncChannel::Runtime)
+            .await
+    }
+
+    pub(crate) async fn ensure_ha_channel_outbox_triggers(
+        &self,
+        channel: HaSyncChannel,
+    ) -> Result<(), ProxyError> {
         let mut conn = self.pool.acquire().await?;
-        for table in HA_BASELINE_TABLES {
+        for table in ha_channel_event_tables(channel) {
             let table_exists = sqlx::query_scalar::<_, i64>(
                 "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?)",
             )
@@ -854,7 +983,11 @@ impl KeyStore {
                 ("update", "AFTER UPDATE", new_json.as_str(), new_resource_id.as_str(), "upsert"),
                 ("delete", "AFTER DELETE", old_json.as_str(), old_resource_id.as_str(), "delete"),
             ] {
-                let trigger = quote_sqlite_identifier(&format!("trg_ha_outbox_{table}_{suffix}"));
+                let trigger = quote_sqlite_identifier(&ha_trigger_name(
+                    channel,
+                    table,
+                    suffix,
+                ));
                 let row_alias = if timing == "AFTER DELETE" { "OLD" } else { "NEW" };
                 let row_filter = meta_filter
                     .as_ref()
@@ -866,7 +999,7 @@ impl KeyStore {
                     {timing} ON {table_ident}
                     WHEN NOT EXISTS (SELECT 1 FROM ha_outbox_suppression WHERE id = 'local'){row_filter}
                     BEGIN
-                        INSERT INTO ha_outbox (
+                        INSERT INTO {} (
                             kind, resource, resource_id, op, payload_json, created_at, checksum
                         )
                         VALUES (
@@ -879,7 +1012,8 @@ impl KeyStore {
                             NULL
                         );
                     END
-                    "#
+                    "#,
+                    quote_sqlite_identifier(ha_channel_event_table(channel))
                 );
                 sqlx::query(&sql).execute(&mut *conn).await?;
             }
@@ -887,12 +1021,24 @@ impl KeyStore {
         Ok(())
     }
 
-    async fn prune_ha_outbox_retention(&self) -> Result<(), ProxyError> {
-        let threshold = self.backend_time.now_ts() - HA_OUTBOX_RETENTION_SECS;
-        sqlx::query("DELETE FROM ha_outbox WHERE created_at < ?")
-            .bind(threshold)
-            .execute(&self.pool)
-            .await?;
+    async fn drop_ha_channel_triggers(&self, channel: HaSyncChannel) -> Result<(), ProxyError> {
+        let mut conn = self.pool.acquire().await?;
+        for table in ha_channel_event_tables(channel) {
+            for suffix in ["insert", "update", "delete"] {
+                sqlx::query(&format!(
+                    "DROP TRIGGER IF EXISTS {}",
+                    quote_sqlite_identifier(&format!("trg_ha_outbox_{}_{}", table, suffix))
+                ))
+                .execute(&mut *conn)
+                .await?;
+                sqlx::query(&format!(
+                    "DROP TRIGGER IF EXISTS {}",
+                    quote_sqlite_identifier(&ha_trigger_name(channel, table, suffix))
+                ))
+                .execute(&mut *conn)
+                .await?;
+            }
+        }
         Ok(())
     }
 
@@ -932,14 +1078,22 @@ fn ha_meta_key_list_sql() -> String {
         .join(", ")
 }
 
-fn ensure_ha_resource_whitelisted(resource: &str) -> Result<(), ProxyError> {
-    if HA_BASELINE_TABLES.contains(&resource) {
+fn ensure_ha_resource_whitelisted(
+    channel: HaSyncChannel,
+    resource: &str,
+) -> Result<(), ProxyError> {
+    if ha_resource_allowed_for_channel(channel, resource) {
         Ok(())
     } else {
         Err(ProxyError::Other(format!(
-            "HA resource is not whitelisted: {resource}"
+            "HA {} resource is not whitelisted: {resource}",
+            channel.as_str()
         )))
     }
+}
+
+fn ha_trigger_name(channel: HaSyncChannel, table: &str, suffix: &str) -> String {
+    format!("trg_ha_{}_{}_{}", channel.as_str(), table, suffix)
 }
 
 fn sanitize_ha_resource_payload(
@@ -997,10 +1151,11 @@ fn ha_trigger_resource_id(alias: &str, columns: &[String]) -> String {
 
 async fn insert_json_row_on_conn(
     conn: &mut sqlx::pool::PoolConnection<sqlx::Sqlite>,
+    channel: HaSyncChannel,
     table: &str,
     row: &serde_json::Value,
 ) -> Result<(), ProxyError> {
-    ensure_ha_resource_whitelisted(table)?;
+    ensure_ha_resource_whitelisted(channel, table)?;
     let Some(object) = row.as_object() else {
         return Err(ProxyError::Other(
             "HA row payload must be a JSON object".to_string(),
@@ -1083,11 +1238,12 @@ async fn insert_json_row_on_conn(
 
 async fn delete_json_row_on_conn(
     conn: &mut sqlx::pool::PoolConnection<sqlx::Sqlite>,
+    channel: HaSyncChannel,
     table: &str,
     resource_id: &str,
     row: &serde_json::Value,
 ) -> Result<(), ProxyError> {
-    ensure_ha_resource_whitelisted(table)?;
+    ensure_ha_resource_whitelisted(channel, table)?;
     let columns = table_column_info_on_conn(conn, table).await?;
     let mut primary_key_columns = columns
         .iter()
@@ -1188,5 +1344,119 @@ fn parse_ha_node_role(value: &str) -> Option<HaNodeRole> {
         "standby" => Some(HaNodeRole::Standby),
         "recovery" => Some(HaNodeRole::Recovery),
         _ => None,
+    }
+}
+
+impl KeyStore {
+    pub(crate) async fn delete_ha_channel_events_bounded(
+        &self,
+        channel: HaSyncChannel,
+        threshold: i64,
+        batch_size: i64,
+    ) -> Result<i64, ProxyError> {
+        let table = quote_sqlite_identifier(ha_channel_event_table(channel));
+        let deleted = sqlx::query(&format!(
+            r#"
+            DELETE FROM {table}
+            WHERE seq IN (
+                SELECT seq
+                FROM {table}
+                WHERE created_at < ?
+                ORDER BY seq ASC
+                LIMIT ?
+            )
+            "#
+        ))
+        .bind(threshold)
+        .bind(batch_size.max(1))
+        .execute(&self.pool)
+        .await?;
+        Ok(deleted.rows_affected() as i64)
+    }
+
+    pub(crate) async fn gc_ha_outbox_with_options(
+        &self,
+        options: HaOutboxGcOptions,
+    ) -> Result<HaOutboxGcReport, ProxyError> {
+        let started = Instant::now();
+        let batch_size = options.batch_size.max(1);
+        let max_batches = options.max_batches.max(1);
+        let deadline = started + Duration::from_secs(options.max_runtime_secs.max(1));
+        let mut deleted_rows = 0_i64;
+        let mut batches = 0_i64;
+        let mut completed = true;
+        let mut channels = Vec::new();
+
+        for channel in [
+            HaSyncChannel::Control,
+            HaSyncChannel::Billing,
+            HaSyncChannel::Runtime,
+        ] {
+            let retention_secs = ha_channel_retention_secs(channel);
+            let threshold = self.backend_time.now_ts() - retention_secs;
+            let mut channel_deleted_rows = 0_i64;
+            let mut channel_batches = 0_i64;
+
+            while channel_batches < max_batches && Instant::now() < deadline {
+                let deleted = self
+                    .delete_ha_channel_events_bounded(channel, threshold, batch_size)
+                    .await?;
+                channel_deleted_rows += deleted;
+                channel_batches += 1;
+                if deleted < batch_size {
+                    break;
+                }
+                completed = false;
+                if options.inter_batch_sleep_ms > 0 {
+                    self.backend_time
+                        .sleep(Duration::from_millis(options.inter_batch_sleep_ms))
+                        .await;
+                }
+            }
+
+            let has_more: bool = sqlx::query_scalar(&format!(
+                "SELECT EXISTS(SELECT 1 FROM {} WHERE created_at < ? LIMIT 1)",
+                quote_sqlite_identifier(ha_channel_event_table(channel))
+            ))
+            .bind(threshold)
+            .fetch_one(&self.pool)
+            .await?;
+            if has_more {
+                completed = false;
+            }
+
+            deleted_rows += channel_deleted_rows;
+            batches += channel_batches;
+            channels.push(HaOutboxGcChannelReport {
+                channel,
+                retention_secs,
+                threshold,
+                deleted_rows: channel_deleted_rows,
+                batches: channel_batches,
+                has_more,
+            });
+        }
+
+        let (busy, log_frames, checkpointed_frames) = if deleted_rows > 0 {
+            let (busy, log_frames, checkpointed_frames) =
+                self.checkpoint_sqlite_wal_passive().await?;
+            (busy != 0, log_frames, checkpointed_frames)
+        } else {
+            (false, 0, 0)
+        };
+
+        Ok(HaOutboxGcReport {
+            batch_size,
+            max_batches,
+            deleted_rows,
+            batches,
+            completed,
+            has_more: channels.iter().any(|channel| channel.has_more),
+            channels,
+            wal_checkpoint_busy: busy,
+            wal_checkpoint_log_frames: log_frames,
+            wal_checkpoint_checkpointed_frames: checkpointed_frames,
+            elapsed_ms: started.elapsed().as_millis(),
+        })
     }
 }

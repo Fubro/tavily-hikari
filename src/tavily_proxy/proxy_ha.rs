@@ -216,42 +216,47 @@ impl TavilyProxy {
 
     pub async fn export_ha_baseline_ndjson(
         &self,
+        channel: HaSyncChannel,
         node_id: &str,
     ) -> Result<HaBaselineExport, ProxyError> {
-        self.key_store.export_ha_baseline_ndjson(node_id).await
+        self.key_store.export_ha_baseline_ndjson(channel, node_id).await
     }
 
     pub async fn apply_ha_baseline_ndjson(
         &self,
+        channel: HaSyncChannel,
         ndjson: &str,
     ) -> Result<HaApplyResult, ProxyError> {
-        self.key_store.apply_ha_baseline_ndjson(ndjson).await
+        self.key_store.apply_ha_baseline_ndjson(channel, ndjson).await
     }
 
     pub async fn apply_ha_events_ndjson(
         &self,
+        channel: HaSyncChannel,
         ndjson: &str,
     ) -> Result<HaApplyResult, ProxyError> {
-        self.key_store.apply_ha_events_ndjson(ndjson).await
+        self.key_store.apply_ha_events_ndjson(channel, ndjson).await
     }
 
-    pub async fn list_ha_outbox_events_after(
+    pub async fn list_ha_events_after(
         &self,
+        channel: HaSyncChannel,
         after_seq: i64,
         limit: i64,
-    ) -> Result<Vec<HaOutboxEventRecord>, ProxyError> {
+    ) -> Result<Vec<HaEventRecord>, ProxyError> {
         self.key_store
-            .list_ha_outbox_events_after(after_seq, limit)
+            .list_ha_events_after(channel, after_seq, limit)
             .await
     }
 
     pub async fn ack_ha_peer_watermark(
         &self,
+        channel: HaSyncChannel,
         peer_node_id: &str,
         acked_seq: i64,
     ) -> Result<(), ProxyError> {
         self.key_store
-            .ack_ha_peer_watermark(peer_node_id, acked_seq)
+            .ack_ha_peer_watermark(channel, peer_node_id, acked_seq)
             .await
     }
 

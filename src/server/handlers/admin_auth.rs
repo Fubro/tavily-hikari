@@ -56,6 +56,7 @@ fn manual_trigger_supported(job_type: &str) -> bool {
         "quota_sync"
             | "token_usage_rollup"
             | "auth_token_logs_gc"
+            | "ha_outbox_gc"
             | "request_logs_gc"
             | "mcp_sessions_gc"
             | "mcp_session_init_backoffs_gc"

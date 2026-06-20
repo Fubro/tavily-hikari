@@ -1,3 +1,6 @@
+use tavily_hikari::{
+    HaOutboxGcOptions, format_ha_outbox_gc_report_message, run_ha_outbox_gc_once,
+};
 use tokio::time::Instant;
 fn random_delay_secs(max_inclusive: u64) -> u64 {
     use rand::Rng;
@@ -458,6 +461,27 @@ fn spawn_auth_token_logs_gc_scheduler(state: Arc<AppState>) {
             };
 
             // Run GC once per hour; retention window is enforced inside the proxy.
+            state.proxy.backend_time().sleep(Duration::from_secs(3600)).await;
+        }
+    });
+}
+
+fn spawn_ha_outbox_gc_scheduler(state: Arc<AppState>) {
+    tokio::spawn(async move {
+        loop {
+            let Some(_) = enqueue_scheduled_job_logged(
+                state.as_ref(),
+                "ha_outbox_gc",
+                None,
+                TRIGGER_SOURCE_SCHEDULER,
+                "ha-outbox-gc",
+            )
+            .await
+            else {
+                state.proxy.backend_time().sleep(Duration::from_secs(3600)).await;
+                continue;
+            };
+
             state.proxy.backend_time().sleep(Duration::from_secs(3600)).await;
         }
     });
@@ -1147,6 +1171,23 @@ async fn run_manual_claimed_job(
             let _maintenance = acquire_db_maintenance_read_gate().await;
             match state.proxy.gc_auth_token_logs().await {
                 Ok(deleted) => finish(state, "success", format!("deleted_rows={deleted}")).await,
+                Err(err) => finish(state, "error", err.to_string()).await,
+            }
+        }
+        "ha_outbox_gc" => {
+            let _maintenance = acquire_db_maintenance_read_gate().await;
+            match run_ha_outbox_gc_once(
+                state.proxy.sqlite_database_path(),
+                HaOutboxGcOptions::default(),
+            )
+            .await
+            {
+                Ok(report) => finish(
+                    state,
+                    "success",
+                    format_ha_outbox_gc_report_message(&report, 1),
+                )
+                .await,
                 Err(err) => finish(state, "error", err.to_string()).await,
             }
         }

@@ -58,6 +58,220 @@ async fn quota_subject_lock_retries_transient_sqlite_write_lock() {
 }
 
 #[tokio::test]
+async fn standalone_ha_outbox_gc_deletes_expired_rows_across_channels_in_bounded_batches() {
+    let db_path = temp_db_path("ha-outbox-gc-bounded-control-only");
+    let db_str = db_path.to_string_lossy().to_string();
+    let old_control_ts = Utc::now().timestamp() - (4 * SECS_PER_DAY);
+    let old_long_retention_ts = Utc::now().timestamp() - (93 * SECS_PER_DAY);
+    let recent_ts = Utc::now().timestamp();
+
+    let pool = sqlx::SqlitePool::connect_with(
+        sqlx::sqlite::SqliteConnectOptions::new()
+            .filename(&db_path)
+            .create_if_missing(true),
+    )
+    .await
+    .expect("open sqlite pool");
+    sqlx::query(
+        r#"
+        CREATE TABLE ha_outbox (
+            seq INTEGER PRIMARY KEY AUTOINCREMENT,
+            kind TEXT NOT NULL,
+            resource TEXT NOT NULL,
+            resource_id TEXT NOT NULL,
+            op TEXT NOT NULL,
+            payload_json TEXT NOT NULL,
+            created_at INTEGER NOT NULL,
+            checksum TEXT
+        )
+        "#,
+    )
+    .execute(&pool)
+    .await
+    .expect("create ha_outbox");
+    sqlx::query(
+        r#"
+        CREATE TABLE ha_billing_outbox (
+            seq INTEGER PRIMARY KEY AUTOINCREMENT,
+            kind TEXT NOT NULL,
+            resource TEXT NOT NULL,
+            resource_id TEXT NOT NULL,
+            op TEXT NOT NULL,
+            payload_json TEXT NOT NULL,
+            created_at INTEGER NOT NULL,
+            checksum TEXT
+        )
+        "#,
+    )
+    .execute(&pool)
+    .await
+    .expect("create ha_billing_outbox");
+    sqlx::query(
+        r#"
+        CREATE TABLE ha_runtime_outbox (
+            seq INTEGER PRIMARY KEY AUTOINCREMENT,
+            kind TEXT NOT NULL,
+            resource TEXT NOT NULL,
+            resource_id TEXT NOT NULL,
+            op TEXT NOT NULL,
+            payload_json TEXT NOT NULL,
+            created_at INTEGER NOT NULL,
+            checksum TEXT
+        )
+        "#,
+    )
+    .execute(&pool)
+    .await
+    .expect("create ha_runtime_outbox");
+    sqlx::query(r#"CREATE INDEX idx_ha_outbox_created ON ha_outbox(created_at, seq)"#)
+        .execute(&pool)
+        .await
+        .expect("create control outbox index");
+    sqlx::query(
+        r#"CREATE INDEX idx_ha_billing_outbox_created ON ha_billing_outbox(created_at, seq)"#,
+    )
+    .execute(&pool)
+    .await
+    .expect("create billing outbox index");
+    sqlx::query(
+        r#"CREATE INDEX idx_ha_runtime_outbox_created ON ha_runtime_outbox(created_at, seq)"#,
+    )
+    .execute(&pool)
+    .await
+    .expect("create runtime outbox index");
+
+    for seq in 0..3 {
+        sqlx::query(
+            r#"
+            INSERT INTO ha_outbox (
+                kind, resource, resource_id, op, payload_json, created_at, checksum
+            ) VALUES ('state', 'users', ?, 'upsert', '{}', ?, NULL)
+            "#,
+        )
+        .bind(format!("old-{seq}"))
+        .bind(old_control_ts + seq)
+        .execute(&pool)
+        .await
+        .expect("seed old control event");
+    }
+    sqlx::query(
+        r#"
+        INSERT INTO ha_outbox (
+            kind, resource, resource_id, op, payload_json, created_at, checksum
+        ) VALUES ('state', 'users', 'recent-1', 'upsert', '{}', ?, NULL)
+        "#,
+    )
+    .bind(recent_ts)
+    .execute(&pool)
+    .await
+    .expect("seed recent control event");
+    sqlx::query(
+        r#"
+        INSERT INTO ha_billing_outbox (
+            kind, resource, resource_id, op, payload_json, created_at, checksum
+        ) VALUES ('state', 'billing_ledger', 'billing-1', 'upsert', '{}', ?, NULL)
+        "#,
+    )
+    .bind(old_long_retention_ts)
+    .execute(&pool)
+    .await
+    .expect("seed billing outbox event");
+    sqlx::query(
+        r#"
+        INSERT INTO ha_billing_outbox (
+            kind, resource, resource_id, op, payload_json, created_at, checksum
+        ) VALUES ('state', 'billing_ledger', 'billing-recent', 'upsert', '{}', ?, NULL)
+        "#,
+    )
+    .bind(recent_ts)
+    .execute(&pool)
+    .await
+    .expect("seed recent billing outbox event");
+    sqlx::query(
+        r#"
+        INSERT INTO ha_runtime_outbox (
+            kind, resource, resource_id, op, payload_json, created_at, checksum
+        ) VALUES ('state', 'mcp_sessions', 'runtime-1', 'upsert', '{}', ?, NULL)
+        "#,
+    )
+    .bind(old_long_retention_ts)
+    .execute(&pool)
+    .await
+    .expect("seed runtime outbox event");
+    sqlx::query(
+        r#"
+        INSERT INTO ha_runtime_outbox (
+            kind, resource, resource_id, op, payload_json, created_at, checksum
+        ) VALUES ('state', 'mcp_sessions', 'runtime-recent', 'upsert', '{}', ?, NULL)
+        "#,
+    )
+    .bind(recent_ts)
+    .execute(&pool)
+    .await
+    .expect("seed recent runtime outbox event");
+    drop(pool);
+
+    let report = run_ha_outbox_gc_once(
+        &db_str,
+        HaOutboxGcOptions {
+            batch_size: 2,
+            max_batches: 1,
+            max_runtime_secs: 30,
+            inter_batch_sleep_ms: 0,
+        },
+    )
+    .await
+    .expect("run standalone ha outbox gc");
+    assert_eq!(report.deleted_rows, 4);
+    assert_eq!(report.batches, 3);
+    assert!(!report.completed);
+    assert!(report.has_more);
+    assert_eq!(report.channels.len(), 3);
+    assert_eq!(report.channels[0].channel, HaSyncChannel::Control);
+    assert_eq!(report.channels[0].deleted_rows, 2);
+    assert!(report.channels[0].has_more);
+    assert_eq!(report.channels[1].channel, HaSyncChannel::Billing);
+    assert_eq!(report.channels[1].deleted_rows, 1);
+    assert!(!report.channels[1].has_more);
+    assert_eq!(report.channels[2].channel, HaSyncChannel::Runtime);
+    assert_eq!(report.channels[2].deleted_rows, 1);
+    assert!(!report.channels[2].has_more);
+
+    let pool = sqlx::SqlitePool::connect_with(
+        sqlx::sqlite::SqliteConnectOptions::new()
+            .filename(&db_path)
+            .create_if_missing(false),
+    )
+    .await
+    .expect("reopen sqlite pool");
+    let control_remaining: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM ha_outbox")
+        .fetch_one(&pool)
+        .await
+        .expect("count remaining control events");
+    let old_control_remaining: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM ha_outbox WHERE created_at < ?")
+            .bind(recent_ts - SECS_PER_DAY)
+            .fetch_one(&pool)
+            .await
+            .expect("count remaining old control events");
+    let billing_remaining: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM ha_billing_outbox")
+        .fetch_one(&pool)
+        .await
+        .expect("count remaining billing events");
+    let runtime_remaining: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM ha_runtime_outbox")
+        .fetch_one(&pool)
+        .await
+        .expect("count remaining runtime events");
+
+    assert_eq!(control_remaining, 2);
+    assert_eq!(old_control_remaining, 1);
+    assert_eq!(billing_remaining, 1);
+    assert_eq!(runtime_remaining, 1);
+
+    let _ = std::fs::remove_file(db_path);
+}
+
+#[tokio::test]
 async fn scheduled_job_start_retries_transient_sqlite_write_lock() {
     let db_path = temp_db_path("scheduled-job-start-retries-sqlite-lock");
     let db_str = db_path.to_string_lossy().to_string();

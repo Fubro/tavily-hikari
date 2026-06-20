@@ -39,9 +39,12 @@ Tavily Hikari 的高可用方案采用单活主备热备，而不是一主多从
 - standby 每 5-15 秒从 active 拉取状态基线或 outbox 增量事件，目标 RPO `<=15s`。
 - 禁止通过 HA 同步传输全量 SQLite 数据库文件。
 - 状态基线与事件流使用 versioned zstd NDJSON，基线压缩后上限 `64MiB`，事件批次压缩后上限 `4MiB`。
-- active 持久化 `ha_outbox` 事件，standby 按递增 seq 幂等应用并回报 peer watermark；outbox 保留窗口为 72 小时，超过窗口必须重新拉状态基线。
-- 基线和事件只允许同步接管基础 API/MCP 所需状态：API keys、auth tokens、用户身份、token/key/user 绑定、MCP 当前会话必要状态、quota 当前状态与聚合 bucket、控制面配置、公告、LinuxDo 充值订单/权益、账本历史、forward proxy 配置、代理节点 override、上游 key 与代理节点绑定/亲和关系。
-- 禁止同步 `request_logs`、`auth_token_logs`、请求体、响应体、path/query/IP/header 明细、dashboard recent logs、OAuth login 临时态、Web session、forward proxy runtime/attempts/hourly weight 和节点本地观测噪声。
+- HA wire contract 按三个正式 channel 拆分：`control`、`billing`、`runtime`。每个 channel 独立导出 baseline、独立拉取 events、独立记录 peer watermark，不支持 mixed-version HA。
+- `control` 只同步控制面小状态，事件流写入 `ha_outbox`，保留窗口为 72 小时；超过窗口必须重新拉取该 channel 的状态基线。
+- `billing` 只同步 `billing_ledger` 完整账本行历史，事件流写入 `ha_billing_outbox`，不再通过 `ha_outbox` 复制账本。
+- `runtime` 只同步 failover 后若不恢复就会影响基础 API/MCP 正确性的最小运行态，事件流写入 `ha_runtime_outbox`。允许的最小运行态包括 quota 当前状态与 bucket、token/account 月额度、MCP 当前会话必要状态、forward proxy 亲和与节点 override、以及主/次 API key affinity。
+- `control`/`billing`/`runtime` 三个 channel 的 baseline 和 events 都禁止包含 `request_logs`、`auth_token_logs`、请求体、响应体、path/query/IP/header 明细、dashboard recent logs、OAuth login 临时态、Web session、forward proxy runtime/attempts/hourly weight、维护审计、调度队列、请求限流快照和节点本地观测噪声。
+- `HA_MODE=single` 下不得产生新的 HA 事件写入；仅保留 schema 兼容、显式 one-shot 维护工具与后续切回 `active_standby` 的启动能力。
 - recovery 只允许导入幂等账本事件，不导入调用记录，不覆盖新主当前权威状态。
 - recovery 完成后 quota 与 usage 聚合必须可继续滚动更新。
 
@@ -53,9 +56,9 @@ Tavily Hikari 的高可用方案采用单活主备热备，而不是一主多从
 - `PUT /api/admin/ha/source` 保存当前服务节点私有源站配置，可在 `IP/域名` 与 `源站组` 间切换，并可选择保存后立即应用到 EdgeOne。
 - HA 源站设置的 `directOriginScheme` JSON wire 值固定为小写 `http|https|follow`。`PUT /api/admin/ha/source` 请求体、成功响应以及后续 `GET /api/admin/ha/status` 返回值都必须维持同一套小写语义；仅下游 EdgeOne 控制面 payload 可以继续映射成 `HTTP|HTTPS|FOLLOW`。
 - `GET`/`PUT /api/admin/ha/snapshot` 是废弃接口，必须返回 `410 Gone`，不得读写 SQLite 数据库文件。
-- `GET /api/admin/ha/baseline` 仅内部或管理员认证可调用，在 active/provisional 节点输出 zstd NDJSON 状态基线，并在响应头返回 high watermark。
-- `GET /api/admin/ha/events?after=<seq>&limit=<n>` 仅内部或管理员认证可调用，输出 `after` 之后的 zstd NDJSON outbox 事件。
-- `POST /api/admin/ha/events/ack` 仅内部或管理员认证可调用，记录 standby 已应用的 outbox seq。
+- `GET /api/admin/ha/baseline?channel=<control|billing|runtime>` 仅内部或管理员认证可调用，在 active/provisional 节点输出对应 channel 的 zstd NDJSON 状态基线，并在响应头返回该 channel 的 high watermark。
+- `GET /api/admin/ha/events?channel=<control|billing|runtime>&after=<seq>&limit=<n>` 仅内部或管理员认证可调用，输出对应 channel 在 `after` 之后且仍位于 retention 窗口内的 zstd NDJSON outbox 事件；该读路径不得隐式删行，若 `after` 已落到 retention 窗口之外则返回 `410 Gone` 并要求先重拉该 channel baseline。
+- `POST /api/admin/ha/events/ack` 仅内部或管理员认证可调用，请求体必须显式携带 `channel`，用于记录 standby 已应用的该 channel outbox seq。
 - `POST /api/admin/ha/promote` 将当前 standby 切为 `provisional_master`，可带 `force` 用于强制接管。
 - `POST /api/admin/ha/finalize` 管理员确认后进入 `full_master`。
 - `POST /api/admin/ha/recovery/import` 导入旧主 recovery 账本批次，仅允许内部或管理员认证调用；调用记录字段必须被拒绝。

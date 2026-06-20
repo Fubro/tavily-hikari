@@ -24,6 +24,7 @@ impl KeyStore {
             (
                 _,
                 "auth_token_logs_gc"
+                | "ha_outbox_gc"
                 | "mcp_sessions_gc"
                 | "mcp_session_init_backoffs_gc"
                 | "token_usage_rollup"
@@ -55,7 +56,7 @@ impl KeyStore {
                 WHEN {trigger_source_column} = 'manual' AND ({job_type_column} = 'request_logs_gc' OR {job_type_column} = 'db_compaction') THEN 0 \
                 WHEN {trigger_source_column} = 'manual' THEN 1 \
                 WHEN {job_type_column} = 'request_logs_gc' OR {job_type_column} = 'db_compaction' THEN 2 \
-                WHEN {job_type_column} = 'auth_token_logs_gc' OR {job_type_column} = 'mcp_sessions_gc' OR {job_type_column} = 'mcp_session_init_backoffs_gc' OR {job_type_column} = 'token_usage_rollup' OR {job_type_column} = 'usage_aggregation' THEN 3 \
+                WHEN {job_type_column} = 'auth_token_logs_gc' OR {job_type_column} = 'ha_outbox_gc' OR {job_type_column} = 'mcp_sessions_gc' OR {job_type_column} = 'mcp_session_init_backoffs_gc' OR {job_type_column} = 'token_usage_rollup' OR {job_type_column} = 'usage_aggregation' THEN 3 \
                 WHEN {job_type_column} = 'linuxdo_user_tag_binding_refresh' OR {job_type_column} = 'forward_proxy_geo_refresh' OR {job_type_column} = 'linuxdo_user_status_sync' THEN 4 \
                 WHEN {job_type_column} = 'quota_sync' OR {job_type_column} = 'quota_sync/manual' OR {job_type_column} = 'quota_sync/hot' THEN 5 \
                 ELSE 6 \

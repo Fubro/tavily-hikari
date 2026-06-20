@@ -1502,9 +1502,10 @@ impl KeyStore {
                 request_log_id,
                 result_status,
                 created_at,
+                updated_at,
                 settled_at,
                 error_message
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?)
             ON CONFLICT(auth_token_log_id) DO UPDATE SET
                 token_id = excluded.token_id,
                 billing_subject = excluded.billing_subject,
@@ -1515,6 +1516,7 @@ impl KeyStore {
                 request_log_id = excluded.request_log_id,
                 result_status = excluded.result_status,
                 created_at = excluded.created_at,
+                updated_at = excluded.updated_at,
                 settled_at = NULL,
                 error_message = excluded.error_message
             "#,
@@ -1528,6 +1530,7 @@ impl KeyStore {
         .bind(api_key_id)
         .bind(request_log_id)
         .bind(result_status)
+        .bind(created_at)
         .bind(created_at)
         .bind(error_message)
         .execute(&self.pool)
@@ -1806,12 +1809,14 @@ impl KeyStore {
                         (SELECT created_at FROM auth_token_logs WHERE id = billing_ledger.auth_token_log_id),
                         billing_ledger.created_at
                     ),
+                    updated_at = ?,
                     settled_at = ?,
                     error_message = NULL
                 WHERE auth_token_log_id = ? AND billing_state = ?
                 "#,
             )
             .bind(BILLING_STATE_CHARGED)
+            .bind(Utc::now().timestamp())
             .bind(Utc::now().timestamp())
             .bind(log_id)
             .bind(BILLING_STATE_PENDING)
@@ -2080,12 +2085,14 @@ impl KeyStore {
                     (SELECT created_at FROM auth_token_logs WHERE id = billing_ledger.auth_token_log_id),
                     billing_ledger.created_at
                 ),
+                updated_at = ?,
                 settled_at = ?,
                 error_message = NULL
             WHERE auth_token_log_id = ? AND billing_state = ?
             "#,
         )
         .bind(BILLING_STATE_CHARGED)
+        .bind(Utc::now().timestamp())
         .bind(Utc::now().timestamp())
         .bind(log_id)
         .bind(BILLING_STATE_PENDING)
@@ -2125,13 +2132,15 @@ impl KeyStore {
                 WHEN error_message IS NULL OR error_message = '' THEN ?
                 WHEN error_message = ? THEN error_message
                 ELSE error_message || ' | ' || ?
-            END
+            END,
+                updated_at = ?
             WHERE auth_token_log_id = ?
             "#,
         )
         .bind(message)
         .bind(message)
         .bind(message)
+        .bind(self.backend_time.now_ts())
         .bind(log_id)
         .execute(&self.pool)
         .await?;
