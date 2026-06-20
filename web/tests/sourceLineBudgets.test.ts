@@ -65,15 +65,17 @@ const EXCEPTIONS = new Map<string, { max: number; reason: string }>([
   [
     'src/i18n/translations/en.ts',
     {
-      max: 1560,
-      reason: 'Admin jobs maintenance copy and the expanded admin rankings live-status/accessibility strings are still stored in the shared English runtime catalog.',
+      max: 1561,
+      reason:
+        'Admin jobs maintenance copy, the expanded admin rankings live-status/accessibility strings, and the auth-token retention settings copy are still stored in the shared English runtime catalog.',
     },
   ],
   [
     'src/i18n/translations/zh.ts',
     {
-      max: 1559,
-      reason: 'Admin jobs maintenance copy and the expanded admin rankings live-status/accessibility strings are still stored in the shared Chinese runtime catalog.',
+      max: 1560,
+      reason:
+        'Admin jobs maintenance copy, the expanded admin rankings live-status/accessibility strings, and the auth-token retention settings copy are still stored in the shared Chinese runtime catalog.',
     },
   ],
   [
