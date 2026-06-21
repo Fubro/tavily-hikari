@@ -87,6 +87,7 @@ export interface DashboardOverviewStrings {
   todayDescription: string
   monthTitle: string
   monthDescription: string
+  monthComparisonEmpty: string
   currentStatusTitle: string
   currentStatusDescription: string
   trendsTitle: string
@@ -228,10 +229,12 @@ function SummaryMetricCard({
   metric,
   compact = false,
   backdrop,
+  backdropNotice,
 }: {
   metric: DashboardMetricCard
   compact?: boolean
   backdrop?: DashboardCardBackdropSeries
+  backdropNotice?: string | null
 }): JSX.Element {
   const deltaTone = metric.comparison?.tone ?? (
     metric.comparison?.direction === 'flat'
@@ -281,6 +284,7 @@ function SummaryMetricCard({
           <div className="metric-subtitle">{metric.subtitle}</div>
         ) : null}
         {metric.comparison && metric.subtitle ? <div className="metric-subtitle">{metric.subtitle}</div> : null}
+        {!metric.comparison && backdropNotice ? <div className="metric-subtitle">{backdropNotice}</div> : null}
       </div>
     </div>
   )
@@ -840,6 +844,7 @@ export default function DashboardOverview({
     monthBackdrop,
     monthSeriesValue,
   ])
+  const monthComparisonNotice = monthBackdrop.hasVisibleComparison ? null : strings.monthComparisonEmpty
   const alertGroupCount = overviewReady && recentAlerts.totalEvents > 0 ? 1 : 0
   const priorityCount = riskItems.length + alertGroupCount
   const focusMetric = todayTotalMetric ?? monthTotalMetric ?? statusMetrics[0] ?? null
@@ -941,6 +946,7 @@ export default function DashboardOverview({
                         <SummaryMetricCard
                           metric={monthTotalMetric}
                           backdrop={monthCardBackdrops[getBackdropMetricKey(monthTotalMetric.id) ?? 'total']}
+                          backdropNotice={monthComparisonNotice}
                         />
                       ) : null}
                       {monthQuotaCharge ? <QuotaChargeCard card={monthQuotaCharge} backdrop={monthCardBackdrops.total} /> : null}
@@ -951,6 +957,7 @@ export default function DashboardOverview({
                             metric={metric}
                             compact
                             backdrop={monthCardBackdrops[getBackdropMetricKey(metric.id) ?? 'total']}
+                            backdropNotice={monthComparisonNotice}
                           />
                         ))}
                       </div>

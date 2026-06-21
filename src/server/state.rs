@@ -11,6 +11,54 @@ struct AppState {
     dev_open_admin: bool,
     usage_base: String,
     api_key_ip_geo_origin: String,
+    dashboard_overview_cache: Arc<Mutex<DashboardOverviewCacheState>>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct DashboardOverviewFreshness {
+    summary: [i64; 10],
+    summary_last_activity: Option<i64>,
+    forward_proxy: Option<(i64, i64)>,
+    exhausted_keys: Vec<String>,
+    latest_quota_sync_sample_at: Option<i64>,
+    latest_request_log_id: Option<i64>,
+    recent_jobs: Vec<(i64, String, Option<i64>)>,
+    disabled_tokens: Vec<String>,
+    disabled_tokens_error: bool,
+    disabled_tokens_truncated: bool,
+    recent_alerts_total_events: i64,
+    recent_alerts_grouped_count: i64,
+    recent_alerts_counts: Vec<(String, i64)>,
+    recent_alerts_top_groups: Vec<(String, i64, i64)>,
+    request_log_retention_days: i64,
+    hourly_window_anchor: i64,
+}
+
+#[derive(Debug, Clone)]
+struct CachedDashboardOverviewSnapshot {
+    snapshot: DashboardOverviewSnapshot,
+    freshness: DashboardOverviewFreshness,
+}
+
+#[derive(Debug, Clone)]
+struct DashboardOverviewCacheState {
+    cached: Option<CachedDashboardOverviewSnapshot>,
+    loading: bool,
+    notify: Arc<tokio::sync::Notify>,
+}
+
+impl Default for DashboardOverviewCacheState {
+    fn default() -> Self {
+        Self {
+            cached: None,
+            loading: false,
+            notify: Arc::new(tokio::sync::Notify::new()),
+        }
+    }
+}
+
+fn new_dashboard_overview_cache() -> Arc<Mutex<DashboardOverviewCacheState>> {
+    Arc::new(Mutex::new(DashboardOverviewCacheState::default()))
 }
 
 static DB_MAINTENANCE_GATE: OnceLock<RwLock<()>> = OnceLock::new();
@@ -62,6 +110,10 @@ fn maintenance_remote_io_slot_for_state(state: &AppState) -> Arc<Semaphore> {
     let slot = Arc::new(Semaphore::new(1));
     slots.insert(key, Arc::downgrade(&slot));
     slot
+}
+
+fn dashboard_overview_cache_for_state(state: &AppState) -> Arc<Mutex<DashboardOverviewCacheState>> {
+    state.dashboard_overview_cache.clone()
 }
 
 fn try_acquire_maintenance_remote_io_slot_for_state(

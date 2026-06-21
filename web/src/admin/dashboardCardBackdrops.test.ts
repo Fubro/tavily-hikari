@@ -147,8 +147,8 @@ describe('dashboardCardBackdrops helpers', () => {
         { bucketStart: 3, displayBucketStart: 3, total: null, valuableSuccess: null, valuableFailure: null, otherSuccess: null, otherFailure: null, unknown: null, upstreamExhausted: null, newKeys: null, newQuarantines: null },
       ],
       comparison: [
-        { bucketStart: 11, displayBucketStart: 11, total: 90, valuableSuccess: 54, valuableFailure: 10, otherSuccess: 18, otherFailure: 5, unknown: 3, upstreamExhausted: 0, newKeys: 0, newQuarantines: 0 },
-        { bucketStart: 12, displayBucketStart: 12, total: 210, valuableSuccess: 126, valuableFailure: 24, otherSuccess: 40, otherFailure: 12, unknown: 8, upstreamExhausted: 1, newKeys: 0, newQuarantines: 0 },
+        { bucketStart: 11, displayBucketStart: 1, total: 90, valuableSuccess: 54, valuableFailure: 10, otherSuccess: 18, otherFailure: 5, unknown: 3, upstreamExhausted: 0, newKeys: 0, newQuarantines: 0 },
+        { bucketStart: 12, displayBucketStart: 2, total: 210, valuableSuccess: 126, valuableFailure: 24, otherSuccess: 40, otherFailure: 12, unknown: 8, upstreamExhausted: 1, newKeys: 0, newQuarantines: 0 },
       ],
     }
 
@@ -157,6 +157,23 @@ describe('dashboardCardBackdrops helpers', () => {
 
     expect(totalBackdrop.current).toEqual([100, 160, null])
     expect(totalBackdrop.comparison).toEqual([90, 120, null])
+    expect(totalBackdrop.hasVisibleComparison).toBe(true)
     expect(newKeysBackdrop.current).toEqual([0, 1, null])
+  })
+
+  it('treats missing previous-month points as an explicit empty comparison on the current-month axis', () => {
+    const monthSeries = {
+      current: [
+        { bucketStart: 1, displayBucketStart: 101, total: 50, valuableSuccess: 30, valuableFailure: 8, otherSuccess: 9, otherFailure: 2, unknown: 1, upstreamExhausted: 0, newKeys: 0, newQuarantines: 0 },
+        { bucketStart: 2, displayBucketStart: 102, total: 90, valuableSuccess: 55, valuableFailure: 13, otherSuccess: 15, otherFailure: 4, unknown: 3, upstreamExhausted: 0, newKeys: 1, newQuarantines: 0 },
+      ],
+      comparison: [],
+    }
+
+    const backdrop = buildMonthSeriesBackdropSeries(monthSeries, 'total')
+
+    expect(backdrop.current).toEqual([50, 40])
+    expect(backdrop.comparison).toEqual([null, null])
+    expect(backdrop.hasVisibleComparison).toBe(false)
   })
 })

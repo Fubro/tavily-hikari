@@ -1145,6 +1145,43 @@ use super::upstream_support_and_manual_jobs::*;
         )
         .await
         .expect("proxy created");
+        let summary_windows = proxy.summary_windows().await.expect("summary windows");
+        let pool = connect_sqlite_test_pool(&db_str).await;
+        sqlx::query(
+            r#"
+            INSERT INTO dashboard_request_rollup_buckets (
+                bucket_start,
+                bucket_secs,
+                total_requests,
+                success_count,
+                error_count,
+                quota_exhausted_count,
+                valuable_success_count,
+                valuable_failure_count,
+                valuable_failure_429_count,
+                other_success_count,
+                other_failure_count,
+                unknown_count,
+                mcp_non_billable,
+                mcp_billable,
+                api_non_billable,
+                api_billable,
+                local_estimated_credits,
+                updated_at
+            ) VALUES (?, 86400, ?, ?, ?, 0, ?, ?, 0, 0, 0, 0, 0, 0, 0, ?, 0, ?)
+            "#,
+        )
+        .bind(summary_windows.previous_month_start)
+        .bind(4_i64)
+        .bind(3_i64)
+        .bind(1_i64)
+        .bind(3_i64)
+        .bind(1_i64)
+        .bind(4_i64)
+        .bind(summary_windows.previous_month_start + 60)
+        .execute(&pool)
+        .await
+        .expect("insert previous month dashboard rollup");
 
         let admin_password = "admin-dashboard-overview-password";
         let admin_addr = spawn_builtin_keys_admin_server(proxy, admin_password).await;
@@ -2267,6 +2304,7 @@ use super::upstream_support_and_manual_jobs::*;
             dev_open_admin: false,
             usage_base: "http://127.0.0.1:58088".to_string(),
             api_key_ip_geo_origin: "https://api.country.is".to_string(),
+            dashboard_overview_cache: new_dashboard_overview_cache(),
         });
 
         let (sig, latest_id) = compute_signatures(&state)
@@ -2277,6 +2315,118 @@ use super::upstream_support_and_manual_jobs::*;
         assert_eq!(sig.summary[5], 0);
         assert_eq!(sig.summary[6], 1);
         assert!(latest_id.is_none());
+
+        let _ = std::fs::remove_file(db_path);
+    }
+
+    #[tokio::test]
+    async fn dashboard_overview_snapshot_is_reused_within_the_same_freshness_wave() {
+        let db_path = temp_db_path("dashboard-overview-shared-snapshot");
+        let db_str = db_path.to_string_lossy().to_string();
+        let proxy = TavilyProxy::with_endpoint(
+            vec!["tvly-dashboard-overview-shared-snapshot".to_string()],
+            DEFAULT_UPSTREAM,
+            &db_str,
+        )
+        .await
+        .expect("proxy created");
+
+        let state = Arc::new(AppState {
+            proxy,
+            static_dir: None,
+            forward_auth: ForwardAuthConfig::new(None, None, None, None),
+            forward_auth_enabled: false,
+            builtin_admin: BuiltinAdminAuth::new(false, None, None),
+            linuxdo_oauth: LinuxDoOAuthOptions::disabled(),
+            linuxdo_credit: LinuxDoCreditOptions::disabled(),
+            ha: tavily_hikari::HaRuntime::new(tavily_hikari::HaConfig::default()),
+            dev_open_admin: false,
+            usage_base: "http://127.0.0.1:58088".to_string(),
+            api_key_ip_geo_origin: "https://api.country.is".to_string(),
+            dashboard_overview_cache: new_dashboard_overview_cache(),
+        });
+
+        let first = load_dashboard_overview_snapshot(&state)
+            .await
+            .expect("first overview snapshot");
+
+        reset_dashboard_overview_build_count();
+
+        let _snapshot_event = build_snapshot_event(&state)
+            .await
+            .expect("snapshot event");
+
+        assert_eq!(
+            dashboard_overview_build_count(),
+            0,
+            "SSE snapshot should reuse the shared overview cache instead of rebuilding within the same refresh wave",
+        );
+        assert!(
+            !first.payload.month_series.current.is_empty(),
+            "snapshot should still expose the expected month series payload",
+        );
+
+        let _ = std::fs::remove_file(db_path);
+    }
+
+    #[tokio::test]
+    async fn dashboard_overview_snapshot_does_not_reuse_recent_cache_after_freshness_changes() {
+        let db_path = temp_db_path("dashboard-overview-shared-snapshot-freshness-change");
+        let db_str = db_path.to_string_lossy().to_string();
+        let proxy = TavilyProxy::with_endpoint(
+            vec!["tvly-dashboard-overview-shared-snapshot-freshness-change".to_string()],
+            DEFAULT_UPSTREAM,
+            &db_str,
+        )
+        .await
+        .expect("proxy created");
+
+        let state = Arc::new(AppState {
+            proxy,
+            static_dir: None,
+            forward_auth: ForwardAuthConfig::new(None, None, None, None),
+            forward_auth_enabled: false,
+            builtin_admin: BuiltinAdminAuth::new(false, None, None),
+            linuxdo_oauth: LinuxDoOAuthOptions::disabled(),
+            linuxdo_credit: LinuxDoCreditOptions::disabled(),
+            ha: tavily_hikari::HaRuntime::new(tavily_hikari::HaConfig::default()),
+            dev_open_admin: false,
+            usage_base: "http://127.0.0.1:58088".to_string(),
+            api_key_ip_geo_origin: "https://api.country.is".to_string(),
+            dashboard_overview_cache: new_dashboard_overview_cache(),
+        });
+        let pool = connect_sqlite_test_pool(&db_str).await;
+
+        let first = load_dashboard_overview_snapshot(&state)
+            .await
+            .expect("first overview snapshot");
+        let _ = first;
+
+        reset_dashboard_overview_build_count();
+
+        sqlx::query(
+            "UPDATE api_keys SET quota_limit = ?, quota_remaining = ?, quota_synced_at = ?",
+        )
+        .bind(2_000_i64)
+        .bind(1_234_i64)
+        .bind(Utc::now().timestamp())
+        .execute(&pool)
+        .await
+        .expect("update quota totals");
+
+        let refreshed = load_dashboard_overview_snapshot(&state)
+            .await
+            .expect("refreshed overview snapshot");
+
+        assert_eq!(
+            refreshed.payload.site_status.remaining_quota,
+            1_234,
+            "freshness changes should bypass the recently loaded cache entry"
+        );
+        assert!(
+            dashboard_overview_build_count() >= 1,
+            "overview snapshot should rebuild after freshness changes even inside the grace window"
+        );
 
         let _ = std::fs::remove_file(db_path);
     }

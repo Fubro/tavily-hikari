@@ -63,6 +63,11 @@ reads:
 - Replace repeated window scans with a single bounded scan that derives all needed windows, then add
   a short manager-scoped TTL cache when settings and live stats can request the same window set in
   one admin refresh cycle.
+- Collapse `/api/dashboard/overview` and admin SSE `snapshot` onto one freshness-aware shared
+  snapshot loader. Reuse the same materialized overview within one refresh wave, but invalidate it
+  immediately when summary totals, request-log signature, exhausted-key subset, disabled-token
+  coverage, recent jobs, recent alerts, forward-proxy counts, quota-sync freshness, or current-hour
+  anchor changes.
 - For public metrics or SSE surfaces backed by request-stat rollups, gate synchronous flushes on
   persisted freshness plus the oldest pending coalesced write. Do not force a flush on every public
   read once the rollup window is already current enough.
@@ -84,6 +89,34 @@ reads:
   details. If a query is bounded by a small user set but SQLite chooses a broad time/visibility
   index, reshape it or use `INDEXED BY` so it seeks by user first instead of scanning the full
   retained window.
+
+## 101 readback
+
+- Current production stack resolution on machine 101 is unambiguous:
+  - stack root: `/home/ivan/srv/ai`
+  - compose file: `/home/ivan/srv/ai/docker-compose.yml`
+  - container: `tavily-hikari`
+  - persistent volume: `ai-tavily-hikari-data`
+  - database paths inside the container:
+    - `/srv/app/data/tavily_proxy.db`
+    - `/srv/app/data/tavily_proxy-observability.db`
+- Read-only inspection on 2026-06-21 showed the container healthy but the data files already large
+  enough to amplify wide scans:
+  - `tavily_proxy.db`: about `3.4G`
+  - `tavily_proxy-observability.db`: about `408M`
+  - `tavily_proxy.db-wal`: about `724M`
+- A controlled in-container admin-style request to
+  `http://127.0.0.1:8787/api/dashboard/overview` with the production forward-auth headers still
+  took about `4.70s` on 2026-06-21.
+- Recent production logs from the same container still show overview-adjacent SQLite pressure, for
+  example:
+  - a retained-window aggregate over `observability.request_logs` logged at about `925ms`
+  - a write into `observability.request_logs` logged at about `938ms`
+  - a follow-up `SELECT request_kind_key, ... FROM request_logs WHERE id = ?` logged at about
+    `1.03s`
+- Treat this as the anti-pattern signature: if overview freshness, snapshot polling, or month-series
+  reads keep touching `observability.request_logs` outside a minute-tail fallback, the read path
+  will contend with live writes and grow with retained history.
 
 ## Guardrails / Reuse Notes
 

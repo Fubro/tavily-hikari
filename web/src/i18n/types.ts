@@ -221,6 +221,7 @@ export interface AdminTranslationsShape {
     todayDescription: string
     monthTitle: string
     monthDescription: string
+    monthComparisonEmpty: string
     currentStatusTitle: string
     currentStatusDescription: string
     deltaFromYesterday: string

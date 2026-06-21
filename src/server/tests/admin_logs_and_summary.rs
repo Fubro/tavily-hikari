@@ -931,6 +931,7 @@ use super::upstream_support_and_manual_jobs::*;
             .next()
             .expect("seeded key exists")
             .id;
+        let summary_windows = proxy.summary_windows().await.expect("summary windows");
 
         for index in 0..6 {
             let note = format!("disabled-token-{index}");
@@ -954,6 +955,41 @@ use super::upstream_support_and_manual_jobs::*;
             .expect("finish job");
 
         let pool = connect_sqlite_test_pool(&db_str).await;
+        sqlx::query(
+            r#"
+            INSERT INTO dashboard_request_rollup_buckets (
+                bucket_start,
+                bucket_secs,
+                total_requests,
+                success_count,
+                error_count,
+                quota_exhausted_count,
+                valuable_success_count,
+                valuable_failure_count,
+                valuable_failure_429_count,
+                other_success_count,
+                other_failure_count,
+                unknown_count,
+                mcp_non_billable,
+                mcp_billable,
+                api_non_billable,
+                api_billable,
+                local_estimated_credits,
+                updated_at
+            ) VALUES (?, 86400, ?, ?, ?, 0, ?, ?, 0, 0, 0, 0, 0, 0, 0, ?, 0, ?)
+            "#,
+        )
+        .bind(summary_windows.previous_month_start)
+        .bind(5_i64)
+        .bind(4_i64)
+        .bind(1_i64)
+        .bind(4_i64)
+        .bind(1_i64)
+        .bind(5_i64)
+        .bind(summary_windows.previous_month_start + 60)
+        .execute(&pool)
+        .await
+        .expect("insert previous month dashboard rollup");
 
         sqlx::query("UPDATE api_keys SET status = 'exhausted', status_changed_at = ? WHERE id = ?")
             .bind(Utc::now().timestamp())

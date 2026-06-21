@@ -890,7 +890,7 @@ function demoDashboardOverview(now = Date.now()) {
     const total = 1_540 + index * 188 + ((index + pulse + 1) % 4) * 42
     return {
       bucketStart: summaryWindows.previous_month_start + index * 86_400,
-      displayBucketStart: summaryWindows.previous_month_start + index * 86_400,
+      displayBucketStart: monthSeriesCurrent[index]?.displayBucketStart ?? null,
       total,
       valuableSuccess: Math.round(total * 0.66),
       valuableFailure: Math.round(total * 0.11),
