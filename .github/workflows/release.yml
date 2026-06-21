@@ -1,4 +1,5 @@
 name: Release
+# portable_release_contract=v1
 
 on:
   workflow_run:
@@ -46,6 +47,7 @@ jobs:
       reason: ${{ steps.intent.outputs.reason }}
       version: ${{ steps.tagmeta.outputs.version }}
       tag: ${{ steps.tagmeta.outputs.tag }}
+      supports_portable: ${{ steps.capabilities.outputs.supports_portable }}
     steps:
       - name: Checkout (workflow_run)
         uses: actions/checkout@v6
@@ -68,6 +70,20 @@ jobs:
           WORKFLOW_RUN_SHA: ${{ env.RELEASE_HEAD_SHA }}
         run: |
           bash ./.github/scripts/release-intent.sh
+
+      - name: Detect release asset capabilities
+        id: capabilities
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          supports_portable=false
+          if [[ -f ".github/workflows/release.yml" ]] &&
+            grep -Fq 'portable_release_contract=v1' ".github/workflows/release.yml"; then
+            supports_portable=true
+          fi
+
+          echo "supports_portable=${supports_portable}" >> "${GITHUB_OUTPUT}"
 
       - name: Determine release version/tag (idempotent)
         id: tagmeta
@@ -173,6 +189,7 @@ jobs:
             echo "- reason: ${{ steps.intent.outputs.reason }}"
             echo "- tag: ${{ steps.tagmeta.outputs.tag || '<none>' }}"
             echo "- version: ${{ steps.tagmeta.outputs.version || '<none>' }}"
+            echo "- supports_portable: ${{ steps.capabilities.outputs.supports_portable }}"
           } >> "${GITHUB_STEP_SUMMARY}"
 
   web-assets:
@@ -512,6 +529,186 @@ jobs:
             echo "- tarball: $(basename "${TARBALL}")"
           } >> "${GITHUB_STEP_SUMMARY}"
 
+  binary-portable:
+    name: Build portable binary release (${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    needs: [prepare, web-assets]
+    if: ${{ needs.prepare.outputs.should_release == 'true' && needs.prepare.outputs.supports_portable == 'true' }}
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-24.04
+            target: x86_64-unknown-linux-musl
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-musl
+    env:
+      APP_EFFECTIVE_VERSION: ${{ needs.prepare.outputs.version }}
+      RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
+    steps:
+      - name: Checkout (workflow_run)
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ env.RELEASE_HEAD_SHA }}
+
+      - name: Download web assets artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: release-web-dist
+          path: web/dist
+
+      - name: Install Zig
+        uses: mlugg/setup-zig@v2
+        with:
+          version: 0.14.1
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@v1
+        with:
+          toolchain: 1.91.0
+          targets: ${{ matrix.target }}
+
+      - name: Install cargo-zigbuild
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo install cargo-zigbuild --locked --version 0.22.1
+
+      - name: Build portable release binary
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo zigbuild --release --locked --target "${{ matrix.target }}" --bin tavily-hikari
+
+      - name: Verify portable binary linkage
+        shell: bash
+        run: |
+          set -euo pipefail
+          binary="target/${{ matrix.target }}/release/tavily-hikari"
+          file_output="$(file "${binary}")"
+          printf '%s\n' "${file_output}" | tee "${RUNNER_TEMP}/portable-file-${{ matrix.arch }}.log"
+          ldd_output="$(ldd "${binary}" 2>&1 || true)"
+          printf '%s\n' "${ldd_output}" | tee "${RUNNER_TEMP}/portable-ldd-${{ matrix.arch }}.log"
+          readelf_dynamic="$(readelf -d "${binary}" 2>&1 || true)"
+          printf '%s\n' "${readelf_dynamic}" | tee "${RUNNER_TEMP}/portable-readelf-dynamic-${{ matrix.arch }}.log"
+          readelf_program_headers="$(readelf -l "${binary}" 2>&1 || true)"
+          printf '%s\n' "${readelf_program_headers}" | tee "${RUNNER_TEMP}/portable-readelf-program-headers-${{ matrix.arch }}.log"
+          if ! grep -Eq 'statically linked|static-pie linked' <<< "${file_output}"; then
+            echo "portable binary must be statically linked" >&2
+            exit 1
+          fi
+          if grep -q 'Requesting program interpreter' <<< "${readelf_program_headers}"; then
+            echo "portable binary unexpectedly requires a runtime loader" >&2
+            exit 1
+          fi
+          if grep -q '(NEEDED)' <<< "${readelf_dynamic}"; then
+            echo "portable binary unexpectedly exposes dynamic library dependencies" >&2
+            exit 1
+          fi
+          if grep -Eq 'libc\.so\.6|ld-linux|libssl|libcrypto|libsqlite3|GLIBC' <<< "${file_output}"$'\n'"${ldd_output}"$'\n'"${readelf_dynamic}"$'\n'"${readelf_program_headers}"; then
+            echo "portable binary still exposes forbidden dynamic runtime dependencies" >&2
+            exit 1
+          fi
+
+      - name: Package portable release binary
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          release_dir="${RUNNER_TEMP}/release-binary-portable-${{ matrix.arch }}"
+          package_root="${release_dir}/tavily-hikari-${RELEASE_TAG}-linux-${{ matrix.arch }}-portable"
+          tarball="${release_dir}/tavily-hikari-${RELEASE_TAG}-linux-${{ matrix.arch }}-portable.tar.gz"
+          sha_file="${tarball}.sha256"
+
+          mkdir -p "${package_root}"
+          install -m 0755 "target/${{ matrix.target }}/release/tavily-hikari" "${package_root}/tavily-hikari"
+          tar -C "${release_dir}" -czf "${tarball}" "$(basename "${package_root}")"
+          (cd "${release_dir}" && sha256sum "$(basename "${tarball}")" > "$(basename "${sha_file}")")
+
+          echo "PACKAGE_ROOT=${package_root}" >> "${GITHUB_ENV}"
+          echo "TARBALL=${tarball}" >> "${GITHUB_ENV}"
+          echo "SHA_FILE=${sha_file}" >> "${GITHUB_ENV}"
+
+      - name: Smoke portable binary
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          smoke_root="${RUNNER_TEMP}/release-smoke-portable-${{ matrix.arch }}"
+          extract_dir="${smoke_root}/extract"
+          db_path="${smoke_root}/data/tavily_proxy.db"
+          port="$(
+            python3 - <<'PY'
+          import socket
+          s = socket.socket()
+          s.bind(("127.0.0.1", 0))
+          print(s.getsockname()[1])
+          s.close()
+          PY
+          )"
+
+          mkdir -p "${extract_dir}" "$(dirname "${db_path}")"
+          tar -xzf "${TARBALL}" -C "${extract_dir}"
+          binary="${extract_dir}/tavily-hikari-${RELEASE_TAG}-linux-${{ matrix.arch }}-portable/tavily-hikari"
+
+          "${binary}" \
+            --bind 127.0.0.1 \
+            --port "${port}" \
+            --db-path "${db_path}" \
+            --dev-open-admin \
+            >"${smoke_root}/stdout.log" \
+            2>"${smoke_root}/stderr.log" &
+          pid=$!
+          trap 'kill "${pid}" >/dev/null 2>&1 || true' EXIT
+
+          for i in {1..60}; do
+            if curl -fsS "http://127.0.0.1:${port}/health" >/dev/null; then
+              break
+            fi
+            if ! kill -0 "${pid}" >/dev/null 2>&1; then
+              echo "portable binary exited early" >&2
+              cat "${smoke_root}/stdout.log" >&2 || true
+              cat "${smoke_root}/stderr.log" >&2 || true
+              exit 1
+            fi
+            sleep 1
+          done
+
+          curl -fsS "http://127.0.0.1:${port}/health" >/dev/null
+          curl -fsSL "http://127.0.0.1:${port}/" | grep -qi '<html'
+          curl -fsS "http://127.0.0.1:${port}/admin" | grep -qi '<html'
+          curl -fsS "http://127.0.0.1:${port}/console" | grep -qi '<html'
+          curl -fsS "http://127.0.0.1:${port}/version.json" | grep -q '"version"'
+          curl -fsS "http://127.0.0.1:${port}/favicon.svg" >/dev/null
+          curl -fsS "http://127.0.0.1:${port}/linuxdo-logo.svg" >/dev/null
+
+      - name: Upload portable binary artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: release-binary-portable-${{ matrix.arch }}
+          path: |
+            ${{ env.TARBALL }}
+            ${{ env.SHA_FILE }}
+          if-no-files-found: error
+          overwrite: true
+
+      - name: Summary
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo "### Portable binary release (${{ matrix.arch }})"
+            echo "- runner: ${{ matrix.runner }}"
+            echo "- target: ${{ matrix.target }}"
+            echo "- tag: ${RELEASE_TAG}"
+            echo "- tarball: $(basename "${TARBALL}")"
+          } >> "${GITHUB_STEP_SUMMARY}"
+
   docker-manifest:
     name: Publish multi-arch manifest (ghcr)
     runs-on: ubuntu-24.04
@@ -621,8 +818,16 @@ jobs:
     name: GitHub Release
     runs-on: ubuntu-24.04
     timeout-minutes: 10
-    needs: [prepare, docker-manifest, binary-native]
-    if: ${{ needs.prepare.outputs.should_release == 'true' }}
+    needs: [prepare, docker-manifest, binary-native, binary-portable]
+    if: >-
+      ${{
+        always() &&
+        needs.prepare.outputs.should_release == 'true' &&
+        needs.prepare.result == 'success' &&
+        needs.docker-manifest.result == 'success' &&
+        needs.binary-native.result == 'success' &&
+        (needs.binary-portable.result == 'success' || needs.binary-portable.result == 'skipped')
+      }}
     permissions:
       contents: write
       issues: write
@@ -642,7 +847,7 @@ jobs:
       - name: Download binary release artifacts
         uses: actions/download-artifact@v8
         with:
-          pattern: release-binary-*
+          pattern: release-binary*
           path: ${{ runner.temp }}/release-binary-assets
           merge-multiple: true
 
@@ -673,6 +878,7 @@ jobs:
           RELEASE_VERSION: ${{ needs.prepare.outputs.version }}
           RELEASE_CHANNEL: ${{ needs.prepare.outputs.release_channel }}
           RELEASE_PR_NUMBER: ${{ needs.prepare.outputs.pr_number }}
+          RELEASE_SUPPORTS_PORTABLE: ${{ needs.prepare.outputs.supports_portable }}
         with:
           script: |
             const { owner, repo } = context.repo
@@ -681,6 +887,7 @@ jobs:
             const releaseTag = process.env.RELEASE_TAG
             const releaseVersion = process.env.RELEASE_VERSION
             const releaseChannel = process.env.RELEASE_CHANNEL || '(unknown)'
+            const supportsPortable = process.env.RELEASE_SUPPORTS_PORTABLE === 'true'
             const targetSha = process.env.TARGET_SHA || '(unknown)'
             const issueNumber = Number(rawPrNumber)
 
@@ -707,6 +914,14 @@ jobs:
               `${binaryBase}-linux-arm64.tar.gz`,
               `${binaryBase}-linux-arm64.tar.gz.sha256`,
             ]
+            if (supportsPortable) {
+              binaryAssets.push(
+                `${binaryBase}-linux-amd64-portable.tar.gz`,
+                `${binaryBase}-linux-amd64-portable.tar.gz.sha256`,
+                `${binaryBase}-linux-arm64-portable.tar.gz`,
+                `${binaryBase}-linux-arm64-portable.tar.gz.sha256`
+              )
+            }
 
             const body = [
               marker,
