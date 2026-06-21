@@ -635,6 +635,12 @@ impl TavilyProxy {
         self.key_store.fetch_dashboard_month_series(summary_windows).await
     }
 
+    pub async fn latest_dashboard_quota_sync_sample_at(&self) -> Result<Option<i64>, ProxyError> {
+        self.key_store
+            .fetch_latest_dashboard_quota_sync_sample_at()
+            .await
+    }
+
     /// Public metrics: successful requests today and this month.
     pub async fn success_breakdown(
         &self,

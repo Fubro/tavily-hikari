@@ -1145,6 +1145,43 @@ use super::upstream_support_and_manual_jobs::*;
         )
         .await
         .expect("proxy created");
+        let summary_windows = proxy.summary_windows().await.expect("summary windows");
+        let pool = connect_sqlite_test_pool(&db_str).await;
+        sqlx::query(
+            r#"
+            INSERT INTO dashboard_request_rollup_buckets (
+                bucket_start,
+                bucket_secs,
+                total_requests,
+                success_count,
+                error_count,
+                quota_exhausted_count,
+                valuable_success_count,
+                valuable_failure_count,
+                valuable_failure_429_count,
+                other_success_count,
+                other_failure_count,
+                unknown_count,
+                mcp_non_billable,
+                mcp_billable,
+                api_non_billable,
+                api_billable,
+                local_estimated_credits,
+                updated_at
+            ) VALUES (?, 86400, ?, ?, ?, 0, ?, ?, 0, 0, 0, 0, 0, 0, 0, ?, 0, ?)
+            "#,
+        )
+        .bind(summary_windows.previous_month_start)
+        .bind(4_i64)
+        .bind(3_i64)
+        .bind(1_i64)
+        .bind(3_i64)
+        .bind(1_i64)
+        .bind(4_i64)
+        .bind(summary_windows.previous_month_start + 60)
+        .execute(&pool)
+        .await
+        .expect("insert previous month dashboard rollup");
 
         let admin_password = "admin-dashboard-overview-password";
         let admin_addr = spawn_builtin_keys_admin_server(proxy, admin_password).await;
@@ -2277,6 +2314,65 @@ use super::upstream_support_and_manual_jobs::*;
         assert_eq!(sig.summary[5], 0);
         assert_eq!(sig.summary[6], 1);
         assert!(latest_id.is_none());
+
+        let _ = std::fs::remove_file(db_path);
+    }
+
+    #[tokio::test]
+    async fn dashboard_overview_snapshot_is_reused_within_the_same_freshness_wave() {
+        let db_path = temp_db_path("dashboard-overview-shared-snapshot");
+        let db_str = db_path.to_string_lossy().to_string();
+        let proxy = TavilyProxy::with_endpoint(
+            vec!["tvly-dashboard-overview-shared-snapshot".to_string()],
+            DEFAULT_UPSTREAM,
+            &db_str,
+        )
+        .await
+        .expect("proxy created");
+
+        let state = Arc::new(AppState {
+            proxy,
+            static_dir: None,
+            forward_auth: ForwardAuthConfig::new(None, None, None, None),
+            forward_auth_enabled: false,
+            builtin_admin: BuiltinAdminAuth::new(false, None, None),
+            linuxdo_oauth: LinuxDoOAuthOptions::disabled(),
+            linuxdo_credit: LinuxDoCreditOptions::disabled(),
+            ha: tavily_hikari::HaRuntime::new(tavily_hikari::HaConfig::default()),
+            dev_open_admin: false,
+            usage_base: "http://127.0.0.1:58088".to_string(),
+            api_key_ip_geo_origin: "https://api.country.is".to_string(),
+        });
+
+        let first = load_dashboard_overview_snapshot(&state)
+            .await
+            .expect("first overview snapshot");
+        let cache_handle = dashboard_overview_cache_for_state(state.as_ref());
+        {
+            let mut cache = cache_handle.lock().await;
+            cache.cached = Some(CachedDashboardOverviewSnapshot {
+                snapshot: first.clone(),
+                freshness: first.freshness.clone(),
+                loaded_at: std::time::Instant::now(),
+            });
+        }
+
+        reset_dashboard_overview_build_count();
+
+        let _snapshot_event = build_snapshot_event(&state)
+            .await
+            .expect("snapshot event");
+
+        assert_eq!(
+            dashboard_overview_build_count(),
+            0,
+            "SSE snapshot should reuse the shared overview cache instead of rebuilding within the same refresh wave",
+        );
+        assert!(
+            first.payload.month_series.current.len() >= first.payload.month_series.comparison.len()
+                || first.payload.month_series.comparison.is_empty(),
+            "snapshot should still expose the expected month series payload",
+        );
 
         let _ = std::fs::remove_file(db_path);
     }

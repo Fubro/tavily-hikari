@@ -14,6 +14,7 @@
 - `summaryWindows.today`、`summaryWindows.yesterday`、`summaryWindows.month` 均由 dashboard request rollup buckets 聚合，避免回退到全量 `request_logs` 扫描。
 - `yesterday` 对比窗口使用服务端本地昨日 0 点到昨日同一日内进度的半开区间，窗口时长与 `today` 一致；昨日同刻之后的数据不会进入今日卡片的“较昨日同刻”比较。
 - 前端今日卡片主值和比较值继续读取 `summaryWindows`，背景图比较序列读取同一响应里的 `yesterday_start/yesterday_end` 边界，因此修正后主值、delta 与背景图窗口保持同一口径。
+- 本月 comparison 由后端月度序列直接提供：当存在上月留存数据时，`comparison[*].displayBucketStart` 与当前月自然日轴一一对齐；当留存数据缺失时，后端返回显式空 `comparison`，前端统一渲染“无上月对比数据”提示。
 - 前端今日明细网格在桌面端固定为两列三行，并把主块剩余高度平均分配到三行小卡；占比 / 新增说明与 delta badge 作为右下角信息组展示，marker 使用轻量半透明样式减少对背景趋势线的遮挡。
 
 ## Remaining Gaps

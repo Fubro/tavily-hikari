@@ -8,6 +8,7 @@
 - 2026-04-07: 将 `上游 Key 耗尽` 从请求级耗尽次数改为窗口内系统自动标记 exhausted 的唯一上游 Key 数，避免与请求日志详情口径混淆。
 - 2026-06-09: 修正 `yesterday` 对比窗口边界。旧实现把 `yesterday_end` 设为今天 0 点，实际统计了昨天整天；正确口径应为昨日同一日内进度，且窗口时长与 `today` 一致。
 - 2026-06-13: 背景图改为完整周期显示轴：`今日` 覆盖服务端本地自然日 24 小时，`本月` 覆盖服务端本地自然月完整日历周期；当前时刻之后的槽位保留 `null`，但主值 / delta 继续沿用 same-time 统计窗口。
+- 2026-06-21: 将 `monthSeries.comparison` 改为按当前月显示轴对齐的 `displayBucketStart` 合同，并在无 retained previous-month data 时返回显式空 comparison + 前端空态提示，避免“上月线像坏掉一样消失”。
 
 ## Key Reasons / Replacements
 

@@ -849,6 +849,28 @@ struct DashboardOverviewPayload {
     recent_alerts: DashboardRecentAlertsView,
 }
 
+#[derive(Debug, Clone)]
+struct DashboardOverviewSnapshot {
+    payload: DashboardOverviewPayload,
+    month_series: tavily_hikari::DashboardMonthSeries,
+    recent_request_logs_signature: Vec<(i64, i64)>,
+    freshness: DashboardOverviewFreshness,
+}
+
+#[cfg(test)]
+static DASHBOARD_OVERVIEW_BUILD_COUNT: std::sync::atomic::AtomicUsize =
+    std::sync::atomic::AtomicUsize::new(0);
+
+#[cfg(test)]
+fn reset_dashboard_overview_build_count() {
+    DASHBOARD_OVERVIEW_BUILD_COUNT.store(0, std::sync::atomic::Ordering::SeqCst);
+}
+
+#[cfg(test)]
+fn dashboard_overview_build_count() -> usize {
+    DASHBOARD_OVERVIEW_BUILD_COUNT.load(std::sync::atomic::Ordering::SeqCst)
+}
+
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct DashboardSnapshot {
@@ -905,6 +927,8 @@ struct DashboardSiteStatusView {
     total_proxy_nodes: Option<i64>,
 }
 
+const DASHBOARD_OVERVIEW_SINGLEFLIGHT_GRACE: Duration = Duration::from_secs(2);
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct DashboardForwardProxyView {
@@ -920,9 +944,9 @@ async fn get_dashboard_overview(
         return Err(StatusCode::FORBIDDEN);
     }
 
-    build_dashboard_overview_payload(&state)
+    load_dashboard_overview_snapshot(&state)
         .await
-        .map(Json)
+        .map(|snapshot| Json(snapshot.payload))
         .map_err(|err| {
             eprintln!("dashboard overview error: {err}");
             StatusCode::INTERNAL_SERVER_ERROR
@@ -1105,7 +1129,10 @@ async fn sse_public(
 
 async fn build_dashboard_overview_payload(
     state: &Arc<AppState>,
-) -> Result<DashboardOverviewPayload, ProxyError> {
+) -> Result<DashboardOverviewSnapshot, ProxyError> {
+    #[cfg(test)]
+    DASHBOARD_OVERVIEW_BUILD_COUNT.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+
     let summary = state.proxy.summary().await?;
     let summary_windows = state.proxy.summary_windows().await?;
     let hourly_request_window = state.proxy.dashboard_hourly_request_window().await?;
@@ -1116,6 +1143,10 @@ async fn build_dashboard_overview_payload(
         .list_dashboard_exhausted_key_metrics(DASHBOARD_EXHAUSTED_KEYS_LIMIT)
         .await
         .unwrap_or_default();
+    let exhausted_key_ids = exhausted_keys
+        .iter()
+        .map(|key| key.id.clone())
+        .collect::<Vec<_>>();
     let recent_log_views: Vec<RequestLogView> = state
         .proxy
         .recent_request_logs(DASHBOARD_TREND_SOURCE_LIMIT)
@@ -1129,6 +1160,10 @@ async fn build_dashboard_overview_payload(
         .into_iter()
         .take(DASHBOARD_RECENT_LOGS_LIMIT)
         .collect();
+    let (request_log_retention_days, recent_request_logs_signature) = state
+        .proxy
+        .recent_request_log_signature(DASHBOARD_RECENT_LOGS_LIMIT)
+        .await?;
     let recent_jobs = state
         .proxy
         .list_recent_jobs(DASHBOARD_RECENT_JOBS_LIMIT)
@@ -1164,87 +1199,115 @@ async fn build_dashboard_overview_payload(
         disabled_tokens.truncate(DASHBOARD_DISABLED_TOKENS_LIMIT);
     }
 
-    Ok(DashboardOverviewPayload {
-        summary: summary.clone().into(),
-        summary_windows: SummaryWindowsView::from(summary_windows),
-        hourly_request_window: DashboardHourlyRequestWindowView::from(hourly_request_window),
-        month_series: DashboardMonthSeriesView::from(month_series),
-        site_status: DashboardSiteStatusView {
-            remaining_quota: summary.total_quota_remaining,
-            total_quota_limit: summary.total_quota_limit,
-            active_keys: summary.active_keys,
-            quarantined_keys: summary.quarantined_keys,
-            temporary_isolated_keys: summary.temporary_isolated_keys,
-            exhausted_keys: summary.exhausted_keys,
-            available_proxy_nodes: Some(forward_proxy.available_nodes),
-            total_proxy_nodes: Some(forward_proxy.total_nodes),
+    let hourly_window_anchor = state
+        .proxy
+        .backend_time()
+        .now_ts()
+        .div_euclid(3600)
+        .saturating_mul(3600);
+    let disabled_tokens_error = token_coverage == "error";
+    let disabled_token_truncated = token_coverage == "truncated";
+    let disabled_token_ids = disabled_tokens
+        .iter()
+        .map(|token| token.id.clone())
+        .collect::<Vec<_>>();
+    let recent_job_signatures = recent_jobs
+        .iter()
+        .map(|job| (job.id, job.status.clone(), job.finished_at))
+        .collect::<Vec<_>>();
+    let recent_alert_counts = recent_alerts
+        .counts_by_type
+        .iter()
+        .map(|item| (item.alert_type.clone(), item.count))
+        .collect::<Vec<_>>();
+    let recent_alert_top_groups = recent_alerts
+        .top_groups
+        .iter()
+        .map(|group| (group.id.clone(), group.count, group.last_seen))
+        .collect::<Vec<_>>();
+    let latest_request_log_id = recent_request_logs_signature.iter().map(|(id, _)| *id).max();
+    let recent_alerts_view = DashboardRecentAlertsView::from(recent_alerts.clone());
+
+    Ok(DashboardOverviewSnapshot {
+        payload: DashboardOverviewPayload {
+            summary: summary.clone().into(),
+            summary_windows: SummaryWindowsView::from(summary_windows),
+            hourly_request_window: DashboardHourlyRequestWindowView::from(hourly_request_window),
+            month_series: DashboardMonthSeriesView::from(month_series.clone()),
+            site_status: DashboardSiteStatusView {
+                remaining_quota: summary.total_quota_remaining,
+                total_quota_limit: summary.total_quota_limit,
+                active_keys: summary.active_keys,
+                quarantined_keys: summary.quarantined_keys,
+                temporary_isolated_keys: summary.temporary_isolated_keys,
+                exhausted_keys: summary.exhausted_keys,
+                available_proxy_nodes: Some(forward_proxy.available_nodes),
+                total_proxy_nodes: Some(forward_proxy.total_nodes),
+            },
+            forward_proxy: DashboardForwardProxyView {
+                available_nodes: Some(forward_proxy.available_nodes),
+                total_nodes: Some(forward_proxy.total_nodes),
+            },
+            trend,
+            exhausted_keys: exhausted_keys.into_iter().map(ApiKeyView::from_list).collect(),
+            recent_logs,
+            recent_jobs: recent_jobs.into_iter().map(JobLogView::from).collect(),
+            disabled_tokens: disabled_tokens.into_iter().map(AuthTokenView::from).collect(),
+            token_coverage: token_coverage.to_string(),
+            recent_alerts: recent_alerts_view,
         },
-        forward_proxy: DashboardForwardProxyView {
-            available_nodes: Some(forward_proxy.available_nodes),
-            total_nodes: Some(forward_proxy.total_nodes),
+        month_series,
+        recent_request_logs_signature,
+        freshness: DashboardOverviewFreshness {
+            summary: [
+                summary.total_requests,
+                summary.success_count,
+                summary.error_count,
+                summary.quota_exhausted_count,
+                summary.active_keys,
+                summary.exhausted_keys,
+                summary.quarantined_keys,
+                summary.temporary_isolated_keys,
+                summary.total_quota_limit,
+                summary.total_quota_remaining,
+            ],
+            summary_last_activity: summary.last_activity,
+            forward_proxy: Some((forward_proxy.available_nodes, forward_proxy.total_nodes)),
+            exhausted_keys: exhausted_key_ids,
+            latest_quota_sync_sample_at: state.proxy.latest_dashboard_quota_sync_sample_at().await?,
+            latest_request_log_id,
+            recent_jobs: recent_job_signatures,
+            disabled_tokens: disabled_token_ids,
+            disabled_tokens_error,
+            disabled_tokens_truncated: disabled_token_truncated,
+            recent_alerts_total_events: recent_alerts.total_events,
+            recent_alerts_grouped_count: recent_alerts.grouped_count,
+            recent_alerts_counts: recent_alert_counts,
+            recent_alerts_top_groups: recent_alert_top_groups,
+            request_log_retention_days,
+            hourly_window_anchor,
         },
-        trend,
-        exhausted_keys: exhausted_keys.into_iter().map(ApiKeyView::from_list).collect(),
-        recent_logs,
-        recent_jobs: recent_jobs.into_iter().map(JobLogView::from).collect(),
-        disabled_tokens: disabled_tokens.into_iter().map(AuthTokenView::from).collect(),
-        token_coverage: token_coverage.to_string(),
-        recent_alerts: DashboardRecentAlertsView::from(recent_alerts),
     })
 }
 
-async fn build_snapshot_event(state: &Arc<AppState>) -> Option<Event> {
-    let overview = build_dashboard_overview_payload(state).await.ok()?;
-    let payload = DashboardSnapshot {
-        keys: overview.exhausted_keys.clone(),
-        logs: overview.recent_logs.clone(),
-        overview,
-    };
-
-    let json = serde_json::to_string(&payload).ok()?;
-    Some(Event::default().event("snapshot").data(json))
-}
-
-async fn compute_signatures(
+async fn compute_dashboard_overview_freshness(
     state: &Arc<AppState>,
-) -> Result<(Option<SummarySig>, Option<i64>), ()> {
-    const DASHBOARD_HOURLY_BUCKET_SECS: i64 = 3600;
-    let summary = state.proxy.summary().await.map_err(|_| ())?;
-    let summary_windows = state.proxy.summary_windows().await.map_err(|_| ())?;
-    let month_series = state
-        .proxy
-        .dashboard_month_series(&summary_windows)
-        .await
-        .map_err(|_| ())?;
-    let tavily_hikari::SummaryWindows {
-        today,
-        yesterday,
-        month,
-        today_start,
-        yesterday_start,
-        month_start,
-        ..
-    } = summary_windows;
-    let forward_proxy = state
-        .proxy
-        .get_forward_proxy_dashboard_summary()
-        .await
-        .map_err(|_| ())?;
-    let latest_id = state
-        .proxy
-        .latest_visible_request_log_id()
-        .await
-        .map_err(|_| ())?;
-    let (request_log_retention_days, recent_request_logs) = state
+) -> Result<DashboardOverviewFreshness, ProxyError> {
+    let summary = state.proxy.summary().await?;
+    let forward_proxy = state.proxy.get_forward_proxy_dashboard_summary().await?;
+    let (request_log_retention_days, recent_request_logs_signature) = state
         .proxy
         .recent_request_log_signature(DASHBOARD_RECENT_LOGS_LIMIT)
-        .await
-        .map_err(|_| ())?;
+        .await?;
+    let latest_request_log_id = recent_request_logs_signature.iter().map(|(id, _)| *id).max();
     let exhausted_keys = state
         .proxy
-        .list_dashboard_exhausted_key_ids(DASHBOARD_EXHAUSTED_KEYS_LIMIT)
+        .list_dashboard_exhausted_key_metrics(DASHBOARD_EXHAUSTED_KEYS_LIMIT)
         .await
-        .unwrap_or_default();
+        .unwrap_or_default()
+        .into_iter()
+        .map(|key| key.id)
+        .collect::<Vec<_>>();
     let (disabled_tokens, disabled_tokens_error) = match state
         .proxy
         .list_dashboard_disabled_token_ids(DASHBOARD_DISABLED_TOKENS_QUERY_LIMIT)
@@ -1269,18 +1332,141 @@ async fn compute_signatures(
             counts_by_type: tavily_hikari::default_alert_type_counts(),
             top_groups: Vec::new(),
         });
-    let hourly_window_anchor = state
-        .proxy
-        .backend_time()
-        .now_ts()
-        .div_euclid(DASHBOARD_HOURLY_BUCKET_SECS)
-        .saturating_mul(DASHBOARD_HOURLY_BUCKET_SECS);
-    let disabled_token_ids = disabled_tokens
-        .iter()
-        .take(DASHBOARD_DISABLED_TOKENS_LIMIT)
-        .cloned()
-        .collect::<Vec<_>>();
-    let disabled_token_truncated = disabled_tokens.len() > DASHBOARD_DISABLED_TOKENS_LIMIT;
+    Ok(DashboardOverviewFreshness {
+        summary: [
+            summary.total_requests,
+            summary.success_count,
+            summary.error_count,
+            summary.quota_exhausted_count,
+            summary.active_keys,
+            summary.exhausted_keys,
+            summary.quarantined_keys,
+            summary.temporary_isolated_keys,
+            summary.total_quota_limit,
+            summary.total_quota_remaining,
+        ],
+        summary_last_activity: summary.last_activity,
+        forward_proxy: Some((forward_proxy.available_nodes, forward_proxy.total_nodes)),
+        exhausted_keys,
+        latest_quota_sync_sample_at: state.proxy.latest_dashboard_quota_sync_sample_at().await?,
+        latest_request_log_id,
+        recent_jobs,
+        disabled_tokens: disabled_tokens
+            .iter()
+            .take(DASHBOARD_DISABLED_TOKENS_LIMIT)
+            .cloned()
+            .collect(),
+        disabled_tokens_error,
+        disabled_tokens_truncated: disabled_tokens.len() > DASHBOARD_DISABLED_TOKENS_LIMIT,
+        recent_alerts_total_events: recent_alerts.total_events,
+        recent_alerts_grouped_count: recent_alerts.grouped_count,
+        recent_alerts_counts: recent_alerts
+            .counts_by_type
+            .into_iter()
+            .map(|item| (item.alert_type, item.count))
+            .collect(),
+        recent_alerts_top_groups: recent_alerts
+            .top_groups
+            .into_iter()
+            .map(|group| (group.id, group.count, group.last_seen))
+            .collect(),
+        request_log_retention_days,
+        hourly_window_anchor: state
+            .proxy
+            .backend_time()
+            .now_ts()
+            .div_euclid(3600)
+            .saturating_mul(3600),
+    })
+}
+
+async fn load_dashboard_overview_snapshot(
+    state: &Arc<AppState>,
+) -> Result<DashboardOverviewSnapshot, ProxyError> {
+    loop {
+        let cache_handle = dashboard_overview_cache_for_state(state.as_ref());
+        let waiter = {
+            let cache = cache_handle.lock().await;
+            if let Some(cached) = cache.cached.as_ref()
+                && cached.loaded_at.elapsed() <= DASHBOARD_OVERVIEW_SINGLEFLIGHT_GRACE
+            {
+                return Ok(cached.snapshot.clone());
+            }
+            if cache.loading {
+                Some(cache.notify.clone().notified_owned())
+            } else {
+                None
+            }
+        };
+
+        if let Some(waiter) = waiter {
+            waiter.await;
+            continue;
+        }
+
+        let freshness = compute_dashboard_overview_freshness(state).await?;
+
+        let waiter = {
+            let mut cache = cache_handle.lock().await;
+            if let Some(cached) = cache.cached.as_ref()
+            {
+                let loaded_recently =
+                    cached.loaded_at.elapsed() <= DASHBOARD_OVERVIEW_SINGLEFLIGHT_GRACE;
+                if cached.freshness == freshness || loaded_recently {
+                    return Ok(cached.snapshot.clone());
+                }
+            }
+            if cache.loading {
+                Some(cache.notify.clone().notified_owned())
+            } else {
+                cache.loading = true;
+                None
+            }
+        };
+
+        if let Some(waiter) = waiter {
+            waiter.await;
+            continue;
+        }
+
+        let result = build_dashboard_overview_payload(state).await.map(|mut snapshot| {
+            snapshot.freshness = freshness.clone();
+            snapshot
+        });
+        let mut cache = cache_handle.lock().await;
+        cache.loading = false;
+        if let Ok(snapshot) = result.as_ref() {
+            cache.cached = Some(CachedDashboardOverviewSnapshot {
+                snapshot: snapshot.clone(),
+                freshness: freshness.clone(),
+                loaded_at: std::time::Instant::now(),
+            });
+        }
+        cache.notify.notify_waiters();
+        return result;
+    }
+}
+
+async fn build_snapshot_event(state: &Arc<AppState>) -> Option<Event> {
+    let overview = load_dashboard_overview_snapshot(state).await.ok()?;
+    let payload = DashboardSnapshot {
+        keys: overview.payload.exhausted_keys.clone(),
+        logs: overview.payload.recent_logs.clone(),
+        overview: overview.payload,
+    };
+
+    let json = serde_json::to_string(&payload).ok()?;
+    Some(Event::default().event("snapshot").data(json))
+}
+
+async fn compute_signatures(
+    state: &Arc<AppState>,
+) -> Result<(Option<SummarySig>, Option<i64>), ()> {
+    let overview = load_dashboard_overview_snapshot(state).await.map_err(|_| ())?;
+    let summary = &overview.payload.summary;
+    let summary_windows = &overview.payload.summary_windows;
+    let month_series = &overview.month_series;
+    let latest_id = overview.freshness.latest_request_log_id;
     let serialize_month_series_point = |point: tavily_hikari::DashboardMonthSeriesPoint| -> [i64; 11] {
         [
             point.bucket_start,
@@ -1311,90 +1497,100 @@ async fn compute_signatures(
         ],
         summary_last_activity: summary.last_activity,
         today: [
-            today.total_requests,
-            today.success_count,
-            today.error_count,
-            today.quota_exhausted_count,
-            today.valuable_success_count,
-            today.valuable_failure_count,
-            today.other_success_count,
-            today.other_failure_count,
-            today.unknown_count,
-            today.upstream_exhausted_key_count,
-            today.quota_charge.local_estimated_credits,
-            today.quota_charge.upstream_actual_credits,
-            today.quota_charge.sampled_key_count,
-            today.quota_charge.stale_key_count,
-            today.quota_charge.latest_sync_at.unwrap_or_default(),
+            summary_windows.today.total_requests,
+            summary_windows.today.success_count,
+            summary_windows.today.error_count,
+            summary_windows.today.quota_exhausted_count,
+            summary_windows.today.valuable_success_count,
+            summary_windows.today.valuable_failure_count,
+            summary_windows.today.other_success_count,
+            summary_windows.today.other_failure_count,
+            summary_windows.today.unknown_count,
+            summary_windows.today.upstream_exhausted_key_count,
+            summary_windows.today.quota_charge.local_estimated_credits,
+            summary_windows.today.quota_charge.upstream_actual_credits,
+            summary_windows.today.quota_charge.sampled_key_count,
+            summary_windows.today.quota_charge.stale_key_count,
+            summary_windows.today.quota_charge.latest_sync_at.unwrap_or_default(),
         ],
         yesterday: [
-            yesterday.total_requests,
-            yesterday.success_count,
-            yesterday.error_count,
-            yesterday.quota_exhausted_count,
-            yesterday.valuable_success_count,
-            yesterday.valuable_failure_count,
-            yesterday.other_success_count,
-            yesterday.other_failure_count,
-            yesterday.unknown_count,
-            yesterday.upstream_exhausted_key_count,
-            yesterday.quota_charge.local_estimated_credits,
-            yesterday.quota_charge.upstream_actual_credits,
-            yesterday.quota_charge.sampled_key_count,
-            yesterday.quota_charge.stale_key_count,
-            yesterday.quota_charge.latest_sync_at.unwrap_or_default(),
+            summary_windows.yesterday.total_requests,
+            summary_windows.yesterday.success_count,
+            summary_windows.yesterday.error_count,
+            summary_windows.yesterday.quota_exhausted_count,
+            summary_windows.yesterday.valuable_success_count,
+            summary_windows.yesterday.valuable_failure_count,
+            summary_windows.yesterday.other_success_count,
+            summary_windows.yesterday.other_failure_count,
+            summary_windows.yesterday.unknown_count,
+            summary_windows.yesterday.upstream_exhausted_key_count,
+            summary_windows.yesterday.quota_charge.local_estimated_credits,
+            summary_windows.yesterday.quota_charge.upstream_actual_credits,
+            summary_windows.yesterday.quota_charge.sampled_key_count,
+            summary_windows.yesterday.quota_charge.stale_key_count,
+            summary_windows.yesterday.quota_charge.latest_sync_at.unwrap_or_default(),
         ],
         month: [
-            month.total_requests,
-            month.success_count,
-            month.error_count,
-            month.quota_exhausted_count,
-            month.valuable_success_count,
-            month.valuable_failure_count,
-            month.other_success_count,
-            month.other_failure_count,
-            month.unknown_count,
-            month.upstream_exhausted_key_count,
-            month.new_keys,
-            month.new_quarantines,
-            month.quota_charge.local_estimated_credits,
-            month.quota_charge.upstream_actual_credits,
-            month.quota_charge.sampled_key_count,
-            month.quota_charge.stale_key_count,
-            month.quota_charge.latest_sync_at.unwrap_or_default(),
+            summary_windows.month.total_requests,
+            summary_windows.month.success_count,
+            summary_windows.month.error_count,
+            summary_windows.month.quota_exhausted_count,
+            summary_windows.month.valuable_success_count,
+            summary_windows.month.valuable_failure_count,
+            summary_windows.month.other_success_count,
+            summary_windows.month.other_failure_count,
+            summary_windows.month.unknown_count,
+            summary_windows.month.upstream_exhausted_key_count,
+            summary_windows.month.new_keys,
+            summary_windows.month.new_quarantines,
+            summary_windows.month.quota_charge.local_estimated_credits,
+            summary_windows.month.quota_charge.upstream_actual_credits,
+            summary_windows.month.quota_charge.sampled_key_count,
+            summary_windows.month.quota_charge.stale_key_count,
+            summary_windows.month.quota_charge.latest_sync_at.unwrap_or_default(),
         ],
         month_series_current: month_series
             .current
-            .into_iter()
+            .iter()
+            .cloned()
             .map(serialize_month_series_point)
             .collect(),
         month_series_comparison: month_series
             .comparison
-            .into_iter()
+            .iter()
+            .cloned()
             .map(serialize_month_series_point)
             .collect(),
-        summary_window_starts: [today_start, yesterday_start, month_start],
-        proxy: Some((forward_proxy.available_nodes, forward_proxy.total_nodes)),
-        exhausted_keys,
-        disabled_tokens: disabled_token_ids,
-        disabled_tokens_error,
-        disabled_tokens_truncated: disabled_token_truncated,
-        recent_jobs,
-        request_log_retention_days,
-        recent_request_logs,
-        hourly_window_anchor,
-        recent_alerts_total_events: recent_alerts.total_events,
-        recent_alerts_grouped_count: recent_alerts.grouped_count,
-        recent_alerts_counts: recent_alerts
-            .counts_by_type
-            .into_iter()
-            .map(|item| (item.alert_type, item.count))
+        summary_window_starts: [
+            summary_windows.today_start,
+            summary_windows.yesterday_start,
+            summary_windows.month_start,
+        ],
+        proxy: Some((
+            overview
+                .payload
+                .forward_proxy
+                .available_nodes
+                .unwrap_or_default(),
+            overview.payload.forward_proxy.total_nodes.unwrap_or_default(),
+        )),
+        exhausted_keys: overview
+            .payload
+            .exhausted_keys
+            .iter()
+            .map(|key| key.id.clone())
             .collect(),
-        recent_alerts_top_groups: recent_alerts
-            .top_groups
-            .into_iter()
-            .map(|group| (group.id, group.count, group.last_seen))
-            .collect(),
+        disabled_tokens: overview.freshness.disabled_tokens.clone(),
+        disabled_tokens_error: overview.freshness.disabled_tokens_error,
+        disabled_tokens_truncated: overview.freshness.disabled_tokens_truncated,
+        recent_jobs: overview.freshness.recent_jobs.clone(),
+        request_log_retention_days: overview.freshness.request_log_retention_days,
+        recent_request_logs: overview.recent_request_logs_signature.clone(),
+        hourly_window_anchor: overview.freshness.hourly_window_anchor,
+        recent_alerts_total_events: overview.freshness.recent_alerts_total_events,
+        recent_alerts_grouped_count: overview.freshness.recent_alerts_grouped_count,
+        recent_alerts_counts: overview.freshness.recent_alerts_counts.clone(),
+        recent_alerts_top_groups: overview.freshness.recent_alerts_top_groups.clone(),
     });
     Ok((sig, latest_id))
 }

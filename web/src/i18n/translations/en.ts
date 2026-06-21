@@ -234,6 +234,7 @@ export const EN: TranslationShape = {
         todayDescription: 'Core request signals up to now, compared with the same time yesterday.',
         monthTitle: 'This Month',
         monthDescription: 'Month-to-date request totals in one compact view.',
+        monthComparisonEmpty: 'No retained previous-month comparison data.',
         currentStatusTitle: 'Current Site Status',
         currentStatusDescription: 'Live quota, active keys, and pool health right now.',
         deltaFromYesterday: 'vs same time yesterday',

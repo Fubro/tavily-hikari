@@ -45,7 +45,9 @@
 - `今日` 的 `上游 Key 耗尽` 卡固定使用总览专用标签，并显示 `今日新增` 副标题；其主值与比较值都基于窗口内由系统自动标记 exhausted 的唯一 `key_id` 数量，而不是请求次数。
 - 摘要卡背景图必须展示对应完整周期的轴：`今日` 背景图覆盖服务端本地自然日完整 24 小时，`本月` 背景图覆盖服务端本地自然月完整日历周期；当前时刻之后的当前周期槽位必须保留为空（`null`），不得填 `0`、不得裁掉未来空间。
 - `本月` 背景图与其 `previous-month comparison line` 必须消费 overview / snapshot 提供的专用月度日粒度序列，不得复用 `hourlyRequestWindow` 或在前端从 49h 小时窗推断自然月形状。
+- `monthSeries.current` 与 `monthSeries.comparison` 的绘制必须共用“当前月自然日轴”；comparison 通过后端提供的 `displayBucketStart` 对齐到当前月对应日，而不是直接拿上月原始时间戳作横轴。
 - 背景图的“完整周期显示轴”与主值 / delta 的“same-time 窗口”是两回事：主值和 delta 仍按现有截至当前时刻的统计窗口计算，背景图只负责把完整周期铺满。
+- 若存在 retained previous-month data，则 `monthSeries.comparison` 必须返回非空累计点并稳定显示参考虚线；若不存在 retained previous-month data，则 overview / snapshot 必须返回显式空 `comparison`，并由本月卡片展示明确的“无上月对比数据”提示，不能表现成像坏掉一样的静默消失。
 - 当 `yesterday.total_requests = 0` 且 `today.total_requests > 0` 时，`成功` / `错误` 不伪造百分点差，改为“昨日无基线”兜底文案并使用中性态。
 - 当 `today.total_requests = 0` 且 `yesterday.total_requests = 0` 时，`成功` / `错误` 的“较昨日同刻”显示 `0.0` 个百分点（或对应语言单位）并保持 `flat`。
 - `本月` 指标卡只显示月累计值与本月占比，不显示昨日比较；其中 `上游 Key 耗尽` 卡固定显示 `本月新增`，不再显示请求占比副标题。
@@ -60,6 +62,8 @@
 - `今日` 的 `成功` 与 `错误` 指标能正确显示相对昨日同一时刻的成功率/错误率百分点差，而不是原始次数差。
 - `今日` 的 `总请求数` 与 `上游 Key 耗尽` 继续显示较昨日同一时刻的数量差与方向，其中 `上游 Key 耗尽` 只统计系统自动标记 exhausted 的唯一上游 Key 数。
 - `本月` 的四项指标能正确显示月累计值；其中 `上游 Key 耗尽` 使用 `本月新增` 副标题且不再显示请求占比。
+- 当存在上月留存数据时，`/api/dashboard/overview` 返回的 `monthSeries.comparison` 非空、长度与当前月显示轴兼容，且本月卡背景可见 comparison 虚线。
+- 当不存在上月留存数据时，`/api/dashboard/overview` 返回的 `monthSeries.comparison` 为显式空数组，本月卡显示“无上月对比数据”提示。
 - `站点当前状态` 保留 `剩余可用`、`活跃密钥`、`隔离中`、`已耗尽` 四项实时快照。
 - `GET /api/summary/windows` 在空窗口时返回 `0`，`today` 与 `yesterday` 的窗口时长相同，昨日对比窗口不会混入昨日同刻之后的数据，包括截止分钟内的后续请求；本月窗口累计到当前时刻，并继续向下游保留请求级 `quota_exhausted_count` 兼容字段。
 - `cargo test`、`cargo clippy -- -D warnings`、`cd web && bun run build`、`cd web && bun run build-storybook` 全部通过。
@@ -69,6 +73,7 @@
 - 当前实现将摘要区重构为“左侧今日主块 + 右侧本月/站点当前状态侧栏”，并在今日块内补入较昨日变化清单，避免桌面端出现大面积空白。
 - 后续口径修正已将 `成功` / `错误` 的昨日对比改为成功率/错误率的百分点比较，以避免高流量日把单纯次数变化误读为质量波动。
 - 最新同步将 dashboard 的耗尽卡切到唯一上游 Key 生命周期口径：`今日` 显示 `今日新增 + 较昨日同刻`，`本月` 显示 `本月新增`，而请求级 `quota_exhausted_count` 继续保留给日志与详情页。
+- 本轮同步把本月 comparison 线固定到当前月自然日轴，并补充无 retained previous-month data 时的显式空态，避免“看不到上个月”被误解成设计如此。
 
 ![管理仪表盘摘要区成果截图](./assets/dashboard-summary-result.png)
 
@@ -83,5 +88,8 @@
 - source_type: `storybook_canvas`; story_id_or_title: `Admin/Components/DashboardOverview/ZhDarkEvidence`; state: `yesterday same-time window and polished today metric grid`; evidence_note: 验证今日/昨日同刻窗口对齐、今日明细两列三行卡片均分主块剩余高度、右下角信息组对齐、长 badge 单行紧凑展示，以及 `主要` / `次要` marker 不遮挡背景趋势线。
   ![管理仪表盘：昨日同刻窗口与今日明细卡片 polish](./assets/dashboard-yesterday-same-time-window.png)
 
-- source_type: `storybook_canvas`; story_id_or_title: `Admin/Components/DashboardOverview/ZhDarkEvidence`; state: `monthSeries full natural-month axis with previous-month comparison line`; evidence_note: 验证“本月”摘要卡背景已切换到专用月度日粒度序列，完整铺满自然月轴；未来日期保持空槽，且 `previous-month comparison line` 恢复可见，不再受 49h hourly window 截断。
-  ![管理仪表盘：本月完整月轴与上月参考线恢复](./assets/admin-dashboard-month-series-summary-storybook.png)
+- source_type: `storybook_canvas`; story_id_or_title: `Admin/Components/DashboardOverview/ZhDarkEvidence`; state: `monthSeries full natural-month axis with visible previous-month comparison`; evidence_note: 验证“本月”摘要卡背景使用当前月自然日轴，并能稳定显示上月 comparison 虚线，不再被上月原始时间戳错位到视窗外。
+  ![管理仪表盘：本月完整月轴与上月参考线恢复](./assets/month-series-comparison-visible-proof.png)
+
+- source_type: `storybook_canvas`; story_id_or_title: `Admin/Components/DashboardOverview/NoPreviousMonthComparison`; state: `explicit empty comparison state`; evidence_note: 验证无上月留存数据时，本月卡不再静默丢失 comparison，而是显示明确空态提示。
+  ![管理仪表盘：无上月留存数据时的显式空态](./assets/month-series-comparison-empty-proof.png)

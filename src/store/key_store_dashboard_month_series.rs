@@ -1,4 +1,21 @@
 impl KeyStore {
+    fn dashboard_month_series_point_has_visible_value(point: &DashboardMonthSeriesPoint) -> bool {
+        [
+            point.total,
+            point.valuable_success,
+            point.valuable_failure,
+            point.other_success,
+            point.other_failure,
+            point.unknown,
+            point.upstream_exhausted,
+            point.new_keys,
+            point.new_quarantines,
+        ]
+        .into_iter()
+        .flatten()
+        .any(|value| value > 0)
+    }
+
     pub(crate) fn collect_bucket_ranges<F>(
         range_start: i64,
         range_end: i64,
@@ -218,13 +235,28 @@ impl KeyStore {
             summary_windows.month_end,
         )
         .await?;
-        let comparison = Self::fetch_dashboard_month_series_points_tx(
+        let mut comparison = Self::fetch_dashboard_month_series_points_tx(
             &mut tx,
             summary_windows.previous_month_start,
             summary_windows.previous_month_end,
             summary_windows.previous_month_end,
         )
         .await?;
+        for (index, point) in comparison.iter_mut().enumerate() {
+            point.display_bucket_start = current
+                .get(index)
+                .map(|current_point| {
+                    current_point
+                        .display_bucket_start
+                        .unwrap_or(current_point.bucket_start)
+                });
+        }
+        if !comparison
+            .iter()
+            .any(Self::dashboard_month_series_point_has_visible_value)
+        {
+            comparison.clear();
+        }
 
         tx.commit().await?;
 

@@ -24,6 +24,7 @@ export interface DashboardCardBackdropSeries {
   baseline?: number
   color?: string
   comparisonColor?: string
+  hasVisibleComparison?: boolean
 }
 
 export type DashboardCardBackdropMap = Partial<Record<DashboardBackdropMetricKey, DashboardCardBackdropSeries>>
@@ -241,16 +242,39 @@ function buildMonthSeriesIncrements(
   })
 }
 
+function buildMonthSeriesIncrementMap(
+  points: ReadonlyArray<DashboardMonthSeriesPoint>,
+  metricKey: DashboardBackdropMetricKey,
+): Map<number, number | null> {
+  let previous: number | null = null
+  const mapped = new Map<number, number | null>()
+  for (const point of points) {
+    const axisStart = point.displayBucketStart ?? point.bucketStart
+    const current = getMonthSeriesMetricValue(point, metricKey)
+    if (current == null) {
+      mapped.set(axisStart, null)
+      continue
+    }
+    const increment = previous == null ? current : current - previous
+    previous = current
+    mapped.set(axisStart, Math.max(0, increment))
+  }
+  return mapped
+}
+
 export function buildMonthSeriesBackdropSeries(
   monthSeries: DashboardMonthSeries,
   metricKey: DashboardBackdropMetricKey = 'total',
-): { current: Array<number | null>; comparison: Array<number | null> } {
+): { current: Array<number | null>; comparison: Array<number | null>; hasVisibleComparison: boolean } {
   const current = buildMonthSeriesIncrements(monthSeries.current, metricKey)
-  const comparison = buildMonthSeriesIncrements(monthSeries.comparison, metricKey)
-  const slotCount = Math.max(current.length, comparison.length)
+  const currentAxisStarts = monthSeries.current.map((point) => point.displayBucketStart ?? point.bucketStart)
+  const comparisonByAxisStart = buildMonthSeriesIncrementMap(monthSeries.comparison, metricKey)
+  const comparison = currentAxisStarts.map((axisStart) => comparisonByAxisStart.get(axisStart) ?? null)
+  const slotCount = current.length
   return {
     current: Array.from({ length: slotCount }, (_, index) => current[index] ?? null),
     comparison: Array.from({ length: slotCount }, (_, index) => comparison[index] ?? null),
+    hasVisibleComparison: comparison.some((value) => typeof value === 'number'),
   }
 }
 

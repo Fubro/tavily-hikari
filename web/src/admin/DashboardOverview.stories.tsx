@@ -51,6 +51,7 @@ const strings = {
   todayDescription: 'Request-value signals up to now, compared with the same time yesterday.',
   monthTitle: 'This Month',
   monthDescription: 'Month-to-date request taxonomy and lifecycle totals in one compact view.',
+  monthComparisonEmpty: 'No retained previous-month comparison data.',
   currentStatusTitle: 'Current Site Status',
   currentStatusDescription: 'Live quota, active keys, and pool health right now.',
   deltaFromYesterday: 'vs same time yesterday',
@@ -405,7 +406,7 @@ const monthSeries: DashboardMonthSeries = {
     ][index]
     return {
       bucketStart: previousMonthStart + index * 24 * 3600,
-      displayBucketStart: previousMonthStart + index * 24 * 3600,
+      displayBucketStart: summaryWindows.month_start + index * 24 * 3600,
       total,
       valuableSuccess: Math.round(total * 0.661),
       valuableFailure: Math.round(total * 0.115),
@@ -417,6 +418,11 @@ const monthSeries: DashboardMonthSeries = {
       newQuarantines: index === 11 ? null : Math.max(0, Math.floor(index / 9)),
     }
   }),
+}
+
+const monthSeriesWithoutComparison: DashboardMonthSeries = {
+  current: monthSeries.current,
+  comparison: [],
 }
 
 const defaultHourlyRequestWindow = buildDashboardHourlyRequestWindowFixture({
@@ -506,6 +512,7 @@ const zhStrings = {
   todayDescription: '按调用价值查看截至当前的请求表现，并直接对比昨日同刻。',
   monthTitle: '本月',
   monthDescription: '把本月累计的请求价值分类与生命周期指标压缩到同一组卡片里。',
+  monthComparisonEmpty: '上月暂无可用对比数据。',
   currentStatusTitle: '站点当前状态',
   currentStatusDescription: '当前额度、活跃密钥和代理池健康度快照。',
   deltaFromYesterday: '较昨日同刻',
@@ -792,6 +799,28 @@ export const Default: Story = {
     onOpenModule: () => {},
     onOpenToken: () => {},
     onOpenKey: () => {},
+  },
+}
+
+export const NoPreviousMonthComparison: Story = {
+  args: {
+    ...Default.args,
+    monthSeries: monthSeriesWithoutComparison,
+  },
+  parameters: {
+    docs: {
+      description: {
+        story:
+          'Explicit empty-state proof for the month comparison backdrop when no retained previous-month data is available.',
+      },
+    },
+  },
+  play: async ({ canvasElement }) => {
+    await new Promise((resolve) => window.setTimeout(resolve, 50))
+    const text = canvasElement.ownerDocument.body.textContent ?? ''
+    if (!text.includes(strings.monthComparisonEmpty)) {
+      throw new Error(`Expected missing previous-month story to contain: ${strings.monthComparisonEmpty}`)
+    }
   },
 }
 

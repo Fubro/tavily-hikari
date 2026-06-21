@@ -1,4 +1,15 @@
 impl KeyStore {
+    pub(crate) async fn fetch_latest_dashboard_quota_sync_sample_at(
+        &self,
+    ) -> Result<Option<i64>, ProxyError> {
+        sqlx::query_scalar::<_, Option<i64>>(
+            "SELECT MAX(captured_at) FROM api_key_quota_sync_samples",
+        )
+        .fetch_one(&self.pool)
+        .await
+        .map_err(ProxyError::Database)
+    }
+
     pub(crate) async fn fetch_summary_windows(
         &self,
         bounds: SummaryWindowBounds,

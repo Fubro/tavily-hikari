@@ -16,6 +16,7 @@ describe('DashboardOverview Storybook coverage', () => {
     expect(dashboardStories.TypesAreaHiddenMiddleSeries).toMatchObject({})
     expect(dashboardStories.HiddenSeriesEmpty).toMatchObject({})
     expect(dashboardStories.FixedRangeWithGaps).toMatchObject({})
+    expect(dashboardStories.NoPreviousMonthComparison).toMatchObject({})
   })
 
   it('renders the empty-selection story with the updated server-time copy', () => {
@@ -55,6 +56,13 @@ describe('DashboardOverview Storybook coverage', () => {
     expect(args?.monthSeries?.comparison).toHaveLength(31)
     expect(args?.monthSeries?.current.slice(7).every((point) => point.total == null)).toBe(true)
     expect(args?.monthSeries?.comparison.some((point) => typeof point.total === 'number')).toBe(true)
+  })
+
+  it('exposes an explicit empty-state story when previous-month comparison data is absent', () => {
+    const args = dashboardStories.NoPreviousMonthComparison.args
+    expect(args?.monthSeries?.comparison).toEqual([])
+    const markup = renderToStaticMarkup(createElement(meta.component, args as never))
+    expect(markup).toContain('No retained previous-month comparison data.')
   })
 
   it('keeps the absolute charts on all-series defaults in the primary stories', () => {

@@ -395,7 +395,7 @@ describe('admin user tag api helpers', () => {
               })),
               comparison: Array.from({ length: 31 }, (_, index) => ({
                 bucketStart: 1_772_803_200 + index * 86_400,
-                displayBucketStart: 1_772_803_200 + index * 86_400,
+                displayBucketStart: 1_775_481_600 + index * 86_400,
                 total: (index + 1) * 90,
                 valuableSuccess: (index + 1) * 61,
                 valuableFailure: (index + 1) * 10,

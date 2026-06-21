@@ -37,13 +37,17 @@
 - 返回 dashboard 首屏真正需要的最小快照：
   - `summary`
   - `summaryWindows`
+  - `hourlyRequestWindow`
+  - `monthSeries`
   - `siteStatus`
   - `forwardProxy`
+  - `trend`
   - `exhaustedKeys`
   - `recentLogs`
   - `recentJobs`
   - `disabledTokens`
   - `tokenCoverage`
+  - `recentAlerts`
 - `summary` 与 `summaryWindows` 结构必须继续与既有接口保持一致。
 - `tokenCoverage` 仅允许：
   - `ok`
@@ -56,14 +60,18 @@
 - 顶层保留：
   - `summary`
   - `summaryWindows`
+  - `hourlyRequestWindow`
+  - `monthSeries`
   - `siteStatus`
   - `forwardProxy`
+  - `trend`
 - 顶层新增：
   - `exhaustedKeys`
   - `recentLogs`
   - `recentJobs`
   - `disabledTokens`
   - `tokenCoverage`
+  - `recentAlerts`
 - 为兼容历史 dashboard 客户端，继续保留 `keys` 与 `logs` 字段，但其内容改为与 `exhaustedKeys` / `recentLogs` 同步的轻量子集，不再返回旧的全量分页载荷。
 
 ### dashboard 轻量查询约束
@@ -103,6 +111,19 @@
   - 字段至少覆盖 `total/success/error/quota_exhausted`、`valuable/other/unknown` 分类、`mcp/api × billable/non_billable` 分类、`local_estimated_credits`、`updated_at`
 - `summary_windows` 与 `hourlyRequestWindow` 读路径必须优先查 rollup，不再重扫 `request_logs`。
 - dashboard overview / snapshot 对这两块数据不再使用 2 秒 TTL 缓存；当前小时写入后下一次请求或 snapshot 必须直接可见。
+- dashboard overview HTTP 与 admin SSE `snapshot` 必须经同一个 shared snapshot loader；同一 freshness wave 内只允许构建一份 overview，再由 HTTP / SSE 共用。
+- shared snapshot 的 freshness 至少覆盖：
+  - `summary` 计数与 `summary.last_activity`
+  - `forwardProxy` 节点可用数 / 总数
+  - `recent_request_logs_signature` 与 request-log retention 口径
+  - `exhaustedKeys` ID 子集
+  - `recentJobs` 签名子集
+  - `disabledTokens` ID 子集与 `tokenCoverage`
+  - `recentAlerts` 聚合结果
+  - `latest_dashboard_quota_sync_sample_at`
+  - 当前小时 anchor
+- 为避免同一波刷新里的重复构建，可以保留极短的 singleflight grace；但它只能用来折叠并发读，不能替代 freshness 失效判定。
+- `monthSeries` 稳态必须读取 `dashboard_request_rollup_buckets` 与轻量生命周期查询；只有尚未物化的极短 minute tail 允许走有界 fallback，且不得退化成整月 `observability.request_logs` 宽窗重扫。
 - dashboard HTTP / SSE overview 逻辑不得再触发：
   - logs facets 聚合
   - keys 分页 facets 聚合
@@ -144,6 +165,9 @@
   首条 `metrics` 事件复用了同一套 rollup freshness 判定，`/api/public/metrics` 首包约
   `1.44s`，SSE 首条 `metrics` 事件立即可见；同时 `/api/alerts/events` 在 SQL 侧分页/聚合改造后
   约 `0.14s` 返回。
+- `2026-06-21`：`cargo test` 全量通过，覆盖 `dashboard_overview_snapshot_is_reused_within_the_same_freshness_wave`、`dashboard_overview_returns_lightweight_segments` 与 `admin_dashboard_sse_snapshot_includes_overview_segments`；确认 HTTP overview 与 SSE snapshot 在同一 freshness wave 内复用 shared snapshot。
+- `2026-06-21`：`cargo clippy -- -D warnings` 通过。
+- `2026-06-21`：101 只读复核确认当前线上唯一数据源链路为 `/home/ivan/srv/ai/docker-compose.yml` -> 容器 `tavily-hikari` -> volume `ai-tavily-hikari-data` -> `/srv/app/data/tavily_proxy.db` + `/srv/app/data/tavily_proxy-observability.db`。容器内受控 `overview` 请求在 `2026-06-21 13:47 +08:00` 约 `4.70s` 返回，且近期 slow log 仍可见 `observability.request_logs` 相关慢语句，说明这次优化仍需经部署后才能在 101 消除热路径宽扫。
 
 ## 实现里程碑
 
@@ -176,3 +200,4 @@
 - 2026-06-20: 将 dashboard rollup freshness 合同扩展到公共 metrics / public SSE 首条
   `metrics` 读取，并将 alerts 事件/分组/summary 改为 SQL 侧有界读取，避免管理端和公共首页分别
   重新引入宽时间窗扫描。
+- 2026-06-21: 将 dashboard overview / SSE 收敛到 freshness-aware shared snapshot，显式把 `recentLogs / jobs / alerts / disabledTokens / exhaustedKeys / quota-sync sample` 纳入失效条件，并为本月 comparison 修复补齐 shared-path 回归测试。

@@ -3690,7 +3690,7 @@ export function DashboardPageCanvas({ beforeIntro }: { beforeIntro?: ReactNode }
             const total = 9_900 + index * 10_400
             return {
               bucketStart: previousMonthStart + index * 24 * 3600,
-              displayBucketStart: previousMonthStart + index * 24 * 3600,
+              displayBucketStart: summaryWindows.month_start + index * 24 * 3600,
               total,
               valuableSuccess: Math.round(total * 0.65),
               valuableFailure: Math.round(total * 0.11),

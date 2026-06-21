@@ -224,6 +224,17 @@ async fn dashboard_month_series_uses_full_natural_month_axis_and_previous_month_
 
     assert_eq!(month_series.comparison[0].total, Some(10));
     assert_eq!(month_series.comparison[1].total, Some(18));
+    assert_eq!(
+        month_series.comparison[0].display_bucket_start,
+        Some(summary_windows.month_start)
+    );
+    assert_eq!(
+        month_series.comparison[1].display_bucket_start,
+        month_series
+            .current
+            .get(1)
+            .and_then(|point| point.display_bucket_start)
+    );
     assert_eq!(month_series.comparison[0].upstream_exhausted, Some(1));
     assert_eq!(month_series.comparison[1].upstream_exhausted, Some(2));
     assert_eq!(month_series.comparison[0].new_keys, Some(1));
@@ -236,6 +247,51 @@ async fn dashboard_month_series_uses_full_natural_month_axis_and_previous_month_
             .iter()
             .take(2)
             .all(|point| point.display_bucket_start.is_some())
+    );
+
+    let _ = std::fs::remove_file(db_path);
+}
+
+#[tokio::test]
+async fn dashboard_month_series_returns_explicit_empty_comparison_when_previous_month_has_no_retained_data()
+ {
+    let db_path = temp_db_path("dashboard-month-series-empty-comparison");
+    let db_str = db_path.to_string_lossy().to_string();
+
+    let proxy = TavilyProxy::with_endpoint(
+        vec!["tvly-dashboard-month-series-empty-comparison".to_string()],
+        DEFAULT_UPSTREAM,
+        &db_str,
+    )
+    .await
+    .expect("proxy created");
+
+    let evaluation_time = Utc
+        .with_ymd_and_hms(2026, 4, 7, 12, 10, 0)
+        .single()
+        .expect("valid utc evaluation time");
+    let local_evaluation = evaluation_time.with_timezone(&Local);
+    let summary_windows = proxy
+        .summary_windows_at(local_evaluation)
+        .await
+        .expect("summary windows");
+
+    insert_dashboard_summary_rollup_day_bucket(&proxy, summary_windows.month_start, 12, 9, 2, 1)
+        .await;
+
+    let month_series = proxy
+        .key_store
+        .fetch_dashboard_month_series(&summary_windows)
+        .await
+        .expect("dashboard month series");
+
+    assert!(
+        !month_series.current.is_empty(),
+        "current month axis should still be present"
+    );
+    assert!(
+        month_series.comparison.is_empty(),
+        "previous-month comparison should be explicitly empty when no retained data exists"
     );
 
     let _ = std::fs::remove_file(db_path);
