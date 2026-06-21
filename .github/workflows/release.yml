@@ -573,10 +573,27 @@ jobs:
         run: |
           set -euo pipefail
           binary="target/${{ matrix.target }}/release/tavily-hikari"
-          file "${binary}"
+          file_output="$(file "${binary}")"
+          printf '%s\n' "${file_output}" | tee "${RUNNER_TEMP}/portable-file-${{ matrix.arch }}.log"
           ldd_output="$(ldd "${binary}" 2>&1 || true)"
           printf '%s\n' "${ldd_output}" | tee "${RUNNER_TEMP}/portable-ldd-${{ matrix.arch }}.log"
-          if grep -Eq 'libssl|libcrypto|libsqlite3|GLIBC' <<< "${ldd_output}"; then
+          readelf_dynamic="$(readelf -d "${binary}" 2>&1 || true)"
+          printf '%s\n' "${readelf_dynamic}" | tee "${RUNNER_TEMP}/portable-readelf-dynamic-${{ matrix.arch }}.log"
+          readelf_program_headers="$(readelf -l "${binary}" 2>&1 || true)"
+          printf '%s\n' "${readelf_program_headers}" | tee "${RUNNER_TEMP}/portable-readelf-program-headers-${{ matrix.arch }}.log"
+          if ! grep -Eq 'statically linked|static-pie linked' <<< "${file_output}"; then
+            echo "portable binary must be statically linked" >&2
+            exit 1
+          fi
+          if grep -q 'Requesting program interpreter' <<< "${readelf_program_headers}"; then
+            echo "portable binary unexpectedly requires a runtime loader" >&2
+            exit 1
+          fi
+          if grep -q '(NEEDED)' <<< "${readelf_dynamic}"; then
+            echo "portable binary unexpectedly exposes dynamic library dependencies" >&2
+            exit 1
+          fi
+          if grep -Eq 'libc\.so\.6|ld-linux|libssl|libcrypto|libsqlite3|GLIBC' <<< "${file_output}"$'\n'"${ldd_output}"$'\n'"${readelf_dynamic}"$'\n'"${readelf_program_headers}"; then
             echo "portable binary still exposes forbidden dynamic runtime dependencies" >&2
             exit 1
           fi
