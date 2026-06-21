@@ -1525,6 +1525,18 @@ impl HaBaselineApplySession {
             row_count: self.row_count,
         })
     }
+
+    pub async fn abort(mut self) -> Result<(), ProxyError> {
+        let rollback_result = sqlx::query("ROLLBACK").execute(&mut *self.conn).await;
+        let foreign_keys_result = sqlx::query("PRAGMA foreign_keys = ON")
+            .execute(&mut *self.conn)
+            .await;
+        match (rollback_result, foreign_keys_result) {
+            (Err(err), _) => Err(err.into()),
+            (_, Err(err)) => Err(err.into()),
+            (Ok(_), Ok(_)) => Ok(()),
+        }
+    }
 }
 
 impl HaEventsApplySession {
@@ -1612,6 +1624,11 @@ impl HaEventsApplySession {
             high_watermark: self.high_watermark,
             row_count: self.row_count,
         })
+    }
+
+    pub async fn abort(mut self) -> Result<(), ProxyError> {
+        sqlx::query("ROLLBACK").execute(&mut *self.conn).await?;
+        Ok(())
     }
 }
 

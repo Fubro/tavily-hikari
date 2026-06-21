@@ -778,14 +778,27 @@ async fn apply_ha_baseline_response_stream(
     let decoder = ZstdDecoder::new(BufReader::new(reader));
     let mut lines = BufReader::new(decoder).lines();
     let mut session = proxy.begin_ha_baseline_apply(channel).await?;
-    while let Some(line) = lines.next_line().await? {
+    loop {
+        let next_line = match lines.next_line().await {
+            Ok(next_line) => next_line,
+            Err(err) => {
+                let _ = session.abort().await;
+                return Err(err.into());
+            }
+        };
+        let Some(line) = next_line else {
+            break;
+        };
         let trimmed = line.trim();
         if trimmed.is_empty() {
             continue;
         }
-        session.apply_line(trimmed).await?;
+        if let Err(err) = session.apply_line(trimmed).await {
+            let _ = session.abort().await;
+            return Err(err.into());
+        }
     }
-    Ok(session.finish().await?)
+    session.finish().await.map_err(Into::into)
 }
 
 async fn apply_ha_events_response_stream(
@@ -800,14 +813,27 @@ async fn apply_ha_events_response_stream(
     let decoder = ZstdDecoder::new(BufReader::new(reader));
     let mut lines = BufReader::new(decoder).lines();
     let mut session = proxy.begin_ha_events_apply(channel).await?;
-    while let Some(line) = lines.next_line().await? {
+    loop {
+        let next_line = match lines.next_line().await {
+            Ok(next_line) => next_line,
+            Err(err) => {
+                let _ = session.abort().await;
+                return Err(err.into());
+            }
+        };
+        let Some(line) = next_line else {
+            break;
+        };
         let trimmed = line.trim();
         if trimmed.is_empty() {
             continue;
         }
-        session.apply_line(trimmed).await?;
+        if let Err(err) = session.apply_line(trimmed).await {
+            let _ = session.abort().await;
+            return Err(err.into());
+        }
     }
-    Ok(session.finish().await?)
+    session.finish().await.map_err(Into::into)
 }
 
 fn spawn_ha_edgeone_authority_task(state: Arc<AppState>) {

@@ -1580,6 +1580,476 @@ async fn ha_standby_sync_does_not_repeat_zero_watermark_baseline() {
 }
 
 #[tokio::test]
+async fn ha_standby_sync_recovers_after_invalid_baseline_stream() {
+    let invalid_baseline_body =
+        zstd::stream::encode_all(&b"{\"kind\":\"baseline_start\"}\nnot-json\n"[..], 0)
+            .expect("encode invalid baseline");
+    let valid_baseline_ndjson = [
+        serde_json::json!({
+            "schemaVersion": 2,
+            "kind": "baseline_start",
+            "channel": "control",
+            "nodeId": "active-retry",
+            "highWatermark": 1
+        })
+        .to_string(),
+        serde_json::json!({
+            "schemaVersion": 2,
+            "kind": "resource",
+            "channel": "control",
+            "resource": "users",
+            "data": {
+                "id": "user-ha-retry",
+                "display_name": "Retry User",
+                "username": "retry_user",
+                "active": 1,
+                "created_at": 1,
+                "updated_at": 1
+            }
+        })
+        .to_string(),
+        serde_json::json!({
+            "schemaVersion": 2,
+            "kind": "baseline_end",
+            "channel": "control",
+            "nodeId": "active-retry",
+            "highWatermark": 1,
+            "rowCount": 1
+        })
+        .to_string(),
+    ]
+    .join("\n");
+    let valid_baseline_body = zstd::stream::encode_all(valid_baseline_ndjson.as_bytes(), 0)
+        .expect("encode valid baseline");
+    let empty_events_ndjson = [
+        serde_json::json!({
+            "schemaVersion": 2,
+            "kind": "events_start",
+            "channel": "control",
+            "after": 1,
+            "limit": 1000
+        })
+        .to_string(),
+        serde_json::json!({
+            "schemaVersion": 2,
+            "kind": "events_end",
+            "channel": "control",
+            "lastSeq": 1,
+            "eventCount": 0
+        })
+        .to_string(),
+    ]
+    .join("\n");
+    let empty_events_body =
+        zstd::stream::encode_all(empty_events_ndjson.as_bytes(), 0).expect("encode events");
+
+    let baseline_requests = Arc::new(AtomicUsize::new(0));
+    let baseline_requests_for_route = baseline_requests.clone();
+    let app = Router::new()
+        .route(
+            "/api/admin/ha/baseline",
+            get(move || {
+                let invalid_baseline_body = invalid_baseline_body.clone();
+                let valid_baseline_body = valid_baseline_body.clone();
+                let baseline_requests = baseline_requests_for_route.clone();
+                async move {
+                    let attempt = baseline_requests.fetch_add(1, Ordering::SeqCst);
+                    let body = if attempt == 0 {
+                        invalid_baseline_body
+                    } else {
+                        valid_baseline_body
+                    };
+                    Response::builder()
+                        .header("content-encoding", "zstd")
+                        .body(Body::from(body))
+                        .expect("baseline response")
+                }
+            }),
+        )
+        .route(
+            "/api/admin/ha/events",
+            get(move || {
+                let empty_events_body = empty_events_body.clone();
+                async move {
+                    Response::builder()
+                        .header("content-encoding", "zstd")
+                        .body(Body::from(empty_events_body))
+                        .expect("events response")
+                }
+            }),
+        )
+        .route("/api/admin/ha/events/ack", post(|| async { StatusCode::OK }));
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let source_addr = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        axum::serve(listener, app.into_make_service())
+            .await
+            .unwrap();
+    });
+
+    let db_path = temp_db_path("ha-invalid-baseline-recovery");
+    let db_str = db_path.to_string_lossy().to_string();
+    let proxy = TavilyProxy::with_endpoint(
+        vec!["tvly-ha-invalid-baseline-recovery".to_string()],
+        DEFAULT_UPSTREAM,
+        &db_str,
+    )
+    .await
+    .expect("proxy created");
+    let ha = tavily_hikari::HaRuntime::new(tavily_hikari::HaConfig {
+        mode: tavily_hikari::HaMode::ActiveStandby,
+        node_id: "standby-invalid-baseline".to_string(),
+        ..tavily_hikari::HaConfig::default()
+    });
+    let state = Arc::new(AppState {
+        proxy: proxy.clone(),
+        static_dir: None,
+        forward_auth: ForwardAuthConfig::new(None, None, None, None),
+        forward_auth_enabled: false,
+        builtin_admin: BuiltinAdminAuth::new(false, None, None),
+        linuxdo_oauth: LinuxDoOAuthOptions::disabled(),
+        linuxdo_credit: LinuxDoCreditOptions::disabled(),
+        ha,
+        dev_open_admin: true,
+        usage_base: "http://127.0.0.1:58088".to_string(),
+        api_key_ip_geo_origin: "https://api.country.is".to_string(),
+        dashboard_overview_cache: new_dashboard_overview_cache(),
+    });
+    let source_url = format!("http://{source_addr}");
+    let client = Client::new();
+
+    for channel in [
+        tavily_hikari::HaSyncChannel::Billing,
+        tavily_hikari::HaSyncChannel::Runtime,
+    ] {
+        proxy
+            .persist_ha_sync_watermark(
+                &format!("standby_{}_baseline_applied", channel.as_str()),
+                Some(&source_url),
+                Some("standby-invalid-baseline"),
+                1,
+                Some("seeded for control-only test"),
+            )
+            .await
+            .expect("seed baseline marker");
+    }
+
+    let first_err = run_ha_standby_sync_once(&state, &client, &source_url, "test-token")
+        .await
+        .expect_err("first sync should fail");
+    let first_err_text = first_err.to_string();
+    assert!(
+        first_err_text.contains("invalid HA baseline NDJSON")
+            || first_err_text.contains("unsupported HA baseline"),
+        "unexpected first sync error: {first_err_text}"
+    );
+
+    run_ha_standby_sync_once(&state, &client, &source_url, "test-token")
+        .await
+        .expect("second sync should recover");
+
+    assert_eq!(baseline_requests.load(Ordering::SeqCst), 2);
+    assert_eq!(
+        proxy
+            .get_ha_sync_watermark("standby_control_baseline_applied")
+            .await
+            .expect("read baseline marker"),
+        Some(1)
+    );
+    assert_eq!(
+        proxy
+            .get_ha_sync_watermark("standby_control_applied_seq")
+            .await
+            .expect("read applied seq"),
+        Some(1)
+    );
+
+    let pool = connect_sqlite_test_pool(&db_str).await;
+    let fk_enabled: i64 = sqlx::query_scalar("PRAGMA foreign_keys")
+        .fetch_one(&pool)
+        .await
+        .expect("foreign_keys pragma");
+    assert_eq!(fk_enabled, 1);
+
+    sqlx::query(
+        r#"
+        INSERT INTO user_tag_bindings (user_id, tag, created_at)
+        VALUES ('missing-user', 'broken-tag', 1)
+        "#,
+    )
+    .execute(&pool)
+    .await
+    .expect_err("foreign key should still reject invalid binding");
+
+    let username: String = sqlx::query_scalar("SELECT username FROM users WHERE id = 'user-ha-retry'")
+        .fetch_one(&pool)
+        .await
+        .expect("user inserted after recovery");
+    assert_eq!(username, "retry_user");
+
+    pool.close().await;
+    let _ = std::fs::remove_file(&db_path);
+    let _ = std::fs::remove_file(db_path.with_extension("db-shm"));
+    let _ = std::fs::remove_file(db_path.with_extension("db-wal"));
+}
+
+#[tokio::test]
+async fn ha_standby_sync_recovers_after_invalid_events_stream() {
+    let valid_baseline_ndjson = [
+        serde_json::json!({
+            "schemaVersion": 2,
+            "kind": "baseline_start",
+            "channel": "control",
+            "nodeId": "active-events-retry",
+            "highWatermark": 1
+        })
+        .to_string(),
+        serde_json::json!({
+            "schemaVersion": 2,
+            "kind": "resource",
+            "channel": "control",
+            "resource": "users",
+            "data": {
+                "id": "user-ha-events-retry",
+                "display_name": "Events Retry User",
+                "username": "events_retry_user",
+                "active": 1,
+                "created_at": 1,
+                "updated_at": 1
+            }
+        })
+        .to_string(),
+        serde_json::json!({
+            "schemaVersion": 2,
+            "kind": "baseline_end",
+            "channel": "control",
+            "nodeId": "active-events-retry",
+            "highWatermark": 1,
+            "rowCount": 1
+        })
+        .to_string(),
+    ]
+    .join("\n");
+    let valid_baseline_body = zstd::stream::encode_all(valid_baseline_ndjson.as_bytes(), 0)
+        .expect("encode valid baseline");
+    let invalid_events_body = zstd::stream::encode_all(
+        &b"{\"kind\":\"events_start\"}\nnot-json\n"[..],
+        0,
+    )
+    .expect("encode invalid events");
+    let valid_events_ndjson = [
+        serde_json::json!({
+            "schemaVersion": 2,
+            "kind": "events_start",
+            "channel": "control",
+            "after": 1,
+            "limit": 1000
+        })
+        .to_string(),
+        serde_json::json!({
+            "schemaVersion": 2,
+            "kind": "event",
+            "channel": "control",
+            "event": {
+                "seq": 2,
+                "channel": "control",
+                "kind": "state",
+                "resource": "users",
+                "resourceId": "user-ha-events-retry",
+                "op": "upsert",
+                "payload": {
+                    "id": "user-ha-events-retry",
+                    "display_name": "Events Retry User 2",
+                    "username": "events_retry_user_2",
+                    "active": 1,
+                    "created_at": 1,
+                    "updated_at": 2
+                },
+                "createdAt": 2,
+                "checksum": null
+            }
+        })
+        .to_string(),
+        serde_json::json!({
+            "schemaVersion": 2,
+            "kind": "events_end",
+            "channel": "control",
+            "lastSeq": 2,
+            "eventCount": 1
+        })
+        .to_string(),
+    ]
+    .join("\n");
+    let valid_events_body =
+        zstd::stream::encode_all(valid_events_ndjson.as_bytes(), 0).expect("encode valid events");
+    let empty_events_ndjson = [
+        serde_json::json!({
+            "schemaVersion": 2,
+            "kind": "events_start",
+            "channel": "control",
+            "after": 1,
+            "limit": 1000
+        })
+        .to_string(),
+        serde_json::json!({
+            "schemaVersion": 2,
+            "kind": "events_end",
+            "channel": "control",
+            "lastSeq": 1,
+            "eventCount": 0
+        })
+        .to_string(),
+    ]
+    .join("\n");
+    let empty_events_body =
+        zstd::stream::encode_all(empty_events_ndjson.as_bytes(), 0).expect("encode empty events");
+
+    let events_requests = Arc::new(AtomicUsize::new(0));
+    let events_requests_for_route = events_requests.clone();
+    let app = Router::new()
+        .route(
+            "/api/admin/ha/baseline",
+            get(move || {
+                let valid_baseline_body = valid_baseline_body.clone();
+                async move {
+                    Response::builder()
+                        .header("content-encoding", "zstd")
+                        .body(Body::from(valid_baseline_body))
+                        .expect("baseline response")
+                }
+            }),
+        )
+        .route(
+            "/api/admin/ha/events",
+            get(move |Query(params): Query<std::collections::HashMap<String, String>>| {
+                let invalid_events_body = invalid_events_body.clone();
+                let valid_events_body = valid_events_body.clone();
+                let empty_events_body = empty_events_body.clone();
+                let events_requests = events_requests_for_route.clone();
+                async move {
+                    if params.get("channel").map(String::as_str) != Some("control") {
+                        return Response::builder()
+                            .header("content-encoding", "zstd")
+                            .body(Body::from(empty_events_body))
+                            .expect("events response");
+                    }
+                    let attempt = events_requests.fetch_add(1, Ordering::SeqCst);
+                    let body = if attempt == 0 {
+                        invalid_events_body
+                    } else {
+                        valid_events_body
+                    };
+                    Response::builder()
+                        .header("content-encoding", "zstd")
+                        .body(Body::from(body))
+                        .expect("events response")
+                }
+            }),
+        )
+        .route("/api/admin/ha/events/ack", post(|| async { StatusCode::OK }));
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let source_addr = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        axum::serve(listener, app.into_make_service())
+            .await
+            .unwrap();
+    });
+
+    let db_path = temp_db_path("ha-invalid-events-recovery");
+    let db_str = db_path.to_string_lossy().to_string();
+    let proxy = TavilyProxy::with_endpoint(
+        vec!["tvly-ha-invalid-events-recovery".to_string()],
+        DEFAULT_UPSTREAM,
+        &db_str,
+    )
+    .await
+    .expect("proxy created");
+    let ha = tavily_hikari::HaRuntime::new(tavily_hikari::HaConfig {
+        mode: tavily_hikari::HaMode::ActiveStandby,
+        node_id: "standby-invalid-events".to_string(),
+        ..tavily_hikari::HaConfig::default()
+    });
+    let state = Arc::new(AppState {
+        proxy: proxy.clone(),
+        static_dir: None,
+        forward_auth: ForwardAuthConfig::new(None, None, None, None),
+        forward_auth_enabled: false,
+        builtin_admin: BuiltinAdminAuth::new(false, None, None),
+        linuxdo_oauth: LinuxDoOAuthOptions::disabled(),
+        linuxdo_credit: LinuxDoCreditOptions::disabled(),
+        ha,
+        dev_open_admin: true,
+        usage_base: "http://127.0.0.1:58088".to_string(),
+        api_key_ip_geo_origin: "https://api.country.is".to_string(),
+        dashboard_overview_cache: new_dashboard_overview_cache(),
+    });
+    let source_url = format!("http://{source_addr}");
+    let client = Client::new();
+
+    for channel in [
+        tavily_hikari::HaSyncChannel::Billing,
+        tavily_hikari::HaSyncChannel::Runtime,
+    ] {
+        proxy
+            .persist_ha_sync_watermark(
+                &format!("standby_{}_baseline_applied", channel.as_str()),
+                Some(&source_url),
+                Some("standby-invalid-events"),
+                1,
+                Some("seeded for control-only test"),
+            )
+            .await
+            .expect("seed baseline marker");
+    }
+
+    let first_err = run_ha_standby_sync_once(&state, &client, &source_url, "test-token")
+        .await
+        .expect_err("first sync should fail");
+    let first_err_text = first_err.to_string();
+    assert!(
+        first_err_text.contains("invalid HA events NDJSON")
+            || first_err_text.contains("unsupported HA events"),
+        "unexpected first sync error: {first_err_text}"
+    );
+
+    run_ha_standby_sync_once(&state, &client, &source_url, "test-token")
+        .await
+        .expect("second sync should recover");
+
+    assert_eq!(events_requests.load(Ordering::SeqCst), 2);
+    assert_eq!(
+        proxy
+            .get_ha_sync_watermark("standby_control_applied_seq")
+            .await
+            .expect("read applied seq"),
+        Some(2)
+    );
+
+    let pool = connect_sqlite_test_pool(&db_str).await;
+    let username: String =
+        sqlx::query_scalar("SELECT username FROM users WHERE id = 'user-ha-events-retry'")
+            .fetch_one(&pool)
+            .await
+            .expect("user inserted after event recovery");
+    assert_eq!(username, "events_retry_user_2");
+
+    sqlx::query(
+        r#"
+        INSERT INTO user_tag_bindings (user_id, tag, created_at)
+        VALUES ('missing-user', 'broken-tag', 1)
+        "#,
+    )
+    .execute(&pool)
+    .await
+    .expect_err("foreign key should still reject invalid binding");
+
+    pool.close().await;
+    let _ = std::fs::remove_file(&db_path);
+    let _ = std::fs::remove_file(db_path.with_extension("db-shm"));
+    let _ = std::fs::remove_file(db_path.with_extension("db-wal"));
+}
+
+#[tokio::test]
 async fn ha_events_ack_records_peer_watermark() {
     let db_path = temp_db_path("ha-events-ack");
     let db_str = db_path.to_string_lossy().to_string();
