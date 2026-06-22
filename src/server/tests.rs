@@ -32,6 +32,7 @@ mod tests {
     mod admin_token_filters_and_maintenance;
     mod admin_users_and_tokens;
     mod alerts_and_ha;
+    mod alerts_and_ha_serving_modes;
     mod api_keys_and_registration;
     mod core_support_and_parsing;
     mod linuxdo_oauth_and_admin_keys;
