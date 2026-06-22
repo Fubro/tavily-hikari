@@ -583,6 +583,7 @@ impl TavilyProxy {
             mcp_session_request_locks: Arc::new(Mutex::new(HashMap::new())),
             low_quota_depletion_threshold: options.low_quota_depletion_threshold,
             forward_proxy_runtime_started: Arc::new(AtomicBool::new(false)),
+            forward_proxy_runtime_transition_lock: Arc::new(Mutex::new(())),
             health_readiness_grace_until: backend_time
                 .deadline_after(options.health_readiness_grace_period),
             backend_time,
@@ -617,14 +618,8 @@ impl TavilyProxy {
         Ok(proxy)
     }
 
-    pub(crate) async fn initialize_forward_proxy_runtime(&mut self) -> Result<(), ProxyError> {
-        if self
-            .forward_proxy_runtime_started
-            .swap(true, Ordering::SeqCst)
-        {
-            return Ok(());
-        }
-        let init_result = async {
+    async fn initialize_forward_proxy_runtime_inner(&self) -> Result<(), ProxyError> {
+        let init_result: Result<(), ProxyError> = async {
             let startup_started = Instant::now();
             let restored_subscription_endpoints = {
                 let manager = self.forward_proxy.lock().await;
@@ -706,16 +701,34 @@ impl TavilyProxy {
             Ok(())
         }
         .await;
-        if let Err(err) = init_result {
-            let _ = self.shutdown_forward_proxy_runtime().await;
-            self.forward_proxy_runtime_started
-                .store(false, Ordering::SeqCst);
+        init_result?;
+        self.forward_proxy_runtime_started
+            .store(true, Ordering::SeqCst);
+        Ok(())
+    }
+
+    pub(crate) async fn initialize_forward_proxy_runtime(&mut self) -> Result<(), ProxyError> {
+        if self
+            .forward_proxy_runtime_started
+            .load(Ordering::SeqCst)
+        {
+            return Ok(());
+        }
+        let _transition = self.forward_proxy_runtime_transition_lock.lock().await;
+        if self
+            .forward_proxy_runtime_started
+            .load(Ordering::SeqCst)
+        {
+            return Ok(());
+        }
+        if let Err(err) = self.initialize_forward_proxy_runtime_inner().await {
+            let _ = self.shutdown_forward_proxy_runtime_locked().await;
             return Err(err);
         }
         Ok(())
     }
 
-    pub async fn shutdown_forward_proxy_runtime(&self) -> Result<(), ProxyError> {
+    async fn shutdown_forward_proxy_runtime_locked(&self) -> Result<(), ProxyError> {
         if !self
             .forward_proxy_runtime_started
             .swap(false, Ordering::SeqCst)
@@ -736,6 +749,11 @@ impl TavilyProxy {
         }
         self.sync_forward_proxy_runtime_state(&mut manager).await?;
         Ok(())
+    }
+
+    pub async fn shutdown_forward_proxy_runtime(&self) -> Result<(), ProxyError> {
+        let _transition = self.forward_proxy_runtime_transition_lock.lock().await;
+        self.shutdown_forward_proxy_runtime_locked().await
     }
 
     pub async fn ensure_forward_proxy_runtime_started(&self) -> Result<(), ProxyError> {

@@ -299,10 +299,10 @@ fn internal_error(err: impl std::fmt::Display) -> (StatusCode, String) {
 
 fn ha_baseline_max_compressed_bytes() -> u64 {
     #[cfg(test)]
-    if let Ok(value) = std::env::var("TAVILY_TEST_HA_BASELINE_MAX_COMPRESSED_BYTES") {
-        if let Ok(parsed) = value.parse::<u64>() {
-            return parsed;
-        }
+    if let Ok(value) = std::env::var("TAVILY_TEST_HA_BASELINE_MAX_COMPRESSED_BYTES")
+        && let Ok(parsed) = value.parse::<u64>()
+    {
+        return parsed;
     }
     HA_BASELINE_MAX_COMPRESSED_BYTES
 }

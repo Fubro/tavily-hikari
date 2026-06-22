@@ -518,6 +518,101 @@ use super::upstream_support_and_manual_jobs::*;
     }
 
     #[tokio::test]
+    async fn concurrent_runtime_start_waits_for_failed_attempt_before_returning() {
+        let share_link =
+            "vless://0688fa59-e971-4278-8c03-4b35821a71dc@retry-xray.example.com:443?encryption=none#ConcurrentRetry";
+        let db_path = temp_db_path("standby-runtime-start-concurrent-retry");
+        let db_str = db_path.to_string_lossy().to_string();
+        let upstream_addr = spawn_forward_proxy_probe_upstream().await;
+        let upstream = format!("http://{}/mcp", upstream_addr);
+        let mut options = tavily_hikari::TavilyProxyOptions::from_database_path(&db_str);
+        options.health_readiness_grace_period = Duration::from_secs(0);
+        options.xray_binary = "/tmp/tavily-hikari-missing-xray".to_string();
+        let proxy = TavilyProxy::with_options_in_ha_mode::<Vec<String>, String>(
+            Vec::new(),
+            &upstream,
+            &db_str,
+            options,
+            tavily_hikari::HaMode::ActiveStandby,
+        )
+        .await
+        .expect("create standby proxy");
+        proxy
+            .update_forward_proxy_settings(
+                ForwardProxySettings {
+                    proxy_urls: vec![share_link.to_string()],
+                    subscription_urls: Vec::new(),
+                    subscription_update_interval_secs: 3600,
+                    insert_direct: false,
+                    egress_socks5_enabled: false,
+                    egress_socks5_url: String::new(),
+                },
+                true,
+            )
+            .await
+            .expect("save standby runtime settings");
+
+        let (core_db_path, _observability_db_path) = sqlite_test_layout(&db_str);
+        let mut lock_conn = sqlx::SqliteConnection::connect_with(
+            &SqliteConnectOptions::new()
+                .filename(&core_db_path)
+                .create_if_missing(false)
+                .journal_mode(SqliteJournalMode::Wal)
+                .busy_timeout(Duration::from_millis(1)),
+        )
+        .await
+        .expect("open lock connection");
+        sqlx::query("BEGIN IMMEDIATE")
+            .execute(&mut lock_conn)
+            .await
+            .expect("lock sqlite writes");
+
+        let first_proxy = proxy.clone();
+        let second_proxy = proxy.clone();
+        let (first_result, second_result) = tokio::join!(
+            async move { first_proxy.ensure_forward_proxy_runtime_started().await },
+            async move { second_proxy.ensure_forward_proxy_runtime_started().await }
+        );
+
+        for (attempt, result) in [first_result, second_result].into_iter().enumerate() {
+            let err = result.expect_err("concurrent runtime start should not succeed");
+            let err_text = err.to_string();
+            assert!(
+                err_text.contains("database is locked")
+                    || err_text.contains("database table is locked"),
+                "unexpected concurrent start error on attempt {}: {err_text}",
+                attempt + 1
+            );
+        }
+        assert!(
+            !proxy.is_forward_proxy_xray_ready().await,
+            "failed concurrent runtime start must not report xray ready"
+        );
+
+        sqlx::query("ROLLBACK")
+            .execute(&mut lock_conn)
+            .await
+            .expect("release sqlite write lock");
+        lock_conn.close().await.expect("close lock connection");
+
+        proxy
+            .ensure_forward_proxy_runtime_started()
+            .await
+            .expect("runtime start should retry successfully after concurrent failure");
+        assert!(
+            !proxy.is_forward_proxy_xray_ready().await,
+            "successful retry should still expose missing xray readiness"
+        );
+
+        proxy
+            .shutdown_forward_proxy_runtime()
+            .await
+            .expect("shutdown runtime after concurrent retry");
+
+        let _ = std::fs::remove_file(db_path);
+    }
+
+    #[tokio::test]
     async fn startup_restores_subscription_runtime_before_refreshing_slow_subscription() {
         let db_path = temp_db_path("startup-restore-subscription-runtime");
         let db_str = db_path.to_string_lossy().to_string();
