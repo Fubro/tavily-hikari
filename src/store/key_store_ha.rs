@@ -50,6 +50,8 @@ pub struct HaEventsApplySession {
     conn: sqlx::pool::PoolConnection<sqlx::Sqlite>,
     high_watermark: i64,
     row_count: usize,
+    saw_start: bool,
+    saw_end: bool,
 }
 
 const HA_SCHEMA_VERSION: i64 = 2;
@@ -948,6 +950,8 @@ impl KeyStore {
             conn,
             high_watermark: 0,
             row_count: 0,
+            saw_start: false,
+            saw_end: false,
         })
     }
 
@@ -1628,7 +1632,9 @@ impl HaEventsApplySession {
         let value: serde_json::Value = serde_json::from_str(line)
             .map_err(|err| ProxyError::Other(format!("invalid HA events NDJSON: {err}")))?;
         match value.get("kind").and_then(serde_json::Value::as_str) {
-            Some("events_start") => {}
+            Some("events_start") => {
+                self.saw_start = true;
+            }
             Some("event") => {
                 let event = value
                     .get("event")
@@ -1682,6 +1688,7 @@ impl HaEventsApplySession {
                 self.row_count += 1;
             }
             Some("events_end") => {
+                self.saw_end = true;
                 self.high_watermark = value
                     .get("lastSeq")
                     .and_then(serde_json::Value::as_i64)
@@ -1698,6 +1705,12 @@ impl HaEventsApplySession {
     }
 
     pub async fn finish(mut self) -> Result<HaApplyResult, ProxyError> {
+        if !self.saw_start || !self.saw_end {
+            let _ = sqlx::query("ROLLBACK").execute(&mut *self.conn).await;
+            return Err(ProxyError::Other(
+                "HA events must include events_start and events_end".to_string(),
+            ));
+        }
         if let Err(err) = clear_ha_outbox_suppression_on_conn(&mut self.conn).await {
             let _ = sqlx::query("ROLLBACK").execute(&mut *self.conn).await;
             return Err(err);

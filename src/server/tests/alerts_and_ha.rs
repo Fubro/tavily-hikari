@@ -2479,6 +2479,49 @@ async fn ha_apply_ndjson_wrappers_abort_failed_sessions_before_retry() {
         "unexpected events error: {events_err}"
     );
 
+    let truncated_events = [
+        serde_json::json!({
+            "schemaVersion": 2,
+            "kind": "events_start",
+            "channel": "control",
+            "afterSeq": 0
+        }),
+        serde_json::json!({
+            "schemaVersion": 2,
+            "kind": "event",
+            "channel": "control",
+            "event": {
+                "channel": "control",
+                "seq": 2,
+                "kind": "state",
+                "resource": "meta",
+                "resourceId": "request_rate_limit_v1",
+                "op": "upsert",
+                "payload": {
+                    "key": "request_rate_limit_v1",
+                    "value": "66"
+                },
+                "createdAt": 2,
+                "checksum": null
+            }
+        }),
+    ]
+    .into_iter()
+    .map(|value| value.to_string())
+    .collect::<Vec<_>>()
+    .join("\n")
+        + "\n";
+    let truncated_err = proxy
+        .apply_ha_events_ndjson(tavily_hikari::HaSyncChannel::Control, &truncated_events)
+        .await
+        .expect_err("truncated events should fail");
+    assert!(
+        truncated_err
+            .to_string()
+            .contains("HA events must include events_start and events_end"),
+        "unexpected truncated events error: {truncated_err}"
+    );
+
     let valid_events = [
         serde_json::json!({
             "schemaVersion": 2,
