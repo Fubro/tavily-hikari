@@ -41,12 +41,6 @@ struct HaEventsAckRequest {
     acked_seq: i64,
 }
 
-#[derive(Debug)]
-struct HaEventResponseItem {
-    seq: i64,
-    value: Value,
-}
-
 const HA_EVENTS_MAX_COMPRESSED_BYTES: usize = 4 * 1024 * 1024;
 const HA_BASELINE_MAX_COMPRESSED_BYTES: u64 = 64 * 1024 * 1024;
 
@@ -246,6 +240,11 @@ struct HaBaselineReader {
     export: tavily_hikari::HaApplyResult,
 }
 
+struct HaEventsReader {
+    reader: tokio::io::DuplexStream,
+    export: tavily_hikari::HaApplyResult,
+}
+
 struct CountingAsyncWriter {
     bytes: u64,
 }
@@ -354,8 +353,69 @@ async fn build_ha_baseline_reader(
     })
 }
 
+async fn build_ha_events_reader(
+    proxy: &TavilyProxy,
+    channel: tavily_hikari::HaSyncChannel,
+    after: i64,
+    limit: i64,
+) -> Result<HaEventsReader, (StatusCode, String)> {
+    let max_compressed_bytes = ha_events_max_compressed_bytes();
+    let mut preflight = proxy.begin_ha_events_read(channel).await.map_err(map_ha_export_error)?;
+    let available = preflight
+        .available_event_count(after, limit)
+        .await
+        .map_err(map_ha_export_error)?;
+    let mut event_count = available;
+    let export = loop {
+        let mut writer = CountingAsyncWriter::new();
+        let mut encoder =
+            ZstdEncoder::with_quality(&mut writer, async_compression::Level::Precise(3));
+        let export = preflight
+            .write_ndjson(after, limit, event_count, &mut encoder)
+            .await
+            .map_err(map_ha_export_error)?;
+        encoder.shutdown().await.map_err(internal_error)?;
+        let compressed_bytes = writer.bytes();
+        if compressed_bytes <= max_compressed_bytes {
+            break export;
+        }
+        if event_count <= 1 {
+            preflight.rollback().await.map_err(internal_error)?;
+            return Err((
+                StatusCode::PAYLOAD_TOO_LARGE,
+                format!(
+                    "HA events payload exceeds compressed limit: {compressed_bytes} > {max_compressed_bytes}"
+                ),
+            ));
+        }
+        event_count = event_count.div_ceil(2);
+    };
+    preflight.rollback().await.map_err(internal_error)?;
+
+    let mut session = proxy.begin_ha_events_read(channel).await.map_err(map_ha_export_error)?;
+    let (writer, reader) = tokio::io::duplex(64 * 1024);
+    tokio::spawn(async move {
+        let mut encoder = ZstdEncoder::with_quality(writer, async_compression::Level::Precise(3));
+        let result = session.write_ndjson(after, limit, event_count, &mut encoder).await;
+        if result.is_ok() {
+            let _ = encoder.shutdown().await;
+        }
+        let _ = session.rollback().await;
+    });
+    Ok(HaEventsReader { reader, export })
+}
+
 fn internal_error(err: impl std::fmt::Display) -> (StatusCode, String) {
     (StatusCode::INTERNAL_SERVER_ERROR, err.to_string())
+}
+
+fn map_ha_export_error(err: impl std::fmt::Display) -> (StatusCode, String) {
+    let message = err.to_string();
+    if message.contains("retention window") {
+        (StatusCode::GONE, message)
+    } else {
+        (StatusCode::INTERNAL_SERVER_ERROR, message)
+    }
 }
 
 fn ha_baseline_max_compressed_bytes() -> u64 {
@@ -366,6 +426,16 @@ fn ha_baseline_max_compressed_bytes() -> u64 {
         return parsed;
     }
     HA_BASELINE_MAX_COMPRESSED_BYTES
+}
+
+fn ha_events_max_compressed_bytes() -> u64 {
+    #[cfg(test)]
+    if let Ok(value) = std::env::var("TAVILY_TEST_HA_EVENTS_MAX_COMPRESSED_BYTES")
+        && let Ok(parsed) = value.parse::<u64>()
+    {
+        return parsed;
+    }
+    HA_EVENTS_MAX_COMPRESSED_BYTES as u64
 }
 
 async fn get_admin_ha_events(
@@ -389,124 +459,17 @@ async fn get_admin_ha_events(
     let channel = parse_ha_channel(query.channel.as_deref())?;
     let after = query.after.unwrap_or(0).max(0);
     let limit = query.limit.unwrap_or(100).clamp(1, 1000);
-    let events = state
-        .proxy
-        .list_ha_events_after(channel, after, limit)
-        .await
-        .map_err(|err| {
-            let message = err.to_string();
-            if message.contains("retention window") {
-                (StatusCode::GONE, message)
-            } else {
-                (StatusCode::INTERNAL_SERVER_ERROR, message)
-            }
-        })?;
-    let event_items = events
-        .iter()
-        .map(|event| HaEventResponseItem {
-            seq: event.seq,
-            value: json!({
-                "schemaVersion": 2,
-                "kind": "event",
-                "channel": channel,
-                "event": event
-            }),
-        })
-        .collect::<Vec<_>>();
-    let encoded =
-        encode_ha_events_limited(channel, after, limit, &event_items, HA_EVENTS_MAX_COMPRESSED_BYTES)?;
+    let events = build_ha_events_reader(&state.proxy, channel, after, limit).await?;
     Response::builder()
         .status(StatusCode::OK)
         .header(CONTENT_TYPE, "application/x-ndjson")
         .header("content-encoding", "zstd")
         .header("x-ha-schema-version", "2")
         .header("x-ha-channel", channel.as_str())
-        .header("x-ha-last-seq", encoded.last_seq.to_string())
-        .header("x-ha-event-count", encoded.event_count.to_string())
-        .body(Body::from(encoded.compressed))
+        .header("x-ha-last-seq", events.export.high_watermark.to_string())
+        .header("x-ha-event-count", events.export.row_count.to_string())
+        .body(Body::from_stream(ReaderStream::new(events.reader)))
         .map_err(|err| (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()))
-}
-
-struct EncodedHaEvents {
-    compressed: Vec<u8>,
-    last_seq: i64,
-    event_count: usize,
-}
-
-fn encode_ha_events_limited(
-    channel: tavily_hikari::HaSyncChannel,
-    after: i64,
-    limit: i64,
-    events: &[HaEventResponseItem],
-    max_compressed_bytes: usize,
-) -> Result<EncodedHaEvents, (StatusCode, String)> {
-    let mut event_count = events.len();
-    loop {
-        let selected = &events[..event_count];
-        let mut ndjson = String::new();
-        let mut last_seq = after;
-        append_ha_events_ndjson(&mut ndjson, channel, after, limit, selected, &mut last_seq)?;
-        let compressed = zstd::stream::encode_all(ndjson.as_bytes(), 3)
-            .map_err(|err| (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()))?;
-        if compressed.len() <= max_compressed_bytes {
-            return Ok(EncodedHaEvents {
-                compressed,
-                last_seq,
-                event_count,
-            });
-        }
-        if event_count <= 1 {
-            return Err((
-                StatusCode::PAYLOAD_TOO_LARGE,
-                format!(
-                    "HA events payload exceeds compressed limit: {} > {max_compressed_bytes}",
-                    compressed.len()
-                ),
-            ));
-        }
-        event_count = event_count.div_ceil(2);
-    }
-}
-
-fn append_ha_events_ndjson(
-    ndjson: &mut String,
-    channel: tavily_hikari::HaSyncChannel,
-    after: i64,
-    limit: i64,
-    events: &[HaEventResponseItem],
-    last_seq: &mut i64,
-) -> Result<(), (StatusCode, String)> {
-    ndjson.push_str(
-        &serde_json::to_string(&json!({
-            "schemaVersion": 2,
-            "kind": "events_start",
-            "channel": channel,
-            "after": after,
-            "limit": limit
-        }))
-        .map_err(|err| (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()))?,
-    );
-    ndjson.push('\n');
-    for event in events {
-        *last_seq = event.seq;
-        ndjson.push_str(
-            &serde_json::to_string(&event.value)
-                .map_err(|err| (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()))?,
-        );
-        ndjson.push('\n');
-    }
-    ndjson.push_str(
-        &serde_json::to_string(&json!({
-            "schemaVersion": 2,
-            "kind": "events_end",
-            "channel": channel,
-            "lastSeq": *last_seq,
-            "eventCount": events.len()
-        }))
-        .map_err(|err| (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()))?,
-    );
-    ndjson.push('\n');
-    Ok(())
 }
 
 async fn post_admin_ha_events_ack(

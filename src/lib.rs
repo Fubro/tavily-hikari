@@ -43,7 +43,7 @@ pub use models::*;
 pub use runtime_logging::{
     LegacyStdIoLevel, RuntimeLogFormat, emit_legacy_stdio_event, init_runtime_logging,
 };
-pub use store::{HaApplyResult, HaBaselineApplySession, HaEventsApplySession};
+pub use store::{HaApplyResult, HaBaselineApplySession, HaEventsApplySession, HaEventsReadSession};
 pub use tavily_proxy::*;
 
 use std::{

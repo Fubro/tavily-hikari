@@ -257,6 +257,13 @@ impl TavilyProxy {
         self.key_store.begin_ha_baseline_read(channel).await
     }
 
+    pub async fn begin_ha_events_read(
+        &self,
+        channel: HaSyncChannel,
+    ) -> Result<crate::store::HaEventsReadSession, ProxyError> {
+        self.key_store.begin_ha_events_read(channel).await
+    }
+
     pub async fn begin_ha_baseline_apply(
         &self,
         channel: HaSyncChannel,

@@ -45,6 +45,13 @@ pub struct HaBaselineReadSession {
 }
 
 #[derive(Debug)]
+pub struct HaEventsReadSession {
+    channel: HaSyncChannel,
+    conn: sqlx::pool::PoolConnection<sqlx::Sqlite>,
+    generated_at: i64,
+}
+
+#[derive(Debug)]
 pub struct HaEventsApplySession {
     channel: HaSyncChannel,
     conn: sqlx::pool::PoolConnection<sqlx::Sqlite>,
@@ -199,6 +206,14 @@ fn ha_channel_outbox_trigger_prefixes(channel: HaSyncChannel) -> Vec<String> {
 
 fn ha_channel_allowed_resources(channel: HaSyncChannel) -> &'static [&'static str] {
     ha_baseline_tables(channel)
+}
+
+fn ha_channel_allowed_resources_sql(channel: HaSyncChannel) -> String {
+    ha_channel_event_tables(channel)
+        .iter()
+        .map(|resource| quote_sqlite_string(resource))
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 impl KeyStore {
@@ -460,6 +475,19 @@ impl KeyStore {
         })
     }
 
+    pub(crate) async fn begin_ha_events_read(
+        &self,
+        channel: HaSyncChannel,
+    ) -> Result<HaEventsReadSession, ProxyError> {
+        let mut conn = self.pool.acquire().await?;
+        sqlx::query("BEGIN").execute(&mut *conn).await?;
+        Ok(HaEventsReadSession {
+            channel,
+            conn,
+            generated_at: self.backend_time.now_ts(),
+        })
+    }
+
     pub(crate) async fn get_ha_sync_watermark(
         &self,
         name: &str,
@@ -508,38 +536,11 @@ impl KeyStore {
         after_seq: i64,
         limit: i64,
     ) -> Result<Vec<HaEventRecord>, ProxyError> {
+        let mut conn = self.pool.acquire().await?;
         let table = quote_sqlite_identifier(ha_channel_event_table(channel));
         let threshold = self.backend_time.now_ts() - ha_channel_retention_secs(channel);
-        let allowed_resources = ha_channel_event_tables(channel)
-            .iter()
-            .map(|resource| quote_sqlite_string(resource))
-            .collect::<Vec<_>>()
-            .join(", ");
-        let min_seq: Option<i64> = sqlx::query_scalar(&format!(
-            "SELECT MIN(seq) FROM {table} WHERE created_at >= ? AND resource IN ({allowed_resources})"
-        ))
-            .bind(threshold)
-            .fetch_one(&self.pool)
-            .await?;
-        let last_seq: Option<i64> = sqlx::query_scalar(&format!(
-            "SELECT seq FROM sqlite_sequence WHERE name = {}",
-            quote_sqlite_string(ha_channel_sequence_name(channel))
-        ))
-                .fetch_optional(&self.pool)
-                .await?;
-        if min_seq.is_none() && after_seq > 0 && last_seq.unwrap_or(0) > after_seq {
-            return Err(ProxyError::Other(
-                format!("HA {} cursor is older than retention window", channel.as_str()),
-            ));
-        }
-        if let Some(min_seq) = min_seq
-            && after_seq > 0
-            && after_seq < min_seq.saturating_sub(1)
-        {
-            return Err(ProxyError::Other(
-                format!("HA {} cursor is older than retention window", channel.as_str()),
-            ));
-        }
+        let allowed_resources = ha_channel_allowed_resources_sql(channel);
+        Self::validate_ha_events_cursor_on_conn(&mut conn, channel, after_seq, threshold).await?;
         let sql = format!(
             r#"
             SELECT seq, kind, resource, resource_id, op, payload_json, created_at, checksum
@@ -551,15 +552,14 @@ impl KeyStore {
              LIMIT ?
             "#
         );
-        let rows = sqlx::query(&sql)
+        let mut rows = sqlx::query(&sql)
             .bind(after_seq.max(0))
             .bind(threshold)
             .bind(limit.clamp(1, 1000))
-            .fetch_all(&self.pool)
-            .await?;
+            .fetch(&mut *conn);
 
         let mut events = Vec::new();
-        for row in rows {
+        while let Some(row) = rows.try_next().await? {
             let resource: String = row.try_get("resource")?;
             let payload_raw: String = row.try_get("payload_json")?;
             let payload = serde_json::from_str(&payload_raw)
@@ -883,6 +883,75 @@ impl KeyStore {
             .await?
             .unwrap_or(0),
         )
+    }
+
+    async fn validate_ha_events_cursor_on_conn(
+        conn: &mut sqlx::pool::PoolConnection<Sqlite>,
+        channel: HaSyncChannel,
+        after_seq: i64,
+        threshold: i64,
+    ) -> Result<(), ProxyError> {
+        let allowed_resources = ha_channel_allowed_resources_sql(channel);
+        let table = quote_sqlite_identifier(ha_channel_event_table(channel));
+        let min_seq: Option<i64> = sqlx::query_scalar(&format!(
+            "SELECT MIN(seq) FROM {table} WHERE created_at >= ? AND resource IN ({allowed_resources})"
+        ))
+        .bind(threshold)
+        .fetch_one(&mut **conn)
+        .await?;
+        let last_seq: Option<i64> = sqlx::query_scalar(&format!(
+            "SELECT seq FROM sqlite_sequence WHERE name = {}",
+            quote_sqlite_string(ha_channel_sequence_name(channel))
+        ))
+        .fetch_optional(&mut **conn)
+        .await?;
+        if min_seq.is_none() && after_seq > 0 && last_seq.unwrap_or(0) > after_seq {
+            return Err(ProxyError::Other(format!(
+                "HA {} cursor is older than retention window",
+                channel.as_str()
+            )));
+        }
+        if let Some(min_seq) = min_seq
+            && after_seq > 0
+            && after_seq < min_seq.saturating_sub(1)
+        {
+            return Err(ProxyError::Other(format!(
+                "HA {} cursor is older than retention window",
+                channel.as_str()
+            )));
+        }
+        Ok(())
+    }
+
+    async fn count_ha_events_after_on_conn(
+        conn: &mut sqlx::pool::PoolConnection<Sqlite>,
+        channel: HaSyncChannel,
+        after_seq: i64,
+        limit: i64,
+        threshold: i64,
+    ) -> Result<usize, ProxyError> {
+        let allowed_resources = ha_channel_allowed_resources_sql(channel);
+        let table = quote_sqlite_identifier(ha_channel_event_table(channel));
+        let sql = format!(
+            r#"
+            SELECT COUNT(*) FROM (
+                SELECT seq
+                  FROM {table}
+                 WHERE seq > ?
+                   AND created_at >= ?
+                   AND resource IN ({allowed_resources})
+                 ORDER BY seq ASC
+                 LIMIT ?
+            )
+            "#
+        );
+        let count: i64 = sqlx::query_scalar(&sql)
+            .bind(after_seq.max(0))
+            .bind(threshold)
+            .bind(limit.clamp(1, 1000))
+            .fetch_one(&mut **conn)
+            .await?;
+        Ok(count.max(0) as usize)
     }
 
 
@@ -1284,6 +1353,145 @@ impl HaBaselineReadSession {
             .flush()
             .await
             .map_err(|err| ProxyError::Other(err.to_string()))
+    }
+}
+
+impl HaEventsReadSession {
+    pub async fn available_event_count(
+        &mut self,
+        after_seq: i64,
+        limit: i64,
+    ) -> Result<usize, ProxyError> {
+        let threshold = self.generated_at - ha_channel_retention_secs(self.channel);
+        KeyStore::validate_ha_events_cursor_on_conn(&mut self.conn, self.channel, after_seq, threshold)
+            .await?;
+        KeyStore::count_ha_events_after_on_conn(
+            &mut self.conn,
+            self.channel,
+            after_seq,
+            limit,
+            threshold,
+        )
+        .await
+    }
+
+    pub async fn rollback(mut self) -> Result<(), ProxyError> {
+        sqlx::query("ROLLBACK").execute(&mut *self.conn).await?;
+        Ok(())
+    }
+
+    pub async fn write_ndjson<W>(
+        &mut self,
+        after_seq: i64,
+        limit: i64,
+        event_count: usize,
+        writer: &mut W,
+    ) -> Result<HaApplyResult, ProxyError>
+    where
+        W: AsyncWrite + Unpin + Send,
+    {
+        let threshold = self.generated_at - ha_channel_retention_secs(self.channel);
+        KeyStore::validate_ha_events_cursor_on_conn(&mut self.conn, self.channel, after_seq, threshold)
+            .await?;
+
+        let start_line = serde_json::to_string(&serde_json::json!({
+            "schemaVersion": HA_SCHEMA_VERSION,
+            "kind": "events_start",
+            "channel": self.channel,
+            "after": after_seq,
+            "limit": limit
+        }))
+        .map_err(|err| ProxyError::Other(err.to_string()))?;
+        writer
+            .write_all(start_line.as_bytes())
+            .await
+            .map_err(|err| ProxyError::Other(err.to_string()))?;
+        writer
+            .write_all(b"\n")
+            .await
+            .map_err(|err| ProxyError::Other(err.to_string()))?;
+
+        let allowed_resources = ha_channel_allowed_resources_sql(self.channel);
+        let table = quote_sqlite_identifier(ha_channel_event_table(self.channel));
+        let sql = format!(
+            r#"
+            SELECT seq, kind, resource, resource_id, op, payload_json, created_at, checksum
+              FROM {table}
+             WHERE seq > ?
+               AND created_at >= ?
+               AND resource IN ({allowed_resources})
+             ORDER BY seq ASC
+             LIMIT ?
+            "#
+        );
+        let mut rows = sqlx::query(&sql)
+            .bind(after_seq.max(0))
+            .bind(threshold)
+            .bind(event_count as i64)
+            .fetch(&mut *self.conn);
+        let mut last_seq = after_seq.max(0);
+        let mut row_count = 0usize;
+        while let Some(row) = rows.try_next().await? {
+            let resource: String = row.try_get("resource")?;
+            let payload_raw: String = row.try_get("payload_json")?;
+            let payload = serde_json::from_str(&payload_raw)
+                .map_err(|err| ProxyError::Other(format!("invalid HA outbox payload: {err}")))?;
+            let payload = sanitize_ha_resource_payload(&resource, payload);
+            let seq: i64 = row.try_get("seq")?;
+            let line = serde_json::to_string(&serde_json::json!({
+                "schemaVersion": HA_SCHEMA_VERSION,
+                "kind": "event",
+                "channel": self.channel,
+                "event": {
+                    "channel": self.channel,
+                    "seq": seq,
+                    "kind": row.try_get::<String, _>("kind")?,
+                    "resource": resource,
+                    "resourceId": row.try_get::<String, _>("resource_id")?,
+                    "op": row.try_get::<String, _>("op")?,
+                    "payload": payload,
+                    "createdAt": row.try_get::<i64, _>("created_at")?,
+                    "checksum": row.try_get::<Option<String>, _>("checksum")?
+                }
+            }))
+            .map_err(|err| ProxyError::Other(err.to_string()))?;
+            writer
+                .write_all(line.as_bytes())
+                .await
+                .map_err(|err| ProxyError::Other(err.to_string()))?;
+            writer
+                .write_all(b"\n")
+                .await
+                .map_err(|err| ProxyError::Other(err.to_string()))?;
+            last_seq = seq;
+            row_count += 1;
+        }
+
+        let end_line = serde_json::to_string(&serde_json::json!({
+            "schemaVersion": HA_SCHEMA_VERSION,
+            "kind": "events_end",
+            "channel": self.channel,
+            "lastSeq": last_seq,
+            "eventCount": row_count
+        }))
+        .map_err(|err| ProxyError::Other(err.to_string()))?;
+        writer
+            .write_all(end_line.as_bytes())
+            .await
+            .map_err(|err| ProxyError::Other(err.to_string()))?;
+        writer
+            .write_all(b"\n")
+            .await
+            .map_err(|err| ProxyError::Other(err.to_string()))?;
+        writer
+            .flush()
+            .await
+            .map_err(|err| ProxyError::Other(err.to_string()))?;
+        Ok(HaApplyResult {
+            channel: self.channel,
+            high_watermark: last_seq,
+            row_count,
+        })
     }
 }
 

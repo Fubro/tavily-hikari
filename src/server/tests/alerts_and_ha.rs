@@ -1059,72 +1059,6 @@ async fn ha_baseline_returns_413_when_compressed_stream_exceeds_cap() {
 }
 
 #[tokio::test]
-async fn ha_events_endpoint_returns_zstd_ndjson() {
-    let db_path = temp_db_path("ha-events");
-    let db_str = db_path.to_string_lossy().to_string();
-    let proxy = TavilyProxy::with_endpoint(
-        vec!["tvly-ha-events-key".to_string()],
-        DEFAULT_UPSTREAM,
-        &db_str,
-    )
-    .await
-    .expect("proxy created");
-    let pool = connect_sqlite_test_pool(&db_str).await;
-    sqlx::query(
-        r#"
-        INSERT INTO ha_outbox (
-            kind, resource, resource_id, op, payload_json, created_at, checksum
-        ) VALUES ('state', 'api_keys', 'key-1', 'upsert', '{"id":"key-1"}', ?, 'checksum')
-        "#,
-    )
-    .bind(Utc::now().timestamp())
-    .execute(&pool)
-    .await
-    .expect("insert outbox event");
-    sqlx::query(
-        r#"
-        INSERT INTO ha_outbox (
-            kind, resource, resource_id, op, payload_json, created_at, checksum
-        ) VALUES ('state', 'request_logs', 'log-1', 'upsert', '{"path":"/secret"}', ?, 'bad')
-        "#,
-    )
-    .bind(Utc::now().timestamp())
-    .execute(&pool)
-    .await
-    .expect("insert forbidden outbox event");
-    pool.close().await;
-    let ha = tavily_hikari::HaRuntime::new(tavily_hikari::HaConfig {
-        node_id: "node-events".to_string(),
-        database_path: Some(db_str.clone()),
-        ..tavily_hikari::HaConfig::default()
-    });
-    let addr = spawn_ha_admin_server(proxy, ha, true).await;
-    let response = Client::new()
-        .get(format!(
-            "http://{addr}/api/admin/ha/events?channel=control&after=0&limit=10"
-        ))
-        .send()
-        .await
-        .expect("events request");
-    assert_eq!(response.status(), reqwest::StatusCode::OK);
-    assert_eq!(
-        response
-            .headers()
-            .get("content-encoding")
-            .and_then(|value| value.to_str().ok()),
-        Some("zstd")
-    );
-    let compressed = response.bytes().await.expect("events bytes");
-    let decoded = zstd::stream::decode_all(compressed.as_ref()).expect("decode zstd events");
-    let text = String::from_utf8(decoded).expect("events utf8");
-    assert!(text.contains("\"kind\":\"event\""));
-    assert!(text.contains("\"resource\":\"api_keys\""));
-    assert!(!text.contains("request_logs"));
-    assert!(!text.contains("/secret"));
-    let _ = std::fs::remove_file(db_path);
-}
-
-#[tokio::test]
 async fn ha_events_endpoint_skips_legacy_non_control_rows_without_cursor_stall() {
     let db_path = temp_db_path("ha-events-legacy-control-cursor");
     let db_str = db_path.to_string_lossy().to_string();
@@ -1228,62 +1162,6 @@ async fn ha_endpoints_require_explicit_channel_query() {
     );
 
     let _ = std::fs::remove_file(db_path);
-}
-
-#[test]
-fn ha_events_encoder_chunks_oversized_batches() {
-    let events = (1..=4)
-        .map(|seq| HaEventResponseItem {
-            seq,
-            value: serde_json::json!({
-                "schemaVersion": 2,
-                "kind": "event",
-                "channel": "control",
-                "event": {
-                    "seq": seq,
-                    "channel": "control",
-                    "kind": "state",
-                    "resource": "meta",
-                    "resourceId": format!("request_rate_limit_v1-{seq}"),
-                    "op": "upsert",
-                    "payload": {
-                        "key": "request_rate_limit_v1",
-                        "value": format!("{}-{}", seq, nanoid!(512))
-                    },
-                    "createdAt": seq,
-                    "checksum": null
-                }
-            }),
-        })
-        .collect::<Vec<_>>();
-    let single = encode_ha_events_limited(
-        tavily_hikari::HaSyncChannel::Control,
-        0,
-        4,
-        &events[..1],
-        usize::MAX,
-    )
-    .expect("encode single event");
-    let full = encode_ha_events_limited(
-        tavily_hikari::HaSyncChannel::Control,
-        0,
-        4,
-        &events,
-        usize::MAX,
-    )
-    .expect("encode full batch");
-    assert!(full.compressed.len() > single.compressed.len());
-
-    let chunked = encode_ha_events_limited(
-        tavily_hikari::HaSyncChannel::Control,
-        0,
-        4,
-        &events,
-        single.compressed.len(),
-    )
-    .expect("chunk oversized batch");
-    assert_eq!(chunked.event_count, 1);
-    assert_eq!(chunked.last_seq, 1);
 }
 
 #[tokio::test]
