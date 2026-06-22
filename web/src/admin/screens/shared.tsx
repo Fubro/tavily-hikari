@@ -236,9 +236,9 @@ export function formatSuccessRateStackValue(
   language: 'en' | 'zh',
 ): StackedValue {
   const total = success + failure
-  const percent = total === 0 ? 0 : Math.round((success / total) * 1000) / 10
+  const percent = total === 0 ? '—' : `${(Math.round((success / total) * 1000) / 10).toFixed(1)}%`
   return {
-    primary: `${percent.toFixed(1)}%`,
+    primary: percent,
     secondary:
       language === 'zh'
         ? `成 ${success} / 败 ${failure}`
@@ -252,8 +252,8 @@ export function formatCompactSuccessRateValue(
   language: 'en' | 'zh',
 ): string {
   const total = success + failure
-  const percent = total === 0 ? 0 : Math.round((success / total) * 1000) / 10
+  const percent = total === 0 ? '—' : `${(Math.round((success / total) * 1000) / 10).toFixed(1)}%`
   return language === 'zh'
-    ? `${percent.toFixed(1)}% 成 ${success} / 败 ${failure}`
-    : `${percent.toFixed(1)}% S ${success} / F ${failure}`
+    ? `${percent} 成 ${success} / 败 ${failure}`
+    : `${percent} S ${success} / F ${failure}`
 }
