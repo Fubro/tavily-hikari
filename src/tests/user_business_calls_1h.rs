@@ -58,7 +58,7 @@ async fn user_business_calls_1h_summary_and_series_track_real_upstream_requests_
     .fetch_one(&proxy.key_store.pool)
     .await
     .expect("insert success request log");
-    manual_clock.set_now_ts(now - 10 * 60);
+    manual_clock.set_now_ts(now);
     proxy
         .record_token_attempt_with_kind_request_log_metadata(
             &token.id,
@@ -107,7 +107,7 @@ async fn user_business_calls_1h_summary_and_series_track_real_upstream_requests_
     .fetch_one(&proxy.key_store.pool)
     .await
     .expect("insert failure request log");
-    manual_clock.set_now_ts(now - 5 * 60);
+    manual_clock.set_now_ts(now);
     proxy
         .record_token_attempt_with_kind_request_log_metadata(
             &token.id,
@@ -156,7 +156,7 @@ async fn user_business_calls_1h_summary_and_series_track_real_upstream_requests_
     .fetch_one(&proxy.key_store.pool)
     .await
     .expect("insert quota exhausted request log");
-    manual_clock.set_now_ts(now - 2 * 60);
+    manual_clock.set_now_ts(now);
     proxy
         .record_token_attempt_with_kind_request_log_metadata(
             &token.id,
@@ -205,7 +205,7 @@ async fn user_business_calls_1h_summary_and_series_track_real_upstream_requests_
     .fetch_one(&proxy.key_store.pool)
     .await
     .expect("insert pre-upstream request log");
-    manual_clock.set_now_ts(now - 60);
+    manual_clock.set_now_ts(now);
     proxy
         .record_token_attempt_with_kind_request_log_metadata(
             &token.id,
@@ -434,7 +434,7 @@ async fn user_business_calls_1h_series_keeps_late_arriving_older_events_in_order
     .fetch_one(&proxy.key_store.pool)
     .await
     .expect("insert newer request log");
-    manual_clock.set_now_ts(now - 5 * 60);
+    manual_clock.set_now_ts(now);
     proxy
         .record_token_attempt_with_kind_request_log_metadata(
             &token.id,
@@ -482,7 +482,7 @@ async fn user_business_calls_1h_series_keeps_late_arriving_older_events_in_order
     .fetch_one(&proxy.key_store.pool)
     .await
     .expect("insert older request log");
-    manual_clock.set_now_ts(now - 4 * 60);
+    manual_clock.set_now_ts(now);
     proxy
         .record_token_attempt_with_kind_request_log_metadata(
             &token.id,

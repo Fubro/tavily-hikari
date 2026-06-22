@@ -2423,9 +2423,18 @@ async fn user_rankings_partial_range_counts_non_billable_mcp_batch_by_request_bo
         .await
         .expect("bind other token");
 
-    let generated_at = Utc::now().timestamp();
+    // Keep the snapshot window off five-minute boundaries so this test always
+    // exercises the partial-range path instead of occasionally reading the
+    // pre-update rollup bucket.
+    let generated_at = 1_700_000_123i64;
     let start_at = generated_at.saturating_sub(SECS_PER_DAY);
-    let partial_created_at = start_at.saturating_add(1);
+    let partial_created_at = start_at.saturating_add(60);
+    assert_ne!(start_at.rem_euclid(SECS_PER_FIVE_MINUTES), 0);
+    assert!(
+        partial_created_at
+            < ((start_at + SECS_PER_FIVE_MINUTES - 1).div_euclid(SECS_PER_FIVE_MINUTES))
+                * SECS_PER_FIVE_MINUTES
+    );
 
     let valuable_batch_body = br#"[
       {"jsonrpc":"2.0","id":1,"method":"initialize"},
