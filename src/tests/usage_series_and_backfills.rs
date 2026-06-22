@@ -180,6 +180,201 @@ async fn request_stats_coalescer_uses_event_day_bucket_for_account_rollups() {
 }
 
 #[tokio::test]
+async fn request_stats_coalescer_flush_preserves_secondary_success_rate5m_rollups() {
+    let db_path = temp_db_path("request-stats-coalescer-secondary-success-rate5m");
+    let db_str = db_path.to_string_lossy().to_string();
+
+    let proxy = TavilyProxy::with_endpoint(Vec::<String>::new(), DEFAULT_UPSTREAM, &db_str)
+        .await
+        .expect("proxy created");
+    let user = proxy
+        .upsert_oauth_account(&OAuthAccountProfile {
+            provider: "github".to_string(),
+            provider_user_id: "secondary-success-rate5m".to_string(),
+            username: Some("secondary_success_rate5m".to_string()),
+            name: Some("Secondary Success Rate5m".to_string()),
+            avatar_template: None,
+            active: true,
+            trust_level: None,
+            raw_payload_json: None,
+        })
+        .await
+        .expect("upsert user");
+    let token = proxy
+        .ensure_user_token_binding(&user.user_id, Some("secondary-success-rate5m"))
+        .await
+        .expect("bind token");
+
+    let secondary_batch_body = br#"[
+      {"jsonrpc":"2.0","id":1,"method":"initialize"},
+      {"jsonrpc":"2.0","id":2,"method":"tools/list"}
+    ]"#;
+    let primary_batch_body = br#"[
+      {"jsonrpc":"2.0","id":1,"method":"initialize"},
+      {"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"tavily-search"}}
+    ]"#;
+    let created_at = Utc::now().timestamp();
+    let secondary_request_log_id = proxy
+        .record_local_request_log_without_key(
+            Some(&token.id),
+            &Method::POST,
+            "/mcp",
+            None,
+            StatusCode::OK,
+            Some(200),
+            secondary_batch_body,
+            b"{}",
+            OUTCOME_SUCCESS,
+            None,
+            &[],
+            &[],
+            None,
+        )
+        .await
+        .expect("record secondary batch request log");
+    proxy
+        .record_token_attempt_with_kind_request_log_metadata(
+            &token.id,
+            &Method::POST,
+            "/mcp",
+            None,
+            Some(StatusCode::OK.as_u16() as i64),
+            Some(200),
+            false,
+            OUTCOME_SUCCESS,
+            None,
+            &TokenRequestKind::new("mcp:batch", "MCP | batch", None),
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            Some(secondary_request_log_id),
+        )
+        .await
+        .expect("record linked secondary batch token log");
+
+    let primary_request_log_id = proxy
+        .record_local_request_log_without_key(
+            Some(&token.id),
+            &Method::POST,
+            "/mcp",
+            None,
+            StatusCode::OK,
+            Some(200),
+            primary_batch_body,
+            b"{}",
+            OUTCOME_SUCCESS,
+            None,
+            &[],
+            &[],
+            None,
+        )
+        .await
+        .expect("record primary batch request log");
+    proxy
+        .record_token_attempt_with_kind_request_log_metadata(
+            &token.id,
+            &Method::POST,
+            "/mcp",
+            None,
+            Some(StatusCode::OK.as_u16() as i64),
+            Some(200),
+            true,
+            OUTCOME_SUCCESS,
+            None,
+            &TokenRequestKind::new("mcp:batch", "MCP | batch", None),
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            Some(primary_request_log_id),
+        )
+        .await
+        .expect("record linked primary batch token log");
+
+    sqlx::query("UPDATE auth_token_logs SET created_at = ?, request_user_id = ? WHERE request_log_id IN (?, ?)")
+        .bind(created_at)
+        .bind(&user.user_id)
+        .bind(secondary_request_log_id)
+        .bind(primary_request_log_id)
+        .execute(&proxy.key_store.pool)
+        .await
+        .expect("align batch token log ownership and time");
+
+    proxy
+        .key_store
+        .flush_request_stats_writes()
+        .await
+        .expect("flush request stats");
+
+    let five_minute_bucket_start = created_at - created_at.rem_euclid(SECS_PER_FIVE_MINUTES);
+    let day_bucket_start = local_day_bucket_start_utc_ts(created_at);
+    let five_minute_secondary_values = proxy
+        .key_store
+        .fetch_account_usage_rollup_values(
+            &user.user_id,
+            AccountUsageRollupMetricKind::SecondarySuccess,
+            AccountUsageRollupBucketKind::FiveMinute,
+            five_minute_bucket_start,
+            five_minute_bucket_start + SECS_PER_FIVE_MINUTES,
+        )
+        .await
+        .expect("load flushed secondary five minute bucket");
+    let five_minute_primary_values = proxy
+        .key_store
+        .fetch_account_usage_rollup_values(
+            &user.user_id,
+            AccountUsageRollupMetricKind::PrimarySuccess,
+            AccountUsageRollupBucketKind::FiveMinute,
+            five_minute_bucket_start,
+            five_minute_bucket_start + SECS_PER_FIVE_MINUTES,
+        )
+        .await
+        .expect("load flushed primary five minute bucket");
+    let day_secondary_values = proxy
+        .key_store
+        .fetch_account_usage_rollup_values(
+            &user.user_id,
+            AccountUsageRollupMetricKind::SecondarySuccess,
+            AccountUsageRollupBucketKind::Day,
+            day_bucket_start,
+            day_bucket_start + SECS_PER_DAY,
+        )
+        .await
+        .expect("load flushed secondary day bucket");
+    let day_primary_values = proxy
+        .key_store
+        .fetch_account_usage_rollup_values(
+            &user.user_id,
+            AccountUsageRollupMetricKind::PrimarySuccess,
+            AccountUsageRollupBucketKind::Day,
+            day_bucket_start,
+            day_bucket_start + SECS_PER_DAY,
+        )
+        .await
+        .expect("load flushed primary day bucket");
+
+    assert_eq!(
+        five_minute_secondary_values.get(&five_minute_bucket_start),
+        Some(&1)
+    );
+    assert_eq!(
+        five_minute_primary_values.get(&five_minute_bucket_start),
+        Some(&1)
+    );
+    assert_eq!(day_secondary_values.get(&day_bucket_start), Some(&1));
+    assert_eq!(day_primary_values.get(&day_bucket_start), Some(&1));
+
+    let _ = std::fs::remove_file(db_path);
+}
+
+#[tokio::test]
 async fn account_usage_rollup_rebuild_backfills_full_month_chart_horizon() {
     let db_path = temp_db_path("account-usage-rollup-month-chart-horizon");
     let db_str = db_path.to_string_lossy().to_string();

@@ -95,7 +95,7 @@
 - Added resumable `request_logs` batch copy semantics keyed by preserved `id`, so partial sidecar
   copies can resume safely without duplicating rows or breaking preserved `request_log_id`
   references.
-- Standardized the validation path around a shared-testbox single-node Compose harness plus a 101
+- Standardized the validation path around a shared-testbox single-node Compose harness plus a
   short-maintenance cutover/rollback runbook, with the pre-cutover core DB exported to testbox as
   the rollback anchor.
 - Replaced the earlier WAL-mode offline-lock heuristic with an explicit sibling
@@ -107,8 +107,8 @@
 
 ## 2026-06-18
 
-- A 101 short-maintenance cutover attempt exposed a contract bug in the first explicit migration:
-  the tool copied `request_logs` and reset derived-table rebuild markers, then service startup
+- A short-maintenance cutover attempt exposed a contract bug in the first explicit migration: the
+  tool copied `request_logs` and reset derived-table rebuild markers, then service startup
   synchronously awaited the large derived rollup rebuild before opening the HTTP listener.
 - The explicit migration contract now treats a successful reopen of the normal startup path as part
   of completion, so `completed=true` only means “offline rebuild succeeded and the service can
@@ -131,8 +131,8 @@
 
 ## 2026-06-20
 
-- Validated the first lossless startup/read-path hardening pass against a live 101 SQLite snapshot
-  copied online with SQLite `.backup`, then replayed on `codex-testbox`.
+- Validated the first lossless startup/read-path hardening pass against a live production SQLite
+  snapshot copied online with SQLite `.backup`, then replayed on the shared testbox.
 - The first upgraded boot still paid one-time repair/migration work on the historical snapshot:
   `billing_ledger` repair ran once, and the new alert-supporting indexes were created on
   `auth_token_logs`.
@@ -146,3 +146,15 @@
 - Offline `billing_ledger_audit` on that snapshot still reported `118` day-only mismatches between
   quota samples and ledger-derived daily windows. That audit drift remains a separate quota
   correctness follow-up and is not repaired by the startup ledger bootstrap path itself.
+
+## 2026-06-22
+
+- Production evidence re-opened the topic at the request hot path: `/health` and `/api/version`
+  stayed responsive, but the latest sampled hour still showed `34` transient `database is locked`
+  failures and `296` slow statements.
+- The highest-value live signatures were `record_pending_billing_attempt failed for /mcp`,
+  `db operation error: operation=request stats persist`, and a public metrics month-tail query
+  shaped like `WITH scoped_logs AS (...) FROM observability.request_logs`.
+- The fix line stayed narrow: request-path pending billing now retries inside one bounded
+  transaction, request-stats flush now retries with batch-aware requeue proof and structured
+  contention logs, and public success metrics stop using the retained-log wide-scan fallback.

@@ -41,6 +41,12 @@ Short-lived SQLite writer collisions can happen when request-path billing/sessio
 background writes all touch the same DB. Treating every transient busy/locked response as fatal makes
 brief contention visible as HTTP 500s or failed background bookkeeping.
 
+On `2026-06-22`, one production sample provided a clean example of this shape: `/health` and
+`/api/version` stayed fast, but the latest sampled hour still contained `34`
+`database is locked` errors and `296` slow statements, concentrated around
+`record_pending_billing_attempt failed for /mcp`, `request stats persist`, and a retained-log
+month-tail public metrics scan.
+
 ## Resolution
 
 - Add a runtime DB logging contract before changing lock semantics again. For this service, default
@@ -216,6 +222,17 @@ brief contention visible as HTTP 500s or failed background bookkeeping.
 - If an owner-facing read depends on coalesced rollups, prefer a freshness-gated flush over an
   unconditional flush. This keeps near-real-time semantics without turning every public/admin read
   into a write barrier under SQLite's single-writer budget.
+- When request-path billing needs both a history row and a ledger row, keep them in one SQLite
+  transaction before adding retries. Retrying two independent writes can duplicate the history row
+  and only masks the actual contention bug.
+- For request-path and flush contention, expose one stable structured retry/exhaustion contract:
+  `operation`, `request_path`, `request_kind`, `attempt|attempts`, `backoff_ms`, `elapsed_ms`,
+  `retry_budget_ms`, `pending_batch_counts`, `oldest_pending_created_at`,
+  `newest_pending_created_at`, and `billing_subject_kind`. Use `token|account|unknown` only; never
+  log raw billing subjects, token secrets, or request bodies.
+- If public metrics only need success counts, do not reuse a generic retained-log summary scan for a
+  month-tail fallback. Subtract the retained tail from the last daily rollup bucket with a bounded
+  success-count query instead of reintroducing a wide `WITH scoped_logs AS (...)` scan.
 - Do not let lock-contention tests depend on real wall-clock sleep just to cross a retry window or a
   one-second timestamp boundary. Prefer deterministic state shaping or a controlled time seam so the
   test still exercises the production retry logic without paying real-time cost.
@@ -272,10 +289,22 @@ brief contention visible as HTTP 500s or failed background bookkeeping.
 - `src/tavily_proxy/proxy_ha.rs`
 - `src/server/schedulers.rs`
 
-## 101 Symptom Mapping
+## 2026-06-22 validation set
 
-For the `2026-06-19 01:00 +08:00` onward 101 sample, the runtime DB log contract should map the
-observed symptoms like this:
+- `cargo test mcp_tools_call_tavily_search_retries_pending_billing_when_sqlite_writer_lock_releases -- --nocapture`
+- `cargo test ensure_user_token_binding_with_preferred_retries_when_begin_is_locked -- --nocapture`
+- `cargo test public_success_breakdown_waits_for_inflight_flush_before_serving_metrics -- --nocapture`
+
+## Rollout grep
+
+- `journalctl -u tavily-hikari -n 2000 | rg 'sqlite_transient_write_retry|sqlite_transient_write_exhausted'`
+- `journalctl -u tavily-hikari -n 2000 | rg 'operation=request stats persist|operation=insert_token_log_pending_billing|operation=apply_pending_billing_log'`
+- `journalctl -u tavily-hikari -n 2000 | rg 'record_pending_billing_attempt failed for /mcp|WITH scoped_logs AS'`
+
+## Symptom Mapping
+
+For the `2026-06-19 01:00 +08:00` onward production sample, the runtime DB log contract should map
+the observed symptoms like this:
 
 - `forward-proxy startup: sqlite initialized in 38906ms`
   -> keep the startup lifecycle event and expect

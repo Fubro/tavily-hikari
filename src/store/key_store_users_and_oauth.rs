@@ -1395,11 +1395,6 @@ impl KeyStore {
         } else {
             Some(business_credits)
         };
-        let billing_state = if request_kind.key == "mcp:session-delete-unsupported" {
-            BILLING_STATE_NONE
-        } else {
-            BILLING_STATE_PENDING
-        };
         let failure_kind = failure_kind
             .map(str::to_string)
             .or_else(|| classify_failure_kind(path, http_status, mcp_status, error_message, &[]));
@@ -1415,6 +1410,164 @@ impl KeyStore {
         );
         let request_log_created_at = diagnostic_metadata.created_at;
         let upstream_operation_for_business = diagnostic_metadata.upstream_operation.clone();
+        let retry_budget = Duration::from_secs(10);
+        let retry_budget_ms = retry_budget.as_millis() as u64;
+        let deadline = self.backend_time.instant_now() + retry_budget;
+        let operation_started = Instant::now();
+        let billing_subject_kind = classify_billing_subject_kind(billing_subject);
+        let log_fields = SqliteContentionLogFields {
+            operation: "insert_token_log_pending_billing",
+            request_path: path,
+            request_kind: request_kind.key.as_str(),
+            billing_subject_kind,
+            retry_budget_ms,
+            pending_batch_counts: "dashboard=0,api_key=0,auth_token=0,account_rollup=0,request_catalog=0",
+            oldest_pending_created_at: None,
+            newest_pending_created_at: None,
+        };
+        let mut retry_attempt = 0usize;
+        let log_id = loop {
+            match self
+                .insert_token_log_pending_billing_once(
+                    token_id,
+                    method,
+                    path,
+                    query,
+                    http_status,
+                    mcp_status,
+                    counts_business_quota,
+                    result_status,
+                    error_message,
+                    business_credits,
+                    billing_subject,
+                    &request_kind,
+                    api_key_id,
+                    failure_kind.as_deref(),
+                    key_effect_code,
+                    key_effect_summary.as_deref(),
+                    binding_effect_code,
+                    binding_effect_summary.as_deref(),
+                    selection_effect_code,
+                    selection_effect_summary.as_deref(),
+                    request_log_id,
+                    created_at,
+                    request_user_id.as_deref(),
+                    &diagnostic_metadata,
+                )
+                .await
+            {
+                Ok(log_id) => {
+                    log_slow_db_operation(
+                        "insert_token_log_pending_billing",
+                        operation_started.elapsed(),
+                        Some(
+                            format!(
+                                "request_path={path}, request_kind={}, billing_subject_kind={billing_subject_kind}",
+                                request_kind.key
+                            )
+                            .as_str(),
+                        ),
+                    );
+                    break log_id;
+                }
+                Err(err) => {
+                    if !is_transient_sqlite_write_error(&err) {
+                        log_db_operation_error(
+                            "insert_token_log_pending_billing",
+                            operation_started.elapsed(),
+                            Some(
+                                format!(
+                                    "request_path={path}, request_kind={}, billing_subject_kind={billing_subject_kind}",
+                                    request_kind.key
+                                )
+                                .as_str(),
+                            ),
+                            &err,
+                        );
+                        return Err(err);
+                    }
+
+                    let now = self.backend_time.instant_now();
+                    if now >= deadline {
+                        log_sqlite_transient_write_exhaustion_with_fields(
+                            log_fields,
+                            retry_attempt + 1,
+                            operation_started.elapsed(),
+                            &err,
+                        );
+                        log_db_operation_error(
+                            "insert_token_log_pending_billing",
+                            operation_started.elapsed(),
+                            Some(
+                                format!(
+                                    "request_path={path}, request_kind={}, billing_subject_kind={billing_subject_kind}",
+                                    request_kind.key
+                                )
+                                .as_str(),
+                            ),
+                            &err,
+                        );
+                        return Err(err);
+                    }
+
+                    let remaining = deadline.saturating_duration_since(now);
+                    let backoff = sqlite_transient_write_retry_delay(retry_attempt).min(remaining);
+                    log_sqlite_transient_write_retry_with_fields(
+                        log_fields,
+                        retry_attempt + 1,
+                        backoff,
+                        operation_started.elapsed(),
+                        &err,
+                    );
+                    self.backend_time.sleep(backoff).await;
+                    retry_attempt += 1;
+                }
+            }
+        };
+        self.request_stats_coalescer
+            .enqueue_auth_token_activity(token_id, request_user_id.as_deref(), created_at)
+            .await;
+        Ok((
+            log_id,
+            build_user_business_call_event_write(
+                request_user_id,
+                counts_business_quota,
+                upstream_operation_for_business,
+                result_status,
+                request_log_created_at.unwrap_or(created_at),
+            ),
+        ))
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    async fn insert_token_log_pending_billing_once(
+        &self,
+        token_id: &str,
+        method: &Method,
+        path: &str,
+        query: Option<&str>,
+        http_status: Option<i64>,
+        mcp_status: Option<i64>,
+        counts_business_quota: i64,
+        result_status: &str,
+        error_message: Option<&str>,
+        business_credits: Option<i64>,
+        billing_subject: &str,
+        request_kind: &TokenRequestKind,
+        api_key_id: Option<&str>,
+        failure_kind: Option<&str>,
+        key_effect_code: &str,
+        key_effect_summary: Option<&str>,
+        binding_effect_code: &str,
+        binding_effect_summary: Option<&str>,
+        selection_effect_code: &str,
+        selection_effect_summary: Option<&str>,
+        request_log_id: Option<i64>,
+        created_at: i64,
+        request_user_id: Option<&str>,
+        diagnostic_metadata: &RequestLogDiagnosticMetadata,
+    ) -> Result<i64, ProxyError> {
+        let mut tx = self.pool.begin().await?;
         let log_id: i64 = sqlx::query_scalar(
             r#"
             INSERT INTO auth_token_logs (
@@ -1472,21 +1625,25 @@ impl KeyStore {
         .bind(binding_effect_summary)
         .bind(selection_effect_code)
         .bind(selection_effect_summary)
-        .bind(diagnostic_metadata.gateway_mode)
-        .bind(diagnostic_metadata.experiment_variant)
-        .bind(diagnostic_metadata.proxy_session_id)
-        .bind(diagnostic_metadata.routing_subject_hash)
-        .bind(diagnostic_metadata.upstream_operation)
-        .bind(diagnostic_metadata.fallback_reason)
+        .bind(diagnostic_metadata.gateway_mode.as_deref())
+        .bind(diagnostic_metadata.experiment_variant.as_deref())
+        .bind(diagnostic_metadata.proxy_session_id.as_deref())
+        .bind(diagnostic_metadata.routing_subject_hash.as_deref())
+        .bind(diagnostic_metadata.upstream_operation.as_deref())
+        .bind(diagnostic_metadata.fallback_reason.as_deref())
         .bind(counts_business_quota)
         .bind(business_credits)
         .bind(billing_subject)
-        .bind(billing_state)
+        .bind(if request_kind.key == "mcp:session-delete-unsupported" {
+            BILLING_STATE_NONE
+        } else {
+            BILLING_STATE_PENDING
+        })
         .bind(api_key_id)
         .bind(request_log_id)
         .bind(created_at)
-        .bind(request_user_id.as_deref())
-        .fetch_one(&self.pool)
+        .bind(request_user_id)
+        .fetch_one(&mut *tx)
         .await?;
 
         sqlx::query(
@@ -1524,30 +1681,23 @@ impl KeyStore {
         .bind(log_id)
         .bind(token_id)
         .bind(billing_subject)
-        .bind(billing_state)
+        .bind(if request_kind.key == "mcp:session-delete-unsupported" {
+            BILLING_STATE_NONE
+        } else {
+            BILLING_STATE_PENDING
+        })
         .bind(business_credits)
-        .bind(request_user_id.as_deref())
+        .bind(request_user_id)
         .bind(api_key_id)
         .bind(request_log_id)
         .bind(result_status)
         .bind(created_at)
         .bind(created_at)
         .bind(error_message)
-        .execute(&self.pool)
+        .execute(&mut *tx)
         .await?;
-        self.request_stats_coalescer
-            .enqueue_auth_token_activity(token_id, request_user_id.as_deref(), created_at)
-            .await;
-        Ok((
-            log_id,
-            build_user_business_call_event_write(
-                request_user_id,
-                counts_business_quota,
-                upstream_operation_for_business,
-                result_status,
-                request_log_created_at.unwrap_or(created_at),
-            ),
-        ))
+        tx.commit().await?;
+        Ok(log_id)
     }
 
     async fn resolve_request_log_diagnostic_metadata(
@@ -1687,10 +1837,33 @@ impl KeyStore {
         &self,
         log_id: i64,
     ) -> Result<PendingBillingSettleOutcome, ProxyError> {
-        let deadline = Instant::now() + Duration::from_secs(10);
+        let retry_budget = Duration::from_secs(10);
+        let deadline = Instant::now() + retry_budget;
         let mut retry_attempt = 0usize;
         let operation_started = Instant::now();
         let context = format!("log_id={log_id}");
+        let (request_path, request_kind, billing_subject_kind) = self
+            .pending_billing_log_retry_metadata(log_id)
+            .await
+            .ok()
+            .flatten()
+            .unwrap_or_else(|| {
+                (
+                    "/internal/pending-billing-settle".to_string(),
+                    "internal:pending-billing-settle".to_string(),
+                    "unknown".to_string(),
+                )
+            });
+        let log_fields = SqliteContentionLogFields {
+            operation: "apply_pending_billing_log",
+            request_path: request_path.as_str(),
+            request_kind: request_kind.as_str(),
+            billing_subject_kind: billing_subject_kind.as_str(),
+            retry_budget_ms: retry_budget.as_millis() as u64,
+            pending_batch_counts: "dashboard=0,api_key=0,auth_token=0,account_rollup=0,request_catalog=0",
+            oldest_pending_created_at: None,
+            newest_pending_created_at: None,
+        };
         loop {
             match self.apply_pending_billing_log_once(log_id).await {
                 Ok(outcome) => {
@@ -1702,17 +1875,29 @@ impl KeyStore {
                     return Ok(outcome);
                 }
                 Err(err) => {
-                    if sleep_before_sqlite_transient_write_retry(
-                        &self.backend_time,
-                        "apply_pending_billing_log",
-                        retry_attempt,
-                        deadline,
-                        &err,
-                    )
-                    .await
-                    {
-                        retry_attempt += 1;
-                        continue;
+                    if is_transient_sqlite_write_error(&err) {
+                        let now = self.backend_time.instant_now();
+                        if now < deadline {
+                            let remaining = deadline.saturating_duration_since(now);
+                            let backoff =
+                                sqlite_transient_write_retry_delay(retry_attempt).min(remaining);
+                            log_sqlite_transient_write_retry_with_fields(
+                                log_fields,
+                                retry_attempt + 1,
+                                backoff,
+                                operation_started.elapsed(),
+                                &err,
+                            );
+                            self.backend_time.sleep(backoff).await;
+                            retry_attempt += 1;
+                            continue;
+                        }
+                        log_sqlite_transient_write_exhaustion_with_fields(
+                            log_fields,
+                            retry_attempt + 1,
+                            operation_started.elapsed(),
+                            &err,
+                        );
                     }
                     log_db_operation_error(
                         "apply_pending_billing_log",
@@ -1724,6 +1909,36 @@ impl KeyStore {
                 }
             }
         }
+    }
+
+    async fn pending_billing_log_retry_metadata(
+        &self,
+        log_id: i64,
+    ) -> Result<Option<(String, String, String)>, ProxyError> {
+        let row = sqlx::query_as::<_, (Option<String>, Option<String>, Option<String>)>(
+            r#"
+            SELECT atl.path, atl.request_kind_key, bl.billing_subject
+            FROM billing_ledger bl
+            LEFT JOIN auth_token_logs atl ON atl.id = bl.auth_token_log_id
+            WHERE bl.auth_token_log_id = ?
+            LIMIT 1
+            "#,
+        )
+        .bind(log_id)
+        .fetch_optional(&self.pool)
+        .await?;
+        Ok(row.map(|(path, request_kind, billing_subject)| {
+            let billing_subject_kind = billing_subject
+                .as_deref()
+                .map(classify_billing_subject_kind)
+                .unwrap_or("unknown")
+                .to_string();
+            (
+                path.unwrap_or_else(|| "/internal/pending-billing-settle".to_string()),
+                request_kind.unwrap_or_else(|| "internal:pending-billing-settle".to_string()),
+                billing_subject_kind,
+            )
+        }))
     }
 
     async fn apply_pending_billing_log_once(

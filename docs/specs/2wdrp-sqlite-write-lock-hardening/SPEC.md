@@ -4,7 +4,7 @@
 
 - Lifecycle: active
 - Created: 2026-05-07
-- Last: 2026-06-18
+- Last: 2026-06-22
 
 ## Background
 
@@ -38,10 +38,16 @@ source when a usable persisted runtime already exists.
 
 - Keep request-path billing and MCP session locks from failing on transient SQLite busy/locked
   errors when the existing bounded wait budget can absorb the contention.
+- Keep billable `/mcp` request completion and pending-billing settlement on the same bounded
+  transient-write retry contract, so a short production writer lock no longer produces
+  `record_pending_billing_attempt failed for /mcp: database is locked` while the upstream response
+  itself was otherwise successful.
 - Preserve quota ledger correctness, pending billing replay, session affinity, research key pinning,
   and API rebalance behavior.
 - Remove avoidable request hot-path SQLite writes that do not need to be synchronous truth, while
   preserving fail-closed billing semantics and owner-facing observability.
+- Keep public success metrics on rollup-first bounded reads so month-tail fallback no longer depends
+  on a retained-log wide scan against `observability.request_logs`.
 - Make background job bookkeeping tolerate transient lock pressure without amplifying request-path
   failures.
 - Keep forward-proxy startup from turning short SQLite writer contention into a long readiness
@@ -61,6 +67,10 @@ source when a usable persisted runtime already exists.
   bounded backoff and must remain inside the existing lock timeout/lease budget.
 - Token billing and MCP session lock callers must retain the current fail-closed semantics if the
   bounded retry window is exhausted.
+- `record_pending_billing_attempt*`, `insert_token_log_pending_billing`, and
+  `apply_pending_billing_log` must share one bounded transient SQLite write retry contract.
+  Successful recovery within budget must keep the request/settlement green; budget exhaustion must
+  still fail closed.
 - `scheduled_jobs` must remain the persisted fact source for maintenance work, but it now needs a
   first-class queued lifecycle: `queued` rows persist before execution, `queued_at` records queue
   admission time, and `started_at` only records the actual execution start time.
@@ -118,6 +128,11 @@ source when a usable persisted runtime already exists.
   `request_logs` table or generating a large WAL. Large backlogs are expected to catch up over
   repeated bounded windows.
 - Retry logs may include operation, attempt, backoff, and final error context.
+- Retry/exhaustion logs for this topic must expose a stable structured contract with
+  `operation`, `request_path`, `request_kind`, `attempt|attempts`, `backoff_ms`, `elapsed_ms`,
+  `retry_budget_ms`, `pending_batch_counts`, `oldest_pending_created_at`,
+  `newest_pending_created_at`, and `billing_subject_kind`. The subject kind must remain one of
+  `token|account|unknown`; raw billing subjects, request bodies, and token secrets must not appear.
 - Request-path billing-subject serialization may rely on an in-process guard for the current
   single-process active node, instead of persisting a SQLite lock row for every request.
 - Pending/charged billing truth may move to a dedicated `billing_ledger` table as long as pending
@@ -172,16 +187,18 @@ source when a usable persisted runtime already exists.
   Compose project and run directory, avoid global Docker cleanup, and only remove this owner’s
   inactive workspaces or runs after confirming they are not referenced by any live
   `com.docker.compose.project`.
-- The production cutover procedure for the 101 deployment is a short maintenance-window, local-host
-  migration. Operators must stop the service, export a pre-cutover cold backup of the core DB to
-  codex-testbox as the rollback anchor, run the offline migration on 101 itself, restart and
-  validate, and if anything fails restore the pre-cutover core DB and delete the sibling sidecar
-  before bringing the service back.
+- The production cutover procedure is a short maintenance-window, local-host migration. Operators
+  must stop the service, export a pre-cutover cold backup of the core DB to a rollback anchor, run
+  the offline migration on the target host itself, restart and validate, and if anything fails
+  restore the pre-cutover core DB and delete the sibling sidecar before bringing the service back.
 
 ## Acceptance
 
 - Under a competing SQLite writer, acquiring a quota subject lock eventually succeeds after the
   writer releases within the existing wait budget.
+- Under a competing SQLite writer that outlives SQLite's builtin busy timeout but releases before
+  the bounded application retry budget, one billable `/mcp` tools/call request still returns `200`,
+  records the billing row, and charges quota after the writer lock clears.
 - Under a competing SQLite writer, scheduled job start retries rather than immediately returning
   `database is locked`.
 - Under a competing SQLite writer, forward-proxy startup runtime snapshot persistence retries
@@ -193,6 +210,9 @@ source when a usable persisted runtime already exists.
 - With a large backlog of old request logs, one scheduler pass records bounded progress instead of
   running indefinitely; later catch-up passes eventually remove all rows older than the retention
   threshold.
+- Public success metrics continue to wait for inflight request-stat flushes, but the month-tail
+  fallback no longer emits the retained-log wide scan shape
+  `WITH scoped_logs AS (...) FROM observability.request_logs` on the public metrics path.
 - Overlapping DB-backed maintenance jobs in one process run through one persisted queue and one
   maintenance worker, so a second job is accepted/coalesced as `queued` instead of competing for the
   SQLite writer slot.
@@ -249,9 +269,9 @@ source when a usable persisted runtime already exists.
 - The current branch must be able to reproduce that explicit migration path on shared testbox from a
   production-shaped cold snapshot, then start normally and pass `/health`, `/api/version`,
   `/api/tavily/search`, `/mcp`, and request-log read-path smoke checks against the migrated data.
-- The 101 cutover runbook must be executable as written against the current deployment topology:
-  `docker compose` project `ai`, service `tavily-hikari`, volume mount `/srv/app/data -> /var/lib/docker/volumes/ai-tavily-hikari-data/_data`, `sqlite3` available on host, and rollback
-  anchor uploaded to codex-testbox before the local migration mutates the core DB.
+- The cutover runbook must be executable as written against the current deployment topology, with a
+  local `docker compose` service, host-level `sqlite3`, a writable data mount, and the rollback
+  anchor uploaded before the local migration mutates the core DB.
 - Existing billing tests continue to prove locked billing subject stability, pending billing
   replay, and account/token quota attribution.
 - Existing MCP/API routing behavior remains unchanged, including research result GET key pinning.

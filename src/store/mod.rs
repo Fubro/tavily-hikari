@@ -265,6 +265,101 @@ pub(crate) async fn sleep_before_sqlite_transient_write_retry(
     true
 }
 
+pub(crate) fn classify_billing_subject_kind(billing_subject: &str) -> &'static str {
+    if billing_subject.starts_with("token:") {
+        "token"
+    } else if billing_subject.starts_with("account:") {
+        "account"
+    } else {
+        "unknown"
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct SqliteContentionLogFields<'a> {
+    pub(crate) operation: &'a str,
+    pub(crate) request_path: &'a str,
+    pub(crate) request_kind: &'a str,
+    pub(crate) billing_subject_kind: &'a str,
+    pub(crate) retry_budget_ms: u64,
+    pub(crate) pending_batch_counts: &'a str,
+    pub(crate) oldest_pending_created_at: Option<i64>,
+    pub(crate) newest_pending_created_at: Option<i64>,
+}
+
+pub(crate) fn log_sqlite_transient_write_retry_with_fields(
+    fields: SqliteContentionLogFields<'_>,
+    attempt: usize,
+    backoff: Duration,
+    elapsed: Duration,
+    err: &ProxyError,
+) {
+    warn!(
+        component = "db",
+        event = "sqlite_transient_write_retry",
+        operation = fields.operation,
+        request_path = fields.request_path,
+        request_kind = fields.request_kind,
+        attempt,
+        backoff_ms = backoff.as_millis() as u64,
+        elapsed_ms = elapsed.as_millis() as u64,
+        retry_budget_ms = fields.retry_budget_ms,
+        pending_batch_counts = fields.pending_batch_counts,
+        oldest_pending_created_at = fields.oldest_pending_created_at.unwrap_or_default(),
+        newest_pending_created_at = fields.newest_pending_created_at.unwrap_or_default(),
+        billing_subject_kind = fields.billing_subject_kind,
+        err = %err,
+        "{}: transient sqlite write error (request_path={}, request_kind={}, attempt={}, backoff={}ms, elapsed={}ms, retry_budget={}ms, pending_batch_counts={}, oldest_pending_created_at={}, newest_pending_created_at={}, billing_subject_kind={}): {}",
+        fields.operation,
+        fields.request_path,
+        fields.request_kind,
+        attempt,
+        backoff.as_millis(),
+        elapsed.as_millis(),
+        fields.retry_budget_ms,
+        fields.pending_batch_counts,
+        fields.oldest_pending_created_at.unwrap_or_default(),
+        fields.newest_pending_created_at.unwrap_or_default(),
+        fields.billing_subject_kind,
+        err,
+    );
+}
+
+pub(crate) fn log_sqlite_transient_write_exhaustion_with_fields(
+    fields: SqliteContentionLogFields<'_>,
+    attempts: usize,
+    elapsed: Duration,
+    err: &ProxyError,
+) {
+    warn!(
+        component = "db",
+        event = "sqlite_transient_write_exhausted",
+        operation = fields.operation,
+        request_path = fields.request_path,
+        request_kind = fields.request_kind,
+        attempts,
+        elapsed_ms = elapsed.as_millis() as u64,
+        retry_budget_ms = fields.retry_budget_ms,
+        pending_batch_counts = fields.pending_batch_counts,
+        oldest_pending_created_at = fields.oldest_pending_created_at.unwrap_or_default(),
+        newest_pending_created_at = fields.newest_pending_created_at.unwrap_or_default(),
+        billing_subject_kind = fields.billing_subject_kind,
+        err = %err,
+        "{}: transient sqlite write retry budget exhausted (request_path={}, request_kind={}, attempts={}, elapsed={}ms, retry_budget={}ms, pending_batch_counts={}, oldest_pending_created_at={}, newest_pending_created_at={}, billing_subject_kind={}): {}",
+        fields.operation,
+        fields.request_path,
+        fields.request_kind,
+        attempts,
+        elapsed.as_millis(),
+        fields.retry_budget_ms,
+        fields.pending_batch_counts,
+        fields.oldest_pending_created_at.unwrap_or_default(),
+        fields.newest_pending_created_at.unwrap_or_default(),
+        fields.billing_subject_kind,
+        err,
+    );
+}
+
 pub(crate) fn is_invalid_current_month_billing_subject_error(err: &ProxyError) -> bool {
     match err {
         ProxyError::QuotaDataMissing { reason } => {
@@ -317,6 +412,7 @@ fn subtract_nonnegative(total: i64, subtract: i64) -> i64 {
     total.saturating_sub(subtract).max(0)
 }
 
+#[allow(dead_code)]
 fn subtract_summary_window_metrics(
     total: &SummaryWindowMetrics,
     subtract: &SummaryWindowMetrics,
@@ -2566,6 +2662,7 @@ include!("key_store_alerts.rs");
 include!("key_store_announcements.rs");
 include!("key_store_dashboard_window_metrics.rs");
 include!("key_store_dashboard_month_series.rs");
+include!("key_store_request_stats_flush_and_public_metrics.rs");
 include!("key_store_request_logs_and_dashboard.rs");
 include!("key_store_request_logs_summary_windows.rs");
 include!("key_store_user_rankings.rs");

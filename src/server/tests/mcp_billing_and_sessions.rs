@@ -1339,6 +1339,135 @@ use super::upstream_support_and_manual_jobs::*;
     }
 
     #[tokio::test]
+    async fn mcp_tools_call_tavily_search_retries_pending_billing_when_sqlite_writer_lock_releases()
+     {
+        let db_path = temp_db_path("mcp-tools-call-search-billing-writer-lock-retry");
+        let db_str = db_path.to_string_lossy().to_string();
+
+        let _hourly_business_guard = EnvVarGuard::set("TOKEN_HOURLY_LIMIT", "1000");
+
+        let expected_api_key = "tvly-mcp-tools-call-search-billing-writer-lock-retry-key";
+        let arrived = Arc::new(Notify::new());
+        let release = Arc::new(Notify::new());
+        let (upstream_addr, hits) = spawn_mock_mcp_upstream_for_tavily_search_delayed(
+            expected_api_key.to_string(),
+            arrived.clone(),
+            release.clone(),
+        )
+        .await;
+        let upstream = format!("http://{}", upstream_addr);
+
+        let proxy =
+            TavilyProxy::with_endpoint(vec![expected_api_key.to_string()], &upstream, &db_str)
+                .await
+                .expect("proxy created");
+        let access_token = proxy
+            .create_access_token(Some("mcp-tools-call-search-billing-writer-lock-retry"))
+            .await
+            .expect("create access token");
+
+        let proxy_addr = spawn_proxy_server(proxy.clone(), upstream.clone()).await;
+        let client = Client::new();
+        let url = format!(
+            "http://{}/mcp?tavilyApiKey={}",
+            proxy_addr, access_token.token
+        );
+
+        let handle = tokio::spawn({
+            let client = client.clone();
+            let url = url.clone();
+            async move {
+                client
+                    .post(&url)
+                    .json(&serde_json::json!({
+                        "method": "tools/call",
+                        "params": {
+                            "name": "tavily-search",
+                            "arguments": {
+                                "query": "mcp transient writer lock",
+                                "search_depth": "basic"
+                            }
+                        }
+                    }))
+                    .send()
+                    .await
+                    .expect("request")
+            }
+        });
+
+        arrived.notified().await;
+
+        let lock_options = sqlx::sqlite::SqliteConnectOptions::new()
+            .filename(&db_str)
+            .create_if_missing(false)
+            .journal_mode(sqlx::sqlite::SqliteJournalMode::Wal)
+            .busy_timeout(Duration::from_millis(1));
+        let mut lock_conn = sqlx::SqliteConnection::connect_with(&lock_options)
+            .await
+            .expect("open lock connection");
+        sqlx::query("BEGIN IMMEDIATE")
+            .execute(&mut lock_conn)
+            .await
+            .expect("hold writer lock");
+
+        release.notify_one();
+
+        tokio::time::sleep(Duration::from_millis(5200)).await;
+
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(2);
+        loop {
+            match sqlx::query("COMMIT").execute(&mut lock_conn).await {
+                Ok(_) => break,
+                Err(sqlx::Error::Database(err))
+                    if err.message().contains("database is locked")
+                        && tokio::time::Instant::now() < deadline =>
+                {
+                    tokio::time::sleep(Duration::from_millis(10)).await;
+                }
+                Err(err) => panic!("release write lock: {err}"),
+            }
+        }
+
+        let resp = handle.await.expect("task join");
+        assert_eq!(resp.status(), reqwest::StatusCode::OK);
+        assert_eq!(hits.load(Ordering::SeqCst), 1);
+
+        let pool = connect_sqlite_test_pool(&db_str).await;
+        let row = sqlx::query(
+            r#"
+            SELECT result_status, error_message, business_credits, billing_state
+            FROM auth_token_logs
+            WHERE token_id = ?
+            ORDER BY id DESC
+            LIMIT 1
+            "#,
+        )
+        .bind(&access_token.id)
+        .fetch_one(&pool)
+        .await
+        .expect("token log row exists");
+        let status: String = row.try_get("result_status").unwrap();
+        let message: Option<String> = row.try_get("error_message").unwrap();
+        let business_credits: Option<i64> = row.try_get("business_credits").unwrap();
+        let billing_state: String = row.try_get("billing_state").unwrap();
+        assert_eq!(status, "success");
+        assert_eq!(business_credits, Some(1));
+        assert_eq!(billing_state, "charged");
+        assert!(
+            !message.unwrap_or_default().contains("record_pending_billing_attempt failed"),
+            "pending billing should recover before returning"
+        );
+
+        let verdict = proxy
+            .peek_token_quota(&access_token.id)
+            .await
+            .expect("peek quota");
+        assert_eq!(verdict.hourly_used, 1);
+
+        let _ = std::fs::remove_file(db_path);
+    }
+
+    #[tokio::test]
     async fn mcp_tools_call_tavily_non_search_tools_charge_credits_from_usage() {
         let db_path = temp_db_path("mcp-tools-call-non-search-credits");
         let db_str = db_path.to_string_lossy().to_string();

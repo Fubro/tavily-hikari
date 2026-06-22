@@ -22,6 +22,16 @@
   `2026-06-19 01:00 +08:00`: `oauth account upsert`, `apply_pending_billing_log`, and the
   downstream request-path billing failures that bubble up as `/api/tavily/search` or MCP proxy
   errors.
+- `insert_token_log_pending_billing` now writes `auth_token_logs` + `billing_ledger` in one
+  transaction and retries transient SQLite writer contention inside a `10s` application budget.
+  The retry/exhaustion logs emit stable structured fields for `operation`, `request_path`,
+  `request_kind`, `attempt|attempts`, `backoff_ms`, `elapsed_ms`, `retry_budget_ms`,
+  `pending_batch_counts`, `oldest_pending_created_at`, `newest_pending_created_at`, and
+  `billing_subject_kind`.
+- `apply_pending_billing_log` now emits the same structured contention contract, keyed by the
+  request path/kind already stored on the pending billing row, so “short contention recovered” and
+  “budget exhausted, fail closed” are distinguishable in production logs without exposing the raw
+  billing subject.
 - Background scheduler/worker DB work now has unified phase logs around `scheduled job enqueue`
   and `request stats persist`, so `quota-sync-hot enqueue`, `scheduled job finish`, and request
   stats flush contention all have a stable DB operation prefix in addition to the existing
@@ -137,10 +147,18 @@
 - Request-derived rollups now flush in one background batcher (`1s / 100 pending keys`) instead of
   issuing synchronous rollup writes per request. Owner-facing summary, key-metrics, and request-log
   catalog reads flush that coalescer before reading.
+- `flush_request_stats_writes` now retries transient SQLite writer contention inside a bounded `10s`
+  application budget before requeueing the drained batch. The retry/exhaustion logs include
+  pending-batch counts plus the oldest/newest drained `created_at`, so operators can tell
+  whether they are looking at recoverable flush pressure or final fail-closed exhaustion.
 - Public `/api/public/metrics` and the first `metrics` event on `/api/public/events` now reuse the
   same freshness-gated read path on top of `dashboard_request_rollup_buckets`. The read path checks
   the last flushed timestamp plus the oldest pending request-stat write and only triggers one
   synchronous flush when the requested window is actually stale.
+- Public success breakdown month-tail fallback is now rollup-first and success-count-only. The
+  live path no longer depends on `fetch_visible_request_log_window_metrics` /
+  `WITH scoped_logs AS (...) FROM observability.request_logs`; it subtracts only the retained tail
+  success count from the last daily bucket and keeps day/month public counters unchanged.
 - Request observability tables now attach through a per-core sibling sidecar SQLite file
   (`<core-stem>-observability.db`) in the new layout. `request_logs`, `api_key_usage_buckets`,
   `dashboard_request_rollup_buckets`, and `request_log_catalog_rollups` are created in that
@@ -234,6 +252,11 @@
   the SQLite writer slot, both at the store layer and through the owner-facing HTTP trigger route.
 - Added request-rollup tests that prove public metrics skip synchronous flush when freshness is
   already current and perform one bounded flush when the live window is stale.
+- Added `/mcp` end-to-end contention coverage:
+  `cargo test mcp_tools_call_tavily_search_retries_pending_billing_when_sqlite_writer_lock_releases -- --nocapture`
+  now holds `BEGIN IMMEDIATE` beyond SQLite's builtin `busy_timeout`, releases inside the
+  application retry budget, and proves one billable `/mcp` request still returns `200` and charges
+  quota after the writer lock clears.
 - Extended alert endpoint coverage so request-kind filtered event/group reads continue returning the
   canonical keys exposed by the HTTP contract after the SQL-side pagination/aggregation rewrite.
 - Added worker orchestration coverage that proves only one remote-I/O maintenance job enters
@@ -258,6 +281,36 @@
   succeeded and a normal startup reopen succeeded,” not just “the offline sidecar tables were
   rebuilt.”
 - Added request-stats coverage proving summary/key-metric reads flush pending coalesced deltas
+
+## 2026-06-22 evidence
+
+- One production sample showed `database is locked` `34` times and `slow statement` `296` times in
+  the latest sampled hour while `/health` and `/api/version` stayed fast, confirming writer
+  contention rather than process deadlock.
+- The live hot-path evidence clustered around:
+  `request stats persist`,
+  `record_pending_billing_attempt failed for /mcp`,
+  and retained-log month-tail scans shaped like
+  `WITH scoped_logs AS (...) FROM observability.request_logs`.
+- Host pressure (root volume near `99%`, swap heavily used) is now recorded as an amplifying
+  factor, not the primary root cause.
+
+## Validation commands
+
+- `cargo test mcp_tools_call_tavily_search_retries_pending_billing_when_sqlite_writer_lock_releases -- --nocapture`
+- `cargo test ensure_user_token_binding_with_preferred_retries_when_begin_is_locked -- --nocapture`
+- `cargo test public_success_breakdown_waits_for_inflight_flush_before_serving_metrics -- --nocapture`
+
+## Rollout notes
+
+- `project_doc_disposition=defer`: the deployment inventory/runbook remains a rollout-stage sync
+  target because this round does not deploy from the repo.
+- Post-deploy grep targets:
+  `sqlite_transient_write_retry`,
+  `sqlite_transient_write_exhausted`,
+  `operation=request stats persist`,
+  `operation=insert_token_log_pending_billing`,
+  `operation=apply_pending_billing_log`.
   before returning.
 - Added request-stats coverage proving auth-token activity reads and admin rate-5m usage-series
   reads flush pending coalesced deltas before returning.
@@ -310,8 +363,8 @@
 
 ## Operations Notes
 
-- The `2026-06-19 01:00 +08:00` to `2026-06-19 10:18 +08:00` 101 sample that motivated this pass
-  showed all three runtime responsibility surfaces at once:
+- The `2026-06-19 01:00 +08:00` to `2026-06-19 10:18 +08:00` production sample that motivated
+  this pass showed all three runtime responsibility surfaces at once:
   - startup: `forward-proxy startup: sqlite initialized in 38906ms`
   - background queueing/worker writes: `quota-sync-hot: enqueue job error`, `scheduled job finish`,
     `request stats persist warning`
@@ -345,33 +398,17 @@
   space crosses the threshold or operators explicitly force a maintenance window.
 - The large-legacy sidecar cutover is now a separate operator runbook instead of an automatic
   startup side effect. The validated flow is:
-  - on codex-testbox, seed a production-shaped legacy core DB snapshot, run the migration
+  - on a shared testbox, seed a production-shaped legacy core DB snapshot, run the migration
     container first, then start the current-branch service image against the migrated files and
     verify `/health`, `/api/version`, `/api/tavily/search`, `/mcp`, and request-log reads;
-  - on 101, stop `tavily-hikari`, export the pre-cutover core DB as the rollback anchor to
-    codex-testbox, run `observability_sidecar_migrate` locally against
-    `/srv/app/data/tavily_proxy.db`, restart, and validate the same request-log and MCP surfaces;
+  - on the production host, stop the service, export the pre-cutover core DB as the rollback
+    anchor to the shared testbox, run `observability_sidecar_migrate` locally against the
+    configured DB
+    path, restart, and validate the same request-log and MCP surfaces;
   - if validation fails, stop the service, restore the pre-cutover core DB, delete the sibling
     `tavily_proxy-observability.db`, and then restart.
-- The current 101 deployment facts that this runbook assumes were rechecked on 2026-06-17:
-  - compose working directory `/home/ivan/srv/ai`
-  - running service name `tavily-hikari` in compose project `ai`
-  - container mount `/srv/app/data -> /var/lib/docker/volumes/ai-tavily-hikari-data/_data`
-  - host free space about `56G`
-  - `sqlite3` available at `/usr/bin/sqlite3`
-- Recommended 101 cutover sequence:
-  - stop the service:
-    `ssh 192.168.31.11 'cd /home/ivan/srv/ai && docker compose stop tavily-hikari'`
-  - create a consistent cold backup on 101:
-    `ssh 192.168.31.11 'sqlite3 /var/lib/docker/volumes/ai-tavily-hikari-data/_data/tavily_proxy.db \".backup /tmp/tavily_proxy.pre_sidecar.db\" && gzip -f /tmp/tavily_proxy.pre_sidecar.db'`
-  - upload the rollback anchor to codex-testbox:
-    `ssh 192.168.31.11 'cat /tmp/tavily_proxy.pre_sidecar.db.gz' | ssh codex-testbox 'cat > /srv/codex/workspaces/ivan/tavily-hikari__7aa37deb/backups/tavily_proxy.pre_sidecar.db.gz'`
-  - run the explicit migration on 101:
-    `ssh 192.168.31.11 'cd /home/ivan/srv/ai && docker compose run --rm -T --entrypoint observability_sidecar_migrate tavily-hikari --db-path /srv/app/data/tavily_proxy.db --batch-size 5000 --json'`
-  - restart and validate:
-    `ssh 192.168.31.11 'cd /home/ivan/srv/ai && docker compose up -d tavily-hikari && docker compose ps tavily-hikari'`
-  - rollback if validation fails:
-    `ssh 192.168.31.11 'cd /home/ivan/srv/ai && docker compose stop tavily-hikari && gzip -dc /tmp/tavily_proxy.pre_sidecar.db.gz > /var/lib/docker/volumes/ai-tavily-hikari-data/_data/tavily_proxy.db && rm -f /var/lib/docker/volumes/ai-tavily-hikari-data/_data/tavily_proxy-observability.db && docker compose up -d tavily-hikari'`
+- The deployment-specific hostnames, paths, and cutover commands are intentionally omitted here.
+  Keep those details in the private deployment inventory/runbook rather than the repository spec.
 - The stop-service proof for this runbook is the sibling `tavily_proxy-observability-migrate.lock`:
   live server and GC paths hold it shared, while the explicit migration command must acquire it
   exclusively before mutating the legacy core DB. The remaining SQLite write probe stays in the

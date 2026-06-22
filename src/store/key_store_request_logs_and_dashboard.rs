@@ -247,293 +247,6 @@ impl KeyStore {
         Ok(())
     }
 
-    pub(crate) async fn flush_request_stats_writes(&self) -> Result<(), ProxyError> {
-        loop {
-            let pending = {
-                let mut state = self.request_stats_coalescer.state.lock().await;
-                if state.flushing {
-                    None
-                } else if state.pending_dashboard_rollups.is_empty()
-                    && state.pending_api_key_usage.is_empty()
-                    && state.pending_auth_token_activity.is_empty()
-                    && state.pending_account_request_rollups.is_empty()
-                    && state.pending_request_log_catalog.is_empty()
-                {
-                    return Ok(());
-                } else {
-                    state.flushing = true;
-                    state.flushing_oldest_created_at = state.oldest_pending_created_at.take();
-                    state.flushing_newest_created_at = state.newest_pending_created_at.take();
-                    Some((
-                        std::mem::take(&mut state.pending_dashboard_rollups),
-                        std::mem::take(&mut state.pending_api_key_usage),
-                        std::mem::take(&mut state.pending_auth_token_activity),
-                        std::mem::take(&mut state.pending_account_request_rollups),
-                        std::mem::take(&mut state.pending_request_log_catalog),
-                        state.flushing_oldest_created_at,
-                        state.flushing_newest_created_at,
-                    ))
-                }
-            };
-            let Some((
-                pending_dashboard_rollups,
-                pending_api_key_usage,
-                pending_auth_token_activity,
-                pending_account_request_rollups,
-                pending_request_log_catalog,
-                drained_oldest_pending_created_at,
-                drained_newest_pending_created_at,
-            )) = pending
-            else {
-                self.request_stats_coalescer.wait_until_flushed().await;
-                continue;
-            };
-
-            let mut pending_dashboard_rollups = pending_dashboard_rollups;
-            let mut pending_api_key_usage = pending_api_key_usage;
-            let mut pending_auth_token_activity = pending_auth_token_activity;
-            let mut pending_account_request_rollups = pending_account_request_rollups;
-            let mut pending_request_log_catalog = pending_request_log_catalog;
-            let updated_at = Utc::now().timestamp();
-            let result = async {
-                let mut tx = self.pool.begin().await?;
-                let mut dashboard_entries = pending_dashboard_rollups
-                    .drain()
-                    .collect::<Vec<_>>();
-                dashboard_entries.sort_by(|left, right| left.0.cmp(&right.0));
-                for ((bucket_start, bucket_secs), counts) in dashboard_entries {
-                    Self::upsert_dashboard_request_rollup_bucket(
-                        &mut tx,
-                        bucket_start,
-                        bucket_secs,
-                        counts,
-                        updated_at,
-                    )
-                    .await?;
-                }
-
-                let mut api_key_usage_entries =
-                    pending_api_key_usage.drain().collect::<Vec<_>>();
-                api_key_usage_entries.sort_by(|left, right| left.0.cmp(&right.0));
-                for ((key_id, bucket_start), delta) in api_key_usage_entries {
-                    Self::upsert_api_key_usage_bucket_delta(
-                        &mut tx,
-                        &key_id,
-                        bucket_start,
-                        delta,
-                        updated_at,
-                    )
-                    .await?;
-                }
-
-                let mut auth_token_activity_entries =
-                    pending_auth_token_activity.drain().collect::<Vec<_>>();
-                auth_token_activity_entries.sort_by(|left, right| left.0.cmp(&right.0));
-                for (token_id, delta) in auth_token_activity_entries {
-                    Self::upsert_auth_token_activity_delta(&mut tx, &token_id, delta).await?;
-                }
-
-                let mut account_request_rollup_entries =
-                    pending_account_request_rollups.drain().collect::<Vec<_>>();
-                account_request_rollup_entries.sort_by(|left, right| left.0.cmp(&right.0));
-                for (key, delta) in account_request_rollup_entries {
-                    let user_id = key.user_id;
-                    let bucket_start = key.five_minute_bucket_start;
-                    let day_bucket_start = key.day_bucket_start;
-                    if delta.request_count > 0 {
-                        for (bucket_kind, rollup_bucket_start) in [
-                            (AccountUsageRollupBucketKind::FiveMinute, bucket_start),
-                            (AccountUsageRollupBucketKind::Day, day_bucket_start),
-                        ] {
-                            sqlx::query(
-                                r#"
-                                INSERT INTO account_usage_rollup_buckets (
-                                    user_id,
-                                    metric_kind,
-                                    bucket_kind,
-                                    bucket_start,
-                                    value,
-                                    updated_at
-                                )
-                                VALUES (?, ?, ?, ?, ?, ?)
-                                ON CONFLICT(user_id, metric_kind, bucket_kind, bucket_start)
-                                DO UPDATE SET
-                                    value = account_usage_rollup_buckets.value + excluded.value,
-                                    updated_at = excluded.updated_at
-                                "#,
-                            )
-                            .bind(&user_id)
-                            .bind(AccountUsageRollupMetricKind::RequestCount.as_str())
-                            .bind(bucket_kind.as_str())
-                            .bind(rollup_bucket_start)
-                            .bind(delta.request_count)
-                            .bind(updated_at)
-                            .execute(&mut *tx)
-                            .await?;
-                        }
-                    }
-                    if delta.primary_success > 0 {
-                        for (bucket_kind, rollup_bucket_start) in [
-                            (AccountUsageRollupBucketKind::FiveMinute, bucket_start),
-                            (AccountUsageRollupBucketKind::Day, day_bucket_start),
-                        ] {
-                            sqlx::query(
-                                r#"
-                                INSERT INTO account_usage_rollup_buckets (
-                                    user_id,
-                                    metric_kind,
-                                    bucket_kind,
-                                    bucket_start,
-                                    value,
-                                    updated_at
-                                )
-                                VALUES (?, ?, ?, ?, ?, ?)
-                                ON CONFLICT(user_id, metric_kind, bucket_kind, bucket_start)
-                                DO UPDATE SET
-                                    value = account_usage_rollup_buckets.value + excluded.value,
-                                    updated_at = excluded.updated_at
-                                "#,
-                            )
-                            .bind(&user_id)
-                            .bind(AccountUsageRollupMetricKind::PrimarySuccess.as_str())
-                            .bind(bucket_kind.as_str())
-                            .bind(rollup_bucket_start)
-                            .bind(delta.primary_success)
-                            .bind(updated_at)
-                            .execute(&mut *tx)
-                            .await?;
-                        }
-                    }
-                    if delta.secondary_success > 0 {
-                        for (bucket_kind, rollup_bucket_start) in [
-                            (AccountUsageRollupBucketKind::FiveMinute, bucket_start),
-                            (AccountUsageRollupBucketKind::Day, day_bucket_start),
-                        ] {
-                            sqlx::query(
-                                r#"
-                                INSERT INTO account_usage_rollup_buckets (
-                                    user_id,
-                                    metric_kind,
-                                    bucket_kind,
-                                    bucket_start,
-                                    value,
-                                    updated_at
-                                )
-                                VALUES (?, ?, ?, ?, ?, ?)
-                                ON CONFLICT(user_id, metric_kind, bucket_kind, bucket_start)
-                                DO UPDATE SET
-                                    value = account_usage_rollup_buckets.value + excluded.value,
-                                    updated_at = excluded.updated_at
-                                "#,
-                            )
-                            .bind(&user_id)
-                            .bind(AccountUsageRollupMetricKind::SecondarySuccess.as_str())
-                            .bind(bucket_kind.as_str())
-                            .bind(rollup_bucket_start)
-                            .bind(delta.secondary_success)
-                            .bind(updated_at)
-                            .execute(&mut *tx)
-                            .await?;
-                        }
-                    }
-                }
-
-                let mut request_log_catalog_entries =
-                    pending_request_log_catalog.drain().collect::<Vec<_>>();
-                request_log_catalog_entries.sort_by(|left, right| left.0.cmp(&right.0));
-                for (key, request_count_delta) in request_log_catalog_entries {
-                    Self::upsert_request_log_catalog_rollup_delta(
-                        &mut tx,
-                        &key,
-                        request_count_delta,
-                        updated_at,
-                    )
-                    .await?;
-                }
-
-                sqlx::query(
-                    r#"
-                    INSERT INTO meta (key, value)
-                    VALUES (?, ?)
-                    ON CONFLICT(key) DO UPDATE SET value = excluded.value
-                    "#,
-                )
-                .bind(META_KEY_REQUEST_STATS_LAST_FLUSHED_AT_V1)
-                .bind(updated_at.to_string())
-                .execute(&mut *tx)
-                .await?;
-
-                tx.commit().await?;
-                Ok::<_, ProxyError>(())
-            }
-            .await;
-
-            {
-                let mut state = self.request_stats_coalescer.state.lock().await;
-                state.flushing = false;
-                state.flush_deadline = None;
-                if let Err(err) = result {
-                    state.flushing_oldest_created_at = None;
-                    state.flushing_newest_created_at = None;
-                    for (key, counts) in pending_dashboard_rollups {
-                        state.pending_dashboard_rollups.entry(key).or_default().add(counts);
-                    }
-                    for (key, delta) in pending_api_key_usage {
-                        state.pending_api_key_usage.entry(key).or_default().add(delta);
-                    }
-                    for (token_id, delta) in pending_auth_token_activity {
-                        state
-                            .pending_auth_token_activity
-                            .entry(token_id)
-                            .or_default()
-                            .add(delta);
-                    }
-                    for (key, delta) in pending_account_request_rollups {
-                        state
-                            .pending_account_request_rollups
-                            .entry(key)
-                            .or_default()
-                            .add(delta);
-                    }
-                    for (key, delta) in pending_request_log_catalog {
-                        *state.pending_request_log_catalog.entry(key).or_default() += delta;
-                    }
-                    if let Some(created_at) = drained_oldest_pending_created_at {
-                        state.oldest_pending_created_at = Some(
-                            state
-                                .oldest_pending_created_at
-                                .map(|current| current.min(created_at))
-                                .unwrap_or(created_at),
-                        );
-                    }
-                    if let Some(created_at) = drained_newest_pending_created_at {
-                        state.newest_pending_created_at = Some(
-                            state
-                                .newest_pending_created_at
-                                .map(|current| current.max(created_at))
-                                .unwrap_or(created_at),
-                        );
-                    }
-                    RequestStatsCoalescer::mark_flush_deadline_if_pending(&mut state);
-                    self.request_stats_coalescer.flushed.notify_waiters();
-                    return Err(err);
-                }
-                state.flushing_oldest_created_at = None;
-                state.flushing_newest_created_at = None;
-                if RequestStatsCoalescer::pending_key_count(&state) == 0 {
-                    state.oldest_pending_created_at = None;
-                    state.newest_pending_created_at = None;
-                } else {
-                    RequestStatsCoalescer::mark_flush_deadline_if_pending(&mut state);
-                }
-                self.request_stats_coalescer.flushed.notify_waiters();
-            }
-            #[cfg(test)]
-            self.request_stats_coalescer
-                .wait_for_post_flush_pause_if_installed()
-                .await;
-        }
-    }
 
     async fn migrate_log_effect_buckets(&self) -> Result<(), ProxyError> {
         let binding_codes = [
@@ -2731,6 +2444,8 @@ impl KeyStore {
         .map_err(ProxyError::Database)
     }
 
+    #[cfg(test)]
+    #[allow(dead_code)]
     async fn fetch_visible_request_log_window_metrics(
         &self,
         start: i64,
@@ -2801,6 +2516,8 @@ impl KeyStore {
         })
     }
 
+    #[cfg(test)]
+    #[allow(dead_code)]
     async fn fetch_api_key_usage_bucket_window_metrics(
         &self,
         bucket_start_at_least: i64,
@@ -2869,61 +2586,6 @@ impl KeyStore {
         })
     }
 
-    async fn fetch_utc_month_gap_bucket_metrics(
-        &self,
-        month_start: i64,
-        month_request_log_floor: Option<i64>,
-        gap_fallback_end: i64,
-    ) -> Result<SummaryWindowMetrics, ProxyError> {
-        let gap_end = match month_request_log_floor {
-            Some(floor) if floor > month_start => floor,
-            Some(_) => return Ok(SummaryWindowMetrics::default()),
-            None => gap_fallback_end,
-        };
-        if gap_end <= month_start {
-            return Ok(SummaryWindowMetrics::default());
-        }
-
-        let first_bucket_start = local_day_bucket_start_utc_ts(month_start);
-        let first_exact_bucket_start = if first_bucket_start == month_start {
-            month_start
-        } else {
-            next_local_day_start_utc_ts(first_bucket_start)
-        };
-        let last_gap_bucket_start = local_day_bucket_start_utc_ts(gap_end);
-
-        let mut backfill = SummaryWindowMetrics::default();
-        if first_exact_bucket_start < last_gap_bucket_start {
-            add_summary_window_metrics(
-                &mut backfill,
-                &self
-                    .fetch_api_key_usage_bucket_window_metrics(
-                        first_exact_bucket_start,
-                        Some(last_gap_bucket_start),
-                    )
-                    .await?,
-            );
-        }
-
-        if gap_end > last_gap_bucket_start && last_gap_bucket_start >= month_start {
-            let last_gap_bucket_end = next_local_day_start_utc_ts(last_gap_bucket_start);
-            let full_day_bucket = self
-                .fetch_api_key_usage_bucket_window_metrics(
-                    last_gap_bucket_start,
-                    Some(last_gap_bucket_end),
-                )
-                .await?;
-            let retained_tail = self
-                .fetch_visible_request_log_window_metrics(gap_end, last_gap_bucket_end)
-                .await?;
-            add_summary_window_metrics(
-                &mut backfill,
-                &subtract_summary_window_metrics(&full_day_bucket, &retained_tail),
-            );
-        }
-
-        Ok(backfill)
-    }
 
     async fn fetch_dashboard_rollup_success_count_tx(
         tx: &mut Transaction<'_, Sqlite>,
@@ -3049,9 +2711,8 @@ impl KeyStore {
             .fetch_visible_request_log_floor_since(month_start)
             .await?;
         let historical_month_success = self
-            .fetch_utc_month_gap_bucket_metrics(month_start, month_request_log_floor, now)
-            .await?
-            .success_count;
+            .fetch_utc_month_gap_success_count(month_start, month_request_log_floor, now)
+            .await?;
         let mut tx = self.pool.begin().await?;
         let (retained_partial_minute_success, dashboard_month_start) =
             match month_request_log_floor {
