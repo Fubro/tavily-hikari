@@ -243,7 +243,7 @@ pub async fn serve(
         .route("/api/admin/ha/events", get(get_admin_ha_events))
         .route("/api/admin/ha/events/ack", post(post_admin_ha_events_ack))
         .route("/api/admin/ha/timeline", get(get_admin_ha_timeline))
-        .route("/api/admin/ha/nodes/{node_id}", get(get_admin_ha_node_detail))
+        .route("/api/admin/ha/nodes/:node_id", get(get_admin_ha_node_detail))
         .route("/api/admin/ha/promote", post(post_admin_ha_promote))
         .route(
             "/api/admin/ha/planned-cutover",

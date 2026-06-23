@@ -8757,6 +8757,7 @@ function AdminDashboard(): JSX.Element {
       strings={systemSettingsStrings.ha}
       language={language}
       adminVariant="panel"
+      onConfigureSource={() => setHaSourceDialogOpen(true)}
       busy={haBusy}
       onPromote={handlePromoteHaNode}
       onFinalize={handleFinalizeHaFailover}

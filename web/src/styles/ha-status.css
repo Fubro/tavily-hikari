@@ -162,9 +162,21 @@
   line-height: 1.5;
 }
 
+.ha-node-panel-head-actions {
+  display: flex;
+  align-items: flex-start;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
 .ha-node-panel-state {
   display: flex;
   justify-content: flex-end;
+}
+
+.ha-node-configure-button {
+  flex: 0 0 auto;
 }
 
 .ha-status-summary {
@@ -840,6 +852,10 @@
 
   .ha-node-panel-head {
     display: grid;
+  }
+
+  .ha-node-panel-head-actions {
+    justify-content: flex-start;
   }
 
   .ha-node-panel-state {

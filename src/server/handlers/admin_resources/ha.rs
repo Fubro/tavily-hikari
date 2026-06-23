@@ -1,3 +1,5 @@
+use futures_util::stream;
+
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct HaPromoteRequest {
@@ -63,6 +65,12 @@ struct HaNodeDetailQuery {
     limit: Option<i64>,
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct InternalHaStatusQuery {
+    refresh_authority: Option<bool>,
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct InternalHaFinalizeRequest {
@@ -74,6 +82,7 @@ struct InternalHaFinalizeRequest {
 struct PlannedCutoverResponse {
     operation_id: String,
     status: String,
+    detail: Option<String>,
 }
 
 const HA_EVENTS_MAX_COMPRESSED_BYTES: usize = 4 * 1024 * 1024;
@@ -244,7 +253,10 @@ async fn fetch_internal_ha_status(
     internal_token: &str,
 ) -> Result<tavily_hikari::HaStatusView, String> {
     let response = client
-        .get(format!("{}/api/internal/ha/status", peer.admin_base_url))
+        .get(format!(
+            "{}/api/internal/ha/status?refreshAuthority=true",
+            peer.admin_base_url
+        ))
         .header("x-ha-internal-token", internal_token)
         .send()
         .await
@@ -288,19 +300,27 @@ async fn build_admin_ha_status(state: &Arc<AppState>) -> tavily_hikari::HaStatus
         .timeout(Duration::from_secs(5))
         .build()
         .unwrap_or_else(|_| Client::new());
-    let mut peer_nodes = Vec::new();
-    for peer in state.ha.peer_nodes() {
-        if peer.node_id == status.node_id {
-            continue;
-        }
-        let last_seen_at = state.proxy.backend_time().now_ts();
-        let peer_view = match fetch_internal_ha_status(&client, &peer, &internal_token).await {
-            Ok(peer_status) => peer_view_from_status(&peer, &peer_status, last_seen_at, now_ts),
-            Err(err) => peer_view_from_error(&peer, err),
-        };
-        peer_nodes.push(peer_view);
-    }
-    status.peer_nodes = peer_nodes;
+    let peers: Vec<_> = state
+        .ha
+        .peer_nodes()
+        .into_iter()
+        .filter(|peer| peer.node_id != status.node_id)
+        .collect();
+    status.peer_nodes = stream::iter(peers)
+        .map(|peer| {
+            let client = client.clone();
+            let internal_token = internal_token.to_string();
+            async move {
+                let last_seen_at = now_ts;
+                match fetch_internal_ha_status(&client, &peer, &internal_token).await {
+                    Ok(peer_status) => peer_view_from_status(&peer, &peer_status, last_seen_at, now_ts),
+                    Err(err) => peer_view_from_error(&peer, err),
+                }
+            }
+        })
+        .buffer_unordered(8)
+        .collect()
+        .await;
     status
 }
 
@@ -809,9 +829,18 @@ async fn get_public_ha_status(
 async fn get_internal_ha_status(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
+    Query(query): Query<InternalHaStatusQuery>,
 ) -> Result<Json<tavily_hikari::HaStatusView>, (StatusCode, String)> {
     if !is_ha_internal_request(state.as_ref(), &headers) {
         return Err((StatusCode::FORBIDDEN, "forbidden".to_string()));
+    }
+    if query.refresh_authority.unwrap_or(false) {
+        let status = state
+            .ha
+            .refresh_authoritative_role()
+            .await
+            .map_err(|err| (StatusCode::BAD_GATEWAY, err))?;
+        return Ok(Json(status));
     }
     Ok(Json(build_internal_ha_status(&state).await))
 }
@@ -1074,8 +1103,8 @@ async fn get_admin_ha_timeline(
         .map_err(|err| (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()))?;
     let mut events = events;
     let next_cursor = if events.len() as i64 > limit {
-        let extra = events.pop().expect("timeline extra event exists");
-        Some(extra.id)
+        events.pop().expect("timeline extra event exists");
+        events.last().map(|event| event.id)
     } else {
         None
     };
@@ -1101,12 +1130,12 @@ async fn get_admin_ha_node_detail(
     let limit = query.limit.unwrap_or(20).clamp(1, 100);
     let mut events = state
         .proxy
-        .list_ha_control_plane_events_for_node_interactions(query.cursor, limit + 1, &node_id)
+        .list_ha_control_plane_events_for_node_interactions(query.cursor, limit, &node_id)
         .await
         .map_err(|err| (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()))?;
     let next_cursor = if events.len() > limit as usize {
-        let extra = events.pop().expect("node detail extra event exists");
-        Some(extra.id)
+        events.pop().expect("node detail extra event exists");
+        events.last().map(|event| event.id)
     } else {
         None
     };
@@ -1302,20 +1331,47 @@ async fn post_admin_ha_planned_cutover(
         .await
         .map_err(|err| (StatusCode::CONFLICT, err))?;
     record_edgeone_audit_entries(&state, &operation_id, &audit_entries).await?;
+    let ingress_already_switched_detail =
+        format!("EdgeOne ingress already switched to {}; complete recovery reconciliation on both nodes before retrying.", peer.node_id);
     let deadline = Instant::now() + Duration::from_secs(HA_PLANNED_CUTOVER_POLL_TIMEOUT_SECS);
     let peer_after = loop {
         let current = fetch_internal_ha_status(&client, &peer, &internal_token)
             .await
-            .map_err(|err| (StatusCode::BAD_GATEWAY, err.clone()))?;
+            .map_err(|err| {
+                (
+                    StatusCode::BAD_GATEWAY,
+                    format!("{err} Ingress already moved to {}; do not retry blindly.", peer.node_id),
+                )
+            })?;
         if current.role == tavily_hikari::HaNodeRole::ProvisionalMaster {
             break current;
         }
         if Instant::now() >= deadline {
+            let _ = record_ha_control_plane_event(
+                &state,
+                tavily_hikari::HaControlPlaneEventInsert {
+                    event_kind: "planned_cutover_reconcile_required".to_string(),
+                    category: tavily_hikari::HaControlPlaneEventCategory::PlannedCutover,
+                    status: tavily_hikari::HaControlPlaneEventStatus::Error,
+                    node_id: Some(peer.node_id.clone()),
+                    operation_id: Some(operation_id.clone()),
+                    summary: format!(
+                        "Planned cutover moved ingress to {} but peer did not acknowledge provisional_master in time",
+                        peer.node_id
+                    ),
+                    detail: Some(ingress_already_switched_detail.clone()),
+                    technical_details: Some(json!({
+                        "targetNodeId": peer.node_id,
+                        "toTarget": target_settings.effective_target(),
+                    })),
+                },
+            )
+            .await;
             return Err((
                 StatusCode::GATEWAY_TIMEOUT,
                 format!(
-                    "planned cutover timed out waiting for peer {} to enter provisional_master",
-                    peer.node_id
+                    "planned cutover timed out waiting for peer {} to enter provisional_master. {}",
+                    peer.node_id, ingress_already_switched_detail
                 ),
             ));
         }
@@ -1333,15 +1389,47 @@ async fn post_admin_ha_planned_cutover(
     if !finalize_response.status().is_success() {
         let status = finalize_response.status();
         let detail = finalize_response.text().await.unwrap_or_default();
+        let _ = record_ha_control_plane_event(
+            &state,
+            tavily_hikari::HaControlPlaneEventInsert {
+                event_kind: "planned_cutover_finalize_failed".to_string(),
+                category: tavily_hikari::HaControlPlaneEventCategory::PlannedCutover,
+                status: tavily_hikari::HaControlPlaneEventStatus::Error,
+                node_id: Some(peer.node_id.clone()),
+                operation_id: Some(operation_id.clone()),
+                summary: format!(
+                    "Planned cutover moved ingress to {} but internal finalize failed",
+                    peer.node_id
+                ),
+                detail: Some(format!("{ingress_already_switched_detail} Finalize returned {status}: {detail}")),
+                technical_details: Some(json!({
+                    "targetNodeId": peer.node_id,
+                    "httpStatus": status.as_u16(),
+                    "response": detail,
+                })),
+            },
+        )
+        .await;
         return Err((
             StatusCode::BAD_GATEWAY,
-            format!("peer finalize failed with {status}: {detail}"),
+            format!(
+                "peer finalize failed with {status}: {detail}. {}",
+                ingress_already_switched_detail
+            ),
         ));
     }
     let _peer_finalized = finalize_response
         .json::<tavily_hikari::HaStatusView>()
         .await
-        .map_err(|err| (StatusCode::BAD_GATEWAY, format!("peer finalize response invalid: {err}")))?;
+        .map_err(|err| {
+            (
+                StatusCode::BAD_GATEWAY,
+                format!(
+                    "peer finalize response invalid: {err}. {}",
+                    ingress_already_switched_detail
+                ),
+            )
+        })?;
     let local_after = loop {
         let current = state
             .ha
@@ -1352,9 +1440,30 @@ async fn post_admin_ha_planned_cutover(
             break current;
         }
         if Instant::now() >= deadline {
+            let _ = record_ha_control_plane_event(
+                &state,
+                tavily_hikari::HaControlPlaneEventInsert {
+                    event_kind: "planned_cutover_local_recovery_timeout".to_string(),
+                    category: tavily_hikari::HaControlPlaneEventCategory::PlannedCutover,
+                    status: tavily_hikari::HaControlPlaneEventStatus::Error,
+                    node_id: Some(local_before.node_id.clone()),
+                    operation_id: Some(operation_id.clone()),
+                    summary: "Planned cutover switched ingress but local node did not enter recovery in time"
+                        .to_string(),
+                    detail: Some(ingress_already_switched_detail.clone()),
+                    technical_details: Some(json!({
+                        "currentNodeId": local_before.node_id,
+                        "targetNodeId": peer.node_id,
+                    })),
+                },
+            )
+            .await;
             return Err((
                 StatusCode::GATEWAY_TIMEOUT,
-                "planned cutover timed out waiting for local node to enter recovery".to_string(),
+                format!(
+                    "planned cutover timed out waiting for local node to enter recovery. {}",
+                    ingress_already_switched_detail
+                ),
             ));
         }
         state.proxy.backend_time().sleep(Duration::from_secs(1)).await;
@@ -1397,5 +1506,6 @@ async fn post_admin_ha_planned_cutover(
     Ok(Json(PlannedCutoverResponse {
         operation_id,
         status: "success".to_string(),
+        detail: None,
     }))
 }

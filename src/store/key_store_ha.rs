@@ -893,7 +893,7 @@ impl KeyStore {
                 .cmp(&left.id)
                 .then_with(|| right.created_at.cmp(&left.created_at))
         });
-        merged.truncate(limit.clamp(1, 200) as usize);
+        merged.truncate(limit.clamp(1, 200).saturating_add(1) as usize);
         Ok(merged)
     }
 

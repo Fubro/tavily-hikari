@@ -20,6 +20,7 @@ interface HaStatusBannerProps {
   strings?: AdminTranslations['systemSettings']['ha']
   language?: 'en' | 'zh'
   adminVariant?: 'panel' | 'compact'
+  onConfigureSource?: () => void
   onPromote?: () => void
   onFinalize?: () => void
   onPlannedCutover?: (targetNodeId: string) => void
@@ -95,6 +96,7 @@ interface HaNodeRow {
   key: string
   nodeId: string
   relation: string
+  isLocalNode: boolean
   role: string
   origin: string
   health: string
@@ -115,6 +117,7 @@ function buildNodeRows(status: HaStatus, strings: AdminTranslations['systemSetti
       key: 'local',
       nodeId: status.nodeId,
       relation: strings.thisAdminNodeLabel,
+      isLocalNode: true,
       role: roleLabel(status.role, strings),
       origin: status.edgeoneCurrentTarget ?? status.nodePublicOrigin ?? '—',
       health:
@@ -179,13 +182,13 @@ function buildNodeRows(status: HaStatus, strings: AdminTranslations['systemSetti
           ? strings.healthReadyStandby
           : peer.role === 'full_master'
             ? strings.healthServingWrites
-            : peer.role === 'standby'
-              ? strings.healthConfigured
-              : formatHaPeerMessage(peer, strings) ?? '—'
+            : formatHaPeerMessage(peer, strings)
+              ?? (peer.role === 'standby' ? strings.healthConfigured : '—')
     rows.push({
       key: `peer-${peer.nodeId}`,
       nodeId: peer.nodeId,
       relation,
+      isLocalNode: false,
       role: peer.role ? roleLabel(peer.role, strings) : '—',
       origin: peer.publicOrigin ?? '—',
       health,
@@ -214,6 +217,7 @@ export default function HaStatusBanner({
   strings,
   language,
   adminVariant = 'panel',
+  onConfigureSource,
   onPromote,
   onFinalize,
   onPlannedCutover,
@@ -302,7 +306,18 @@ export default function HaStatusBanner({
             <h2 id="ha-node-panel-title">{title}</h2>
             <p>{detail}</p>
           </div>
-          <div className="ha-node-panel-state">
+          <div className="ha-node-panel-head-actions">
+            {onConfigureSource ? (
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                className="ha-node-configure-button"
+                onClick={onConfigureSource}
+              >
+                {labels.configureSource}
+              </Button>
+            ) : null}
             <StatusBadge tone={authorityTone}>{authorityLabel}</StatusBadge>
           </div>
         </div>
@@ -340,7 +355,7 @@ export default function HaStatusBanner({
                   className="ha-node-cell ha-node-cell--identity ha-node-identity"
                   data-label={labels.nodeHeader}
                 >
-                  {onOpenNodeDetails ? (
+                  {onOpenNodeDetails && !row.isLocalNode ? (
                     <button
                       type="button"
                       className="ha-node-link"
