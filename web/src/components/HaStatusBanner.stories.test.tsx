@@ -48,6 +48,7 @@ describe('HaStatusBanner Storybook proofs', () => {
           renderStory?.({
             ...(meta.args ?? {}),
             ...(stories.StandbyAdmin.args ?? {}),
+            onOpenNodeDetails: () => undefined,
           }),
         ),
       ),
@@ -56,8 +57,36 @@ describe('HaStatusBanner Storybook proofs', () => {
     expect(markup).toContain(translations.zh.admin.systemSettings.ha.panelTitle)
     expect(markup).toContain(translations.zh.admin.systemSettings.ha.nodeInventoryTitle)
     expect(markup).toContain('node-b')
-    expect(markup).toContain('configured-peer')
+    expect(markup).toContain('node-a')
     expect(markup).toContain(translations.zh.admin.systemSettings.ha.promoteToMaster)
+  })
+
+  it('renders planned cutover inventory and timeline affordances for the ready story', () => {
+    const renderStory = meta.render as ((args: typeof stories.PlannedCutoverReady.args) => JSX.Element) | undefined
+    expect(renderStory).toBeDefined()
+
+    const markup = renderToStaticMarkup(
+      createElement(
+        LanguageProvider,
+        { initialLanguage: 'zh' },
+        createElement(
+          ThemeProvider,
+          null,
+          renderStory?.({
+            ...(meta.args ?? {}),
+            ...(stories.PlannedCutoverReady.args ?? {}),
+            onOpenNodeDetails: () => undefined,
+          }),
+        ),
+      ),
+    )
+
+    expect(markup).toContain(translations.zh.admin.systemSettings.ha.actionPlannedCutover)
+    expect(markup).toContain(translations.zh.admin.systemSettings.ha.timelineTitle)
+    expect(markup).toContain(translations.zh.admin.systemSettings.ha.timelineLoadMore)
+    expect(markup).toContain(translations.zh.admin.systemSettings.ha.healthStale)
+    expect(markup).toContain(translations.zh.admin.systemSettings.ha.timelineStatusSuccess)
+    expect(markup).toContain(translations.zh.admin.systemSettings.ha.healthReadyStandby)
   })
 
   it('renders compact admin attention without node inventory actions', () => {
