@@ -8711,6 +8711,29 @@ function AdminDashboard(): JSX.Element {
     setHaSourceDialogOpen(false)
   }, [])
 
+  const showNotFound = route.name === 'not-found'
+  const showSystemSettings = activeModule === 'system-settings'
+  const systemSettingsView = showSystemSettings && route.name === 'module'
+    ? route.systemSettingsView ?? 'general'
+    : route.name === 'ha-node'
+      ? 'ha'
+      : 'general'
+  const showSystemSettingsHa = showSystemSettings && systemSettingsView === 'ha'
+
+  useEffect(() => {
+    if (!showSystemSettingsHa) return
+    void refreshHaTimeline(null, false)
+  }, [refreshHaTimeline, showSystemSettingsHa])
+
+  useEffect(() => {
+    if (route.name !== 'ha-node') {
+      setHaNodeDetail(null)
+      setHaNodeDetailNextCursor(null)
+      return
+    }
+    void refreshHaNodeDetail(route.nodeId, null, false)
+  }, [refreshHaNodeDetail, route])
+
   const isSystemSettingsHaRoute =
     route.name === 'module' && route.module === 'system-settings' && (route.systemSettingsView ?? 'general') === 'ha'
   const isSystemSettingsHaNodeRoute = route.name === 'ha-node'
@@ -9460,7 +9483,6 @@ function AdminDashboard(): JSX.Element {
       </AdminShell>
     )
   }
-  const showNotFound = route.name === 'not-found'
   const notFoundPath = route.name === 'not-found' ? route.path : ''
   const showDashboard = activeModule === 'dashboard' && !showNotFound
   const showRankings = activeModule === 'rankings' && !showNotFound
@@ -9472,26 +9494,7 @@ function AdminDashboard(): JSX.Element {
   const showAnnouncements = activeModule === 'announcements'
   const showRecharges = activeModule === 'recharges'
   const showAlerts = activeModule === 'alerts'
-  const showSystemSettings = activeModule === 'system-settings'
-  const systemSettingsView = showSystemSettings && route.name === 'module'
-    ? route.systemSettingsView ?? 'general'
-    : route.name === 'ha-node'
-      ? 'ha'
-      : 'general'
   const showSystemSettingsGeneral = showSystemSettings && systemSettingsView === 'general'
-  const showSystemSettingsHa = showSystemSettings && systemSettingsView === 'ha'
-  useEffect(() => {
-    if (!showSystemSettingsHa) return
-    void refreshHaTimeline(null, false)
-  }, [refreshHaTimeline, showSystemSettingsHa])
-  useEffect(() => {
-    if (route.name !== 'ha-node') {
-      setHaNodeDetail(null)
-      setHaNodeDetailNextCursor(null)
-      return
-    }
-    void refreshHaNodeDetail(route.nodeId, null, false)
-  }, [refreshHaNodeDetail, route])
   const showProxySettings = activeModule === 'proxy-settings'
   const headerUpdatedTime = lastUpdated ? timeOnlyFormatter.format(lastUpdated) : null
 
