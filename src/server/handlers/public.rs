@@ -1153,6 +1153,29 @@ async fn build_dashboard_overview_payload(
     let summary_windows = state.proxy.summary_windows().await?;
     let hourly_request_window = state.proxy.dashboard_hourly_request_window().await?;
     let month_series = state.proxy.dashboard_month_series(&summary_windows).await?;
+    let dashboard_rollup_signature = state
+        .proxy
+        .dashboard_rollup_freshness_signature(summary_windows.previous_month_start)
+        .await?;
+    let dashboard_api_key_lifecycle_signature = state
+        .proxy
+        .dashboard_api_key_lifecycle_signature(summary_windows.previous_month_start)
+        .await?;
+    let dashboard_quarantine_lifecycle_signature = state
+        .proxy
+        .dashboard_quarantine_lifecycle_signature(summary_windows.previous_month_start)
+        .await?;
+    let dashboard_exhausted_lifecycle_signature = state
+        .proxy
+        .dashboard_exhausted_lifecycle_signature(
+            summary_windows.previous_month_start,
+            summary_windows.month_period_end,
+        )
+        .await?;
+    let dashboard_quota_sample_signature = state
+        .proxy
+        .dashboard_quota_sample_signature(summary_windows.previous_month_start)
+        .await?;
     let forward_proxy = state.proxy.get_forward_proxy_dashboard_summary().await?;
     let (request_log_retention_days, retention_since) =
         dashboard_request_log_retention(state).await?;
@@ -1293,6 +1316,11 @@ async fn build_dashboard_overview_payload(
                 summary_windows.yesterday_start,
                 summary_windows.month_start,
             ],
+            dashboard_rollup_signature,
+            dashboard_api_key_lifecycle_signature,
+            dashboard_quarantine_lifecycle_signature,
+            dashboard_exhausted_lifecycle_signature,
+            dashboard_quota_sample_signature,
             forward_proxy: Some((forward_proxy.available_nodes, forward_proxy.total_nodes)),
             exhausted_keys: exhausted_key_ids,
             latest_quota_sync_sample_at: state.proxy.latest_dashboard_quota_sync_sample_at().await?,
@@ -1387,6 +1415,30 @@ async fn compute_dashboard_overview_freshness(
     state: &Arc<AppState>,
 ) -> Result<DashboardOverviewFreshness, ProxyError> {
     let summary = state.proxy.summary().await?;
+    let summary_windows = state.proxy.summary_windows().await?;
+    let dashboard_rollup_signature = state
+        .proxy
+        .dashboard_rollup_freshness_signature(summary_windows.previous_month_start)
+        .await?;
+    let dashboard_api_key_lifecycle_signature = state
+        .proxy
+        .dashboard_api_key_lifecycle_signature(summary_windows.previous_month_start)
+        .await?;
+    let dashboard_quarantine_lifecycle_signature = state
+        .proxy
+        .dashboard_quarantine_lifecycle_signature(summary_windows.previous_month_start)
+        .await?;
+    let dashboard_exhausted_lifecycle_signature = state
+        .proxy
+        .dashboard_exhausted_lifecycle_signature(
+            summary_windows.previous_month_start,
+            summary_windows.month_period_end,
+        )
+        .await?;
+    let dashboard_quota_sample_signature = state
+        .proxy
+        .dashboard_quota_sample_signature(summary_windows.previous_month_start)
+        .await?;
     let forward_proxy = state.proxy.get_forward_proxy_dashboard_summary().await?;
     let summary_window_starts =
         dashboard_summary_window_starts_now(state.proxy.backend_time().local_now());
@@ -1439,6 +1491,11 @@ async fn compute_dashboard_overview_freshness(
         ],
         summary_last_activity: summary.last_activity,
         summary_window_starts,
+        dashboard_rollup_signature,
+        dashboard_api_key_lifecycle_signature,
+        dashboard_quarantine_lifecycle_signature,
+        dashboard_exhausted_lifecycle_signature,
+        dashboard_quota_sample_signature,
         forward_proxy: Some((forward_proxy.available_nodes, forward_proxy.total_nodes)),
         exhausted_keys,
         latest_quota_sync_sample_at: state.proxy.latest_dashboard_quota_sync_sample_at().await?,

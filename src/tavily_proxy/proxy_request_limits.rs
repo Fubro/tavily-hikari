@@ -641,6 +641,52 @@ impl TavilyProxy {
             .await
     }
 
+    pub async fn dashboard_rollup_freshness_signature(
+        &self,
+        range_start: i64,
+    ) -> Result<[i64; 4], ProxyError> {
+        self.key_store
+            .fetch_dashboard_rollup_freshness_signature(range_start)
+            .await
+    }
+
+    pub async fn dashboard_api_key_lifecycle_signature(
+        &self,
+        range_start: i64,
+    ) -> Result<[i64; 3], ProxyError> {
+        self.key_store
+            .fetch_dashboard_api_key_lifecycle_signature(range_start)
+            .await
+    }
+
+    pub async fn dashboard_quarantine_lifecycle_signature(
+        &self,
+        range_start: i64,
+    ) -> Result<[i64; 3], ProxyError> {
+        self.key_store
+            .fetch_dashboard_quarantine_lifecycle_signature(range_start)
+            .await
+    }
+
+    pub async fn dashboard_exhausted_lifecycle_signature(
+        &self,
+        range_start: i64,
+        range_end: i64,
+    ) -> Result<[i64; 3], ProxyError> {
+        self.key_store
+            .fetch_dashboard_exhausted_lifecycle_signature(range_start, range_end)
+            .await
+    }
+
+    pub async fn dashboard_quota_sample_signature(
+        &self,
+        range_start: i64,
+    ) -> Result<[i64; 4], ProxyError> {
+        self.key_store
+            .fetch_dashboard_quota_sample_signature(range_start)
+            .await
+    }
+
     /// Public metrics: successful requests today and this month.
     pub async fn success_breakdown(
         &self,
