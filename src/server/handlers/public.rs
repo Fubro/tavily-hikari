@@ -984,8 +984,8 @@ async fn sse_dashboard(
                     if last_sig.is_none() || sig != last_sig || latest_id != last_log_id {
                         if let Some((event, emitted_sig)) = build_snapshot_event(&state).await {
                             yield Ok(event);
+                            last_log_id = emitted_sig.freshness.latest_request_log_id;
                             last_sig = Some(emitted_sig);
-                            last_log_id = latest_id;
                         } else {
                             let degraded = Event::default().event("degraded").data("{}");
                             yield Ok(degraded);

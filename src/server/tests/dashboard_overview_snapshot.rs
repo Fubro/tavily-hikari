@@ -189,6 +189,97 @@ async fn dashboard_snapshot_event_uses_rebuilt_freshness_after_pending_rollups()
 }
 
 #[tokio::test]
+async fn dashboard_snapshot_event_emits_latest_log_cursor_from_rebuilt_snapshot() {
+    let db_path = temp_db_path("dashboard-overview-emitted-log-cursor");
+    let db_str = db_path.to_string_lossy().to_string();
+    let proxy = TavilyProxy::with_endpoint(
+        vec!["tvly-dashboard-overview-emitted-log-cursor".to_string()],
+        DEFAULT_UPSTREAM,
+        &db_str,
+    )
+    .await
+    .expect("proxy created");
+
+    let state = Arc::new(AppState {
+        proxy,
+        static_dir: None,
+        forward_auth: ForwardAuthConfig::new(None, None, None, None),
+        forward_auth_enabled: false,
+        builtin_admin: BuiltinAdminAuth::new(false, None, None),
+        linuxdo_oauth: LinuxDoOAuthOptions::disabled(),
+        linuxdo_credit: LinuxDoCreditOptions::disabled(),
+        ha: tavily_hikari::HaRuntime::new(tavily_hikari::HaConfig::default()),
+        dev_open_admin: false,
+        usage_base: "http://127.0.0.1:58088".to_string(),
+        api_key_ip_geo_origin: "https://api.country.is".to_string(),
+        dashboard_overview_cache: new_dashboard_overview_cache(),
+    });
+    let pool = connect_sqlite_test_pool(&db_str).await;
+
+    let (probe_sig, stale_latest_id) = compute_signatures(&state)
+        .await
+        .expect("compute signatures before new log");
+    let probe_sig = probe_sig.expect("summary signature before new log");
+    assert_eq!(
+        stale_latest_id, None,
+        "fresh probe should start without a visible request-log cursor",
+    );
+
+    let new_created_at = Utc::now().timestamp();
+    let new_log_id = sqlx::query(
+        r#"
+        INSERT INTO observability.request_logs (
+            api_key_id, auth_token_id, method, path, query, status_code, tavily_status_code,
+            error_message, result_status, request_body, response_body, forwarded_headers,
+            dropped_headers, created_at
+        ) VALUES (NULL, NULL, 'POST', '/search', NULL, 200, 200, NULL, 'success', NULL, NULL, '', '', ?)
+        "#,
+    )
+    .bind(new_created_at)
+    .execute(&pool)
+    .await
+    .expect("insert new visible request log")
+    .last_insert_rowid();
+
+    let (_event, emitted_sig) = build_snapshot_event(&state)
+        .await
+        .expect("snapshot event after new log");
+
+    assert_eq!(
+        emitted_sig.freshness.latest_request_log_id,
+        Some(new_log_id),
+        "emitted snapshot freshness should carry the rebuilt latest visible request-log id",
+    );
+    assert_ne!(
+        stale_latest_id,
+        emitted_sig.freshness.latest_request_log_id,
+        "probe cursor should be allowed to go stale while the snapshot rebuild catches up",
+    );
+
+    let (next_sig, next_latest_id) = compute_signatures(&state)
+        .await
+        .expect("compute signatures after snapshot emit");
+    let next_sig = next_sig.expect("summary signature after snapshot emit");
+    assert_eq!(
+        next_sig,
+        emitted_sig,
+        "the next SSE probe should match the freshness that was just emitted",
+    );
+    assert_eq!(
+        next_latest_id,
+        emitted_sig.freshness.latest_request_log_id,
+        "SSE cursor should advance to the emitted snapshot freshness to avoid duplicate snapshots on the next poll",
+    );
+    assert_ne!(
+        probe_sig.freshness.latest_request_log_id,
+        emitted_sig.freshness.latest_request_log_id,
+        "the regression only shows up when a request log lands after the probe but before snapshot emission",
+    );
+
+    let _ = std::fs::remove_file(db_path);
+}
+
+#[tokio::test]
 async fn dashboard_overview_snapshot_ignores_retained_out_request_logs_in_freshness_probe() {
     let db_path = temp_db_path("dashboard-overview-retained-log-freshness");
     let db_str = db_path.to_string_lossy().to_string();
