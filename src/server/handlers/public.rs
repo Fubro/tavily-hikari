@@ -1196,6 +1196,10 @@ async fn build_dashboard_overview_payload(
         .into_iter()
         .map(RequestLogView::from_summary_record)
         .collect();
+    let trend_request_logs = recent_log_views
+        .iter()
+        .map(|log| (log.id, log.created_at))
+        .collect::<Vec<_>>();
     let trend = build_dashboard_trend(&recent_log_views);
     let recent_logs: Vec<RequestLogView> = recent_log_views
         .into_iter()
@@ -1326,6 +1330,7 @@ async fn build_dashboard_overview_payload(
             latest_quota_sync_sample_at: state.proxy.latest_dashboard_quota_sync_sample_at().await?,
             latest_request_log_id,
             recent_request_logs,
+            trend_request_logs,
             recent_jobs: recent_job_signatures,
             disabled_tokens: disabled_token_ids,
             disabled_tokens_error,
@@ -1444,11 +1449,16 @@ async fn compute_dashboard_overview_freshness(
         dashboard_summary_window_starts_now(state.proxy.backend_time().local_now());
     let (request_log_retention_days, retention_since) =
         dashboard_request_log_retention(state).await?;
-    let recent_request_logs = state
+    let trend_request_logs = state
         .proxy
-        .recent_request_log_signature(DASHBOARD_RECENT_LOGS_LIMIT, retention_since)
+        .recent_request_log_signature(DASHBOARD_TREND_SOURCE_LIMIT, retention_since)
         .await?;
-    let latest_request_log_id = recent_request_logs.first().map(|(id, _)| *id);
+    let recent_request_logs = trend_request_logs
+        .iter()
+        .take(DASHBOARD_RECENT_LOGS_LIMIT)
+        .copied()
+        .collect::<Vec<_>>();
+    let latest_request_log_id = trend_request_logs.first().map(|(id, _)| *id);
     let exhausted_keys = state
         .proxy
         .list_dashboard_exhausted_key_ids(DASHBOARD_EXHAUSTED_KEYS_LIMIT)
@@ -1501,6 +1511,7 @@ async fn compute_dashboard_overview_freshness(
         latest_quota_sync_sample_at: state.proxy.latest_dashboard_quota_sync_sample_at().await?,
         latest_request_log_id,
         recent_request_logs,
+        trend_request_logs,
         recent_jobs,
         disabled_tokens: disabled_tokens
             .iter()

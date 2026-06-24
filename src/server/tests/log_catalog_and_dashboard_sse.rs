@@ -2369,6 +2369,11 @@ use super::upstream_support_and_manual_jobs::*;
             snapshot.freshness.recent_request_logs,
             "SSE freshness probe should track the same displayed recent-log signature as the shared overview snapshot",
         );
+        assert_eq!(
+            sig.freshness.trend_request_logs,
+            snapshot.freshness.trend_request_logs,
+            "SSE freshness probe should also track the full trend source window used by the shared overview snapshot",
+        );
         assert_eq!(latest_id, snapshot.freshness.latest_request_log_id);
 
         let _ = std::fs::remove_file(db_path);
@@ -2599,6 +2604,121 @@ use super::upstream_support_and_manual_jobs::*;
             second.payload.recent_logs.iter().map(|log| log.id).collect::<Vec<_>>(),
             vec![newest_id, older_id],
             "rebuilding should refresh the displayed recent-log rows after an older retained log is inserted",
+        );
+
+        let _ = std::fs::remove_file(db_path);
+    }
+
+    #[tokio::test]
+    async fn dashboard_overview_snapshot_rebuilds_when_trend_only_log_window_changes() {
+        let db_path = temp_db_path("dashboard-overview-trend-log-freshness");
+        let db_str = db_path.to_string_lossy().to_string();
+        let proxy = TavilyProxy::with_endpoint(
+            vec!["tvly-dashboard-overview-trend-log-freshness".to_string()],
+            DEFAULT_UPSTREAM,
+            &db_str,
+        )
+        .await
+        .expect("proxy created");
+
+        let state = Arc::new(AppState {
+            proxy,
+            static_dir: None,
+            forward_auth: ForwardAuthConfig::new(None, None, None, None),
+            forward_auth_enabled: false,
+            builtin_admin: BuiltinAdminAuth::new(false, None, None),
+            linuxdo_oauth: LinuxDoOAuthOptions::disabled(),
+            linuxdo_credit: LinuxDoCreditOptions::disabled(),
+            ha: tavily_hikari::HaRuntime::new(tavily_hikari::HaConfig::default()),
+            dev_open_admin: false,
+            usage_base: "http://127.0.0.1:58088".to_string(),
+            api_key_ip_geo_origin: "https://api.country.is".to_string(),
+            dashboard_overview_cache: new_dashboard_overview_cache(),
+        });
+        let pool = connect_sqlite_test_pool(&db_str).await;
+        let base_created_at = Utc::now().timestamp();
+
+        for offset in 0..DASHBOARD_TREND_SOURCE_LIMIT {
+            sqlx::query(
+                r#"
+                INSERT INTO observability.request_logs (
+                    api_key_id, auth_token_id, method, path, query, status_code, tavily_status_code,
+                    error_message, result_status, request_body, response_body, forwarded_headers,
+                    dropped_headers, created_at
+                ) VALUES (NULL, NULL, 'POST', '/search', NULL, 200, 200, NULL, 'success', NULL, NULL, '', '', ?)
+                "#,
+            )
+            .bind(base_created_at - offset as i64)
+            .execute(&pool)
+            .await
+            .expect("seed trend request log");
+        }
+
+        let first = load_dashboard_overview_snapshot(&state)
+            .await
+            .expect("first overview snapshot");
+        let first_recent_ids = first
+            .payload
+            .recent_logs
+            .iter()
+            .map(|log| log.id)
+            .collect::<Vec<_>>();
+        let first_trend_error = first.payload.trend.error.clone();
+        let first_trend_signature = first.freshness.trend_request_logs.clone();
+
+        reset_dashboard_overview_build_count(&state).await;
+
+        let extra_created_at = base_created_at - DASHBOARD_RECENT_LOGS_LIMIT as i64 - 1;
+        let extra_id = sqlx::query(
+            r#"
+            INSERT INTO observability.request_logs (
+                api_key_id, auth_token_id, method, path, query, status_code, tavily_status_code,
+                error_message, result_status, request_body, response_body, forwarded_headers,
+                dropped_headers, created_at
+            ) VALUES (NULL, NULL, 'POST', '/search', NULL, 500, 500, NULL, 'error', NULL, NULL, '', '', ?)
+            "#,
+        )
+        .bind(extra_created_at)
+        .execute(&pool)
+        .await
+        .expect("insert trend-only request log")
+        .last_insert_rowid();
+
+        let second = load_dashboard_overview_snapshot(&state)
+            .await
+            .expect("second overview snapshot");
+
+        assert!(
+            dashboard_overview_build_count(&state).await >= 1,
+            "trend-only freshness changes should rebuild the shared snapshot",
+        );
+        assert_eq!(
+            second
+                .payload
+                .recent_logs
+                .iter()
+                .map(|log| log.id)
+                .collect::<Vec<_>>(),
+            first_recent_ids,
+            "logs outside the displayed top-five window should not disturb the displayed recent-log list",
+        );
+        assert_ne!(
+            second.freshness.trend_request_logs,
+            first_trend_signature,
+            "the cached freshness should include the full trend source window, not only displayed logs",
+        );
+        assert_ne!(
+            second.payload.trend.error,
+            first_trend_error,
+            "trend data should refresh when a retained error log enters the trend window outside the displayed top-five list",
+        );
+        assert!(
+            second
+                .freshness
+                .trend_request_logs
+                .iter()
+                .any(|(id, created_at)| *id == extra_id && *created_at == extra_created_at),
+            "trend freshness signature should capture the new retained trend-only log",
         );
 
         let _ = std::fs::remove_file(db_path);
