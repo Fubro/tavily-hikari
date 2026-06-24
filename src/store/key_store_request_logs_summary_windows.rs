@@ -194,6 +194,42 @@ impl KeyStore {
         ])
     }
 
+    pub(crate) async fn fetch_dashboard_stale_key_count(
+        &self,
+        hot_active_since: i64,
+        hot_stale_before: i64,
+        cold_stale_before: i64,
+    ) -> Result<i64, ProxyError> {
+        sqlx::query_scalar(
+            r#"
+            SELECT COALESCE(COUNT(*), 0)
+            FROM api_keys
+            WHERE deleted_at IS NULL
+              AND status <> ?
+              AND NOT EXISTS (
+                  SELECT 1
+                  FROM api_key_quarantines aq
+                  WHERE aq.key_id = api_keys.id AND aq.cleared_at IS NULL
+              )
+              AND CASE
+                  WHEN last_used_at >= ? THEN (
+                      quota_synced_at IS NULL OR quota_synced_at = 0 OR quota_synced_at < ?
+                  )
+                  ELSE (
+                      quota_synced_at IS NULL OR quota_synced_at = 0 OR quota_synced_at < ?
+                  )
+              END
+            "#,
+        )
+        .bind(STATUS_EXHAUSTED)
+        .bind(hot_active_since)
+        .bind(hot_stale_before)
+        .bind(cold_stale_before)
+        .fetch_one(&self.pool)
+        .await
+        .map_err(ProxyError::from)
+    }
+
     pub(crate) async fn fetch_summary_windows(
         &self,
         bounds: SummaryWindowBounds,

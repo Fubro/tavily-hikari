@@ -25,6 +25,7 @@ struct DashboardOverviewFreshness {
     dashboard_quarantine_lifecycle_signature: [i64; 3],
     dashboard_exhausted_lifecycle_signature: [i64; 3],
     dashboard_quota_sample_signature: [i64; 4],
+    dashboard_stale_key_count: i64,
     forward_proxy: Option<(i64, i64)>,
     exhausted_keys: Vec<String>,
     latest_quota_sync_sample_at: Option<i64>,

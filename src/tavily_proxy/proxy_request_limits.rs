@@ -716,6 +716,21 @@ impl TavilyProxy {
             .await
     }
 
+    pub async fn dashboard_stale_key_count(
+        &self,
+        hot_active_since: i64,
+        hot_stale_before: i64,
+        cold_stale_before: i64,
+    ) -> Result<i64, ProxyError> {
+        self.key_store
+            .fetch_dashboard_stale_key_count(
+                hot_active_since,
+                hot_stale_before,
+                cold_stale_before,
+            )
+            .await
+    }
+
     /// Public metrics: successful requests today and this month.
     pub async fn success_breakdown(
         &self,

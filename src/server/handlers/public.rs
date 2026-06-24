@@ -1183,6 +1183,14 @@ async fn build_dashboard_overview_payload(
         .proxy
         .dashboard_quota_sample_signature(quota_sample_window_start, summary_windows.today_end)
         .await?;
+    let now_ts = state.proxy.backend_time().now_ts();
+    let hot_active_since = now_ts.saturating_sub(2 * 60 * 60);
+    let hot_stale_before = now_ts.saturating_sub(15 * 60);
+    let cold_stale_before = now_ts.saturating_sub(24 * 60 * 60);
+    let dashboard_stale_key_count = state
+        .proxy
+        .dashboard_stale_key_count(hot_active_since, hot_stale_before, cold_stale_before)
+        .await?;
     let forward_proxy = state.proxy.get_forward_proxy_dashboard_summary().await?;
     let (request_log_retention_days, retention_since) =
         dashboard_request_log_retention(state).await?;
@@ -1333,6 +1341,7 @@ async fn build_dashboard_overview_payload(
             dashboard_quarantine_lifecycle_signature,
             dashboard_exhausted_lifecycle_signature,
             dashboard_quota_sample_signature,
+            dashboard_stale_key_count,
             forward_proxy: Some((forward_proxy.available_nodes, forward_proxy.total_nodes)),
             exhausted_keys: exhausted_key_ids,
             latest_quota_sync_sample_at: state.proxy.latest_dashboard_quota_sync_sample_at().await?,
@@ -1489,6 +1498,14 @@ async fn compute_dashboard_overview_freshness(
             state.proxy.backend_time().now_ts().saturating_add(1),
         )
         .await?;
+    let now_ts = state.proxy.backend_time().now_ts();
+    let hot_active_since = now_ts.saturating_sub(2 * 60 * 60);
+    let hot_stale_before = now_ts.saturating_sub(15 * 60);
+    let cold_stale_before = now_ts.saturating_sub(24 * 60 * 60);
+    let dashboard_stale_key_count = state
+        .proxy
+        .dashboard_stale_key_count(hot_active_since, hot_stale_before, cold_stale_before)
+        .await?;
     let forward_proxy = state.proxy.get_forward_proxy_dashboard_summary().await?;
     let summary_window_starts = [today_start, yesterday_start, month_start];
     let (request_log_retention_days, retention_since) =
@@ -1551,6 +1568,7 @@ async fn compute_dashboard_overview_freshness(
         dashboard_quarantine_lifecycle_signature,
         dashboard_exhausted_lifecycle_signature,
         dashboard_quota_sample_signature,
+        dashboard_stale_key_count,
         forward_proxy: Some((forward_proxy.available_nodes, forward_proxy.total_nodes)),
         exhausted_keys,
         latest_quota_sync_sample_at: state.proxy.latest_dashboard_quota_sync_sample_at().await?,

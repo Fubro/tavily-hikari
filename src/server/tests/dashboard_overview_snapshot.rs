@@ -477,6 +477,78 @@ async fn dashboard_overview_freshness_notices_same_second_rollup_updates() {
 }
 
 #[tokio::test]
+async fn dashboard_overview_freshness_tracks_time_driven_stale_key_transitions() {
+    let db_path = temp_db_path("dashboard-overview-stale-key-transition");
+    let db_str = db_path.to_string_lossy().to_string();
+    let proxy = TavilyProxy::with_endpoint(
+        vec!["tvly-dashboard-overview-stale-key-transition".to_string()],
+        DEFAULT_UPSTREAM,
+        &db_str,
+    )
+    .await
+    .expect("proxy created");
+
+    let state = Arc::new(AppState {
+        proxy: proxy.clone(),
+        static_dir: None,
+        forward_auth: ForwardAuthConfig::new(None, None, None, None),
+        forward_auth_enabled: false,
+        builtin_admin: BuiltinAdminAuth::new(false, None, None),
+        linuxdo_oauth: LinuxDoOAuthOptions::disabled(),
+        linuxdo_credit: LinuxDoCreditOptions::disabled(),
+        ha: tavily_hikari::HaRuntime::new(tavily_hikari::HaConfig::default()),
+        dev_open_admin: false,
+        usage_base: "http://127.0.0.1:58088".to_string(),
+        api_key_ip_geo_origin: "https://api.country.is".to_string(),
+        dashboard_overview_cache: new_dashboard_overview_cache(),
+    });
+    let pool = connect_sqlite_test_pool(&db_str).await;
+
+    let key_id = proxy
+        .list_api_key_metrics()
+        .await
+        .expect("list key metrics")
+        .into_iter()
+        .next()
+        .expect("seeded key")
+        .id;
+    let now_ts = Utc::now().timestamp();
+    sqlx::query("UPDATE api_keys SET last_used_at = ?, quota_synced_at = ? WHERE id = ?")
+        .bind(now_ts - 10 * 60)
+        .bind(now_ts - 15 * 60 + 1)
+        .bind(&key_id)
+        .execute(&pool)
+        .await
+        .expect("seed near-stale key");
+
+    let first = load_dashboard_overview_snapshot(&state)
+        .await
+        .expect("first overview snapshot");
+    assert_eq!(
+        first.payload.summary_windows.today.quota_charge.stale_key_count,
+        0,
+        "fresh key should not be counted stale before the 15 minute threshold",
+    );
+
+    tokio::time::sleep(Duration::from_secs(2)).await;
+    let second = load_dashboard_overview_snapshot(&state)
+        .await
+        .expect("second overview snapshot");
+    assert_eq!(
+        second.payload.summary_windows.today.quota_charge.stale_key_count,
+        1,
+        "crossing the stale threshold should update the quota stale-key count without requiring a new sample row",
+    );
+    assert_ne!(
+        second.freshness.dashboard_stale_key_count,
+        first.freshness.dashboard_stale_key_count,
+        "cheap freshness should include time-driven stale-key transitions",
+    );
+
+    let _ = std::fs::remove_file(db_path);
+}
+
+#[tokio::test]
 async fn dashboard_overview_snapshot_rebuilds_when_displayed_log_signature_changes() {
     let db_path = temp_db_path("dashboard-overview-log-order-freshness");
     let db_str = db_path.to_string_lossy().to_string();
