@@ -354,6 +354,129 @@ async fn dashboard_overview_snapshot_ignores_retained_out_request_logs_in_freshn
 }
 
 #[tokio::test]
+async fn dashboard_overview_freshness_notices_same_second_rollup_updates() {
+    let db_path = temp_db_path("dashboard-overview-rollup-same-second-update");
+    let db_str = db_path.to_string_lossy().to_string();
+    let proxy = TavilyProxy::with_endpoint(
+        vec!["tvly-dashboard-overview-rollup-same-second-update".to_string()],
+        DEFAULT_UPSTREAM,
+        &db_str,
+    )
+    .await
+    .expect("proxy created");
+
+    let state = Arc::new(AppState {
+        proxy,
+        static_dir: None,
+        forward_auth: ForwardAuthConfig::new(None, None, None, None),
+        forward_auth_enabled: false,
+        builtin_admin: BuiltinAdminAuth::new(false, None, None),
+        linuxdo_oauth: LinuxDoOAuthOptions::disabled(),
+        linuxdo_credit: LinuxDoCreditOptions::disabled(),
+        ha: tavily_hikari::HaRuntime::new(tavily_hikari::HaConfig::default()),
+        dev_open_admin: false,
+        usage_base: "http://127.0.0.1:58088".to_string(),
+        api_key_ip_geo_origin: "https://api.country.is".to_string(),
+        dashboard_overview_cache: new_dashboard_overview_cache(),
+    });
+
+    let initial = load_dashboard_overview_snapshot(&state)
+        .await
+        .expect("initial overview snapshot");
+    let pool = connect_sqlite_test_pool(&db_str).await;
+    let summary_windows = state.proxy.summary_windows().await.expect("summary windows");
+    let bucket_start = summary_windows.today_start;
+    let updated_at = Utc::now().timestamp();
+
+    sqlx::query(
+        r#"
+        INSERT INTO dashboard_request_rollup_buckets (
+            bucket_start,
+            bucket_secs,
+            total_requests,
+            success_count,
+            error_count,
+            quota_exhausted_count,
+            valuable_success_count,
+            valuable_failure_count,
+            valuable_failure_429_count,
+            other_success_count,
+            other_failure_count,
+            unknown_count,
+            mcp_non_billable,
+            mcp_billable,
+            api_non_billable,
+            api_billable,
+            local_estimated_credits,
+            updated_at
+        ) VALUES (?, 86400, 2, 2, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 2, 0, ?)
+        ON CONFLICT(bucket_start, bucket_secs) DO UPDATE SET
+            total_requests = excluded.total_requests,
+            success_count = excluded.success_count,
+            error_count = excluded.error_count,
+            quota_exhausted_count = excluded.quota_exhausted_count,
+            valuable_success_count = excluded.valuable_success_count,
+            valuable_failure_count = excluded.valuable_failure_count,
+            valuable_failure_429_count = excluded.valuable_failure_429_count,
+            other_success_count = excluded.other_success_count,
+            other_failure_count = excluded.other_failure_count,
+            unknown_count = excluded.unknown_count,
+            mcp_non_billable = excluded.mcp_non_billable,
+            mcp_billable = excluded.mcp_billable,
+            api_non_billable = excluded.api_non_billable,
+            api_billable = excluded.api_billable,
+            local_estimated_credits = excluded.local_estimated_credits,
+            updated_at = excluded.updated_at
+        "#,
+    )
+    .bind(bucket_start)
+    .bind(updated_at)
+    .execute(&pool)
+    .await
+    .expect("upsert initial rollup row");
+
+    let after_insert = load_dashboard_overview_snapshot(&state)
+        .await
+        .expect("overview snapshot after insert");
+    assert_ne!(
+        after_insert.freshness.dashboard_rollup_signature,
+        initial.freshness.dashboard_rollup_signature,
+        "adding a rollup bucket should invalidate the cached overview freshness signature",
+    );
+
+    sqlx::query(
+        r#"
+        UPDATE dashboard_request_rollup_buckets
+        SET total_requests = 9,
+            success_count = 7,
+            error_count = 2,
+            valuable_success_count = 7,
+            valuable_failure_count = 2,
+            api_billable = 9,
+            updated_at = ?
+        WHERE bucket_start = ?
+          AND bucket_secs = 86400
+        "#,
+    )
+    .bind(updated_at)
+    .bind(bucket_start)
+    .execute(&pool)
+    .await
+    .expect("update same bucket within same second");
+
+    let after_update = load_dashboard_overview_snapshot(&state)
+        .await
+        .expect("overview snapshot after update");
+    assert_ne!(
+        after_update.freshness.dashboard_rollup_signature,
+        after_insert.freshness.dashboard_rollup_signature,
+        "same-second rollup metric changes should still invalidate the cached overview freshness signature",
+    );
+
+    let _ = std::fs::remove_file(db_path);
+}
+
+#[tokio::test]
 async fn dashboard_overview_snapshot_rebuilds_when_displayed_log_signature_changes() {
     let db_path = temp_db_path("dashboard-overview-log-order-freshness");
     let db_str = db_path.to_string_lossy().to_string();
