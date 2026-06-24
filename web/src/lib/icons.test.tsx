@@ -66,7 +66,7 @@ const REQUIRED_RUNTIME_ICON_NAMES = [
   'mdi:tune',
   'mdi:tune-variant',
   'mdi:view-dashboard-outline',
-  'mdi:wifi-strength-off-outline',
+  'mdi:earth-off',
   'simple-icons:anthropic',
   'simple-icons:codeium',
   'simple-icons:cursor',
