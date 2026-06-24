@@ -257,6 +257,7 @@
 - Alerts 页面筛选区已统一到时间输入的控件语言：
   - `请求类型`、`用户`、`令牌`、`Key`、`应用时间`、`清空筛选` 与 `datetime-local` 输入现在共享同一套高度、圆角、pressed surface、padding 与 focus ring。
   - grouped 读侧已改为 SQLite 兼容写法，`/api/alerts/groups` 在 101 上不再依赖命名 `WINDOW` 语法。
+  - grouped 读侧的 request-kind canonicalization 也必须避免为 `COALESCE`、`COUNT(DISTINCT ...)`、`MIN(...)` 包裹旧版 SQLite 会在 `near "("` 处拒绝的多余 `CASE` 外层括号；`/api/alerts/groups` 的外部接口契约保持不变。
 
 - Web demo 真实页面视口：
   - `/admin/alerts?demo=1&view=groups`：direct-open 默认进入 `聚合告警`，`用户请求限流` 以 `母 -> 子 -> 原始事件明细` 两层半结构展示，子窗口不再按 `request_kind` 拆主结构。
@@ -332,3 +333,4 @@
 
 - 2026-04-18: 初始化 spec，冻结 Admin 告警中心、告警读模型、24h 仪表盘摘要、共享 URL 语义与验证门禁。
 - 2026-04-22: 热修复补充 `upstream_usage_limit_432`，明确 Tavily 432 通过查询层重分类，不再误报为 `user_quota_exhausted`；同时要求 affinity 仅粘 active key，成功请求需回写 primary affinity。
+- 2026-06-24: 修复 101 生产 `/api/alerts/groups` 的旧版 SQLite parser 兼容性；batch request-kind canonicalization 不再生成 `COALESCE((CASE ...))`、`COUNT(DISTINCT (CASE ...))`、`MIN((CASE ...))` 形式的聚合 SQL，并补充回归断言。

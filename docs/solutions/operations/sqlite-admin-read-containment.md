@@ -139,6 +139,11 @@ reads:
   embedded in rollup triggers; prefer canonicalizing retained legacy rows before rollup rebuild,
   using a focused canonicalization trigger for legacy write-path rows, then keeping rollup triggers
   on stored canonical columns only.
+- When an admin read path embeds `CASE` classification inside SQLite scalar or aggregate
+  expressions, avoid adding wrapper parentheses around the `CASE` inside `COALESCE`,
+  `COUNT(DISTINCT ...)`, `MIN(...)`, or `MAX(...)`. Production-grade older SQLite parsers can
+  reject forms such as `COUNT(DISTINCT (CASE ...))`, `MIN((CASE ...))`, or
+  `COALESCE((CASE ...), ...)` with `near "("` even when newer local SQLite builds accept them.
 - Add query-plan regression tests for admin read hot paths when the fix depends on SQLite choosing a
   specific index. Local small databases may return quickly even when the planner would be disastrous
   on production data volume.
