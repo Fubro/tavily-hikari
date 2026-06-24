@@ -14,7 +14,7 @@
     "preview": "bun --bun ./node_modules/.bin/vite preview",
     "test": "bun test",
     "test:source-budgets": "bun test tests/sourceLineBudgets.test.ts",
-    "test:e2e:pwa-offline": "bun ../../tests/e2e/pwa_offline_browser_e2e.ts"
+    "test:e2e:pwa-offline": "bun ../tests/e2e/pwa_offline_browser_e2e.ts"
   },
   "dependencies": {
     "@iconify/react": "^4.1.1",

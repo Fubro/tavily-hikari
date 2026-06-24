@@ -987,10 +987,9 @@
     display: none;
   }
 
-  .admin-sidebar.is-stacked .admin-sidebar-brand-dot {
-    width: 9px;
-    height: 9px;
-    box-shadow: 0 0 0 4px rgba(19, 194, 163, 0.16);
+  .admin-sidebar.is-stacked .admin-sidebar-brand-mark {
+    width: 34px;
+    height: 34px;
   }
 
   .admin-sidebar.is-stacked .admin-menu-toggle {

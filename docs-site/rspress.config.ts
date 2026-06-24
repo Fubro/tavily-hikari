@@ -13,7 +13,17 @@ const localStorybookDevOrigin = process.env.VITE_STORYBOOK_DEV_ORIGIN?.trim() ??
 export default defineConfig({
   root: 'docs',
   base: docsBase,
+  icon: '/relay-mesh-icon.svg',
+  logo: {
+    light: '/relay-mesh-logo.svg',
+    dark: '/relay-mesh-logo.svg',
+  },
+  logoText: 'Tavily Hikari Docs',
   lang: 'en',
+  head: [
+    ['meta', { name: 'theme-color', content: '#7c3aed' }],
+    ['link', { rel: 'mask-icon', href: '/relay-mesh-icon.svg', color: '#7c3aed' }],
+  ],
   locales: [
     {
       lang: 'en',
@@ -45,6 +55,8 @@ export default defineConfig({
         label: 'English',
         title: 'Tavily Hikari Docs',
         description: 'Product, deployment, API, and operator guidance for Tavily Hikari.',
+        logo: '/relay-mesh-logo.svg',
+        logoText: 'Tavily Hikari Docs',
         nav: [
           { text: 'Home', link: '/' },
           { text: 'Quick Start', link: '/quick-start' },
@@ -74,6 +86,8 @@ export default defineConfig({
         label: '简体中文',
         title: 'Tavily Hikari 文档',
         description: 'Tavily Hikari 的产品、部署、API 与运维文档。',
+        logo: '/relay-mesh-logo.svg',
+        logoText: 'Tavily Hikari 文档',
         nav: [
           { text: '首页', link: '/zh/' },
           { text: '快速开始', link: '/zh/quick-start' },

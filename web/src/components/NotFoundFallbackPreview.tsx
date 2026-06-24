@@ -1,3 +1,5 @@
+import BrandLockup from './BrandLockup'
+
 interface NotFoundFallbackPreviewProps {
   originalPath?: string
   returnHref?: string
@@ -10,7 +12,15 @@ export default function NotFoundFallbackPreview({
   return (
     <div className="not-found-page-body">
       <main className="not-found-shell" role="main">
-        <span className="not-found-badge" aria-hidden="true">Tavily Hikari Proxy</span>
+        <BrandLockup
+          title="Tavily Hikari Proxy"
+          subtitle="Relay Mesh"
+          compact
+          className="not-found-brand"
+          titleClassName="not-found-brand-title"
+          subtitleClassName="not-found-brand-subtitle"
+          markClassName="not-found-brand-mark"
+        />
         <p className="not-found-code">404</p>
         <h1 className="not-found-title">Page not found</h1>
         <p className="not-found-description">

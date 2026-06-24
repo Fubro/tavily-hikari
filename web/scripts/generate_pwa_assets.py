@@ -6,7 +6,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageDraw
 
 
 WEB_ROOT = Path(__file__).resolve().parent.parent
@@ -73,31 +73,40 @@ def make_gradient(size: int, top: tuple[int, int, int], bottom: tuple[int, int, 
     return image
 
 
-def draw_icon(prefix: str, top: tuple[int, int, int], bottom: tuple[int, int, int], accent: tuple[int, int, int], text: str, text_fill: tuple[int, int, int]) -> dict[str, str]:
+def draw_icon(
+    prefix: str,
+    top: tuple[int, int, int],
+    bottom: tuple[int, int, int],
+    halo: tuple[int, int, int, int],
+    stroke_start: tuple[int, int, int],
+    stroke_end: tuple[int, int, int],
+    accent_start: tuple[int, int, int],
+    accent_end: tuple[int, int, int],
+) -> dict[str, str]:
     base = make_gradient(512, top, bottom)
     draw = ImageDraw.Draw(base)
+    stroke_gradient = make_gradient(512, stroke_start, stroke_end)
+    accent_gradient = make_gradient(512, accent_start, accent_end)
 
-    draw.rounded_rectangle((24, 24, 488, 488), radius=108, outline=accent + (255,), width=18)
-    draw.rounded_rectangle((88, 96, 424, 424), radius=72, fill=(255, 255, 255, 210))
-    draw.rounded_rectangle((136, 148, 376, 324), radius=46, fill=text_fill + (36,))
-    draw.rounded_rectangle((166, 338, 346, 372), radius=18, fill=text_fill + (52,))
-    draw.ellipse((372, 84, 452, 164), fill=accent + (255,))
-    draw.ellipse((384, 96, 440, 152), fill=(255, 255, 255, 235))
+    draw.ellipse((64, 64, 448, 448), fill=halo)
 
-    try:
-        font_large = ImageFont.truetype("Arial Bold.ttf", 84)
-    except OSError:
-        font_large = ImageFont.load_default()
+    stroke_mask = Image.new("L", (512, 512), 0)
+    stroke_draw = ImageDraw.Draw(stroke_mask)
+    stroke_draw.arc((96, 96, 416, 416), start=182, end=354, fill=255, width=42)
+    stroke_draw.arc((96, 96, 416, 416), start=2, end=174, fill=255, width=42)
+    stroke_draw.line((278, 96, 356, 96), fill=255, width=42)
+    stroke_draw.line((96, 272, 96, 348), fill=255, width=42)
+    stroke_draw.line((356, 96, 404, 144), fill=255, width=42)
+    stroke_draw.line((96, 348, 144, 396), fill=255, width=42)
+    stroke_draw.ellipse((372, 84, 436, 148), fill=255)
+    stroke_draw.ellipse((100, 372, 164, 436), fill=255)
+    base.paste(stroke_gradient, mask=stroke_mask)
 
-    bbox = draw.textbbox((0, 0), text, font=font_large)
-    text_width = bbox[2] - bbox[0]
-    text_height = bbox[3] - bbox[1]
-    draw.text(
-        ((512 - text_width) / 2, 384 - text_height / 2),
-        text,
-        fill=text_fill + (255,),
-        font=font_large,
-    )
+    accent_mask = Image.new("L", (512, 512), 0)
+    accent_draw = ImageDraw.Draw(accent_mask)
+    accent_draw.rectangle((186, 164, 334, 210), fill=255)
+    accent_draw.rectangle((236, 164, 282, 330), fill=255)
+    base.paste(accent_gradient, mask=accent_mask)
 
     output: dict[str, str] = {}
     pwa_dir = DIST_DIR / "pwa"
@@ -253,19 +262,23 @@ def main() -> None:
 
     public_icons = draw_icon(
         prefix="public",
-        top=(255, 244, 214),
-        bottom=(252, 211, 77),
-        accent=(217, 119, 6),
-        text="TH",
-        text_fill=(146, 64, 14),
+        top=(244, 241, 250),
+        bottom=(232, 226, 247),
+        halo=(231, 224, 247, 255),
+        stroke_start=(51, 47, 58),
+        stroke_end=(124, 58, 237),
+        accent_start=(219, 39, 119),
+        accent_end=(124, 58, 237),
     )
     admin_icons = draw_icon(
         prefix="admin",
-        top=(240, 253, 250),
-        bottom=(153, 246, 228),
-        accent=(15, 118, 110),
-        text="ADM",
-        text_fill=(17, 94, 89),
+        top=(236, 241, 250),
+        bottom=(219, 229, 245),
+        halo=(218, 227, 247, 255),
+        stroke_start=(51, 47, 58),
+        stroke_end=(14, 165, 233),
+        accent_start=(219, 39, 119),
+        accent_end=(124, 58, 237),
     )
 
     write_json(
@@ -275,8 +288,8 @@ def main() -> None:
             short_name="Hikari",
             start_url="/",
             scope="/",
-            theme_color="#d97706",
-            background_color="#fff9ec",
+            theme_color="#7c3aed",
+            background_color="#f4f1fa",
             icons=public_icons,
         ),
     )
@@ -287,8 +300,8 @@ def main() -> None:
             short_name="Hikari Admin",
             start_url="/admin/",
             scope="/admin/",
-            theme_color="#0f766e",
-            background_color="#f0fdfa",
+            theme_color="#0ea5e9",
+            background_color="#eef1fa",
             icons=admin_icons,
         ),
     )

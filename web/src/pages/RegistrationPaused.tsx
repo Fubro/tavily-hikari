@@ -1,3 +1,4 @@
+import BrandLockup from '../components/BrandLockup'
 import ThemeToggle from '../components/ThemeToggle'
 import LanguageSwitcher from '../components/LanguageSwitcher'
 import { Button } from '../components/ui/button'
@@ -21,6 +22,14 @@ function RegistrationPaused(): JSX.Element {
       <div className="mx-auto flex w-full max-w-4xl flex-col gap-6 px-6 py-10">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="space-y-2">
+            <BrandLockup
+              title="Tavily Hikari"
+              subtitle="Relay Mesh"
+              className="registration-paused-brand-lockup"
+              titleClassName="registration-paused-brand-title"
+              subtitleClassName="registration-paused-brand-subtitle"
+              markClassName="registration-paused-brand-mark"
+            />
             <div
               className={`inline-flex items-center rounded-full px-3 py-1 text-xs font-semibold uppercase tracking-[0.2em] ${
                 isDark

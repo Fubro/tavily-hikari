@@ -143,6 +143,25 @@
   line-height: 1.1;
 }
 
+.user-console-header-brand {
+  flex: 0 0 auto;
+  margin-right: 2px;
+}
+
+.user-console-header-brand-mark {
+  width: 34px;
+  height: 34px;
+}
+
+.user-console-header-brand-title {
+  font-size: 0.84rem;
+}
+
+.user-console-header-brand-subtitle {
+  font-size: 0.58rem;
+  letter-spacing: 0.14em;
+}
+
 .user-console-header-eyebrow {
   flex: 0 0 auto;
   max-width: 11ch;
@@ -410,6 +429,10 @@
 @media (max-width: 767px) {
   .user-console-header-summary {
     display: none;
+  }
+
+  .user-console-header-brand {
+    margin-right: 4px;
   }
 
   .user-console-header-eyebrow {

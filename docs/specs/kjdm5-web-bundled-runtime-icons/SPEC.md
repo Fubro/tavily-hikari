@@ -4,7 +4,7 @@
 
 - Status: 已实现（待审查）
 - Created: 2026-03-15
-- Last: 2026-04-08
+- Last: 2026-06-25
 
 ## 背景 / 问题陈述
 
@@ -23,7 +23,7 @@
 ### Non-goals
 
 - 不修改 Rust 后端接口、数据库 schema、token / quota / auth 逻辑。
-- 不调整 `web/public/favicon.svg` 与其它已存在静态资源装配方式。
+- 不改变 `/favicon.svg` 的静态路径合同；其视觉内容可由后续品牌资产工作独立更新。
 - 不借机重做页面样式、文案或信息架构。
 
 ## 范围（Scope）
@@ -43,7 +43,8 @@
 ### Out of scope
 
 - `src/**` 后端与服务端静态资源路由。
-- `web/public/favicon.svg`、`web/public/linuxdo-logo.svg` 的内容与 URL。
+- `web/public/linuxdo-logo.svg` 的内容与 URL。
+- `/favicon.svg` 的静态路径语义之外的品牌视觉内容。
 - 任意新的远程图标供应商或运行时 CDN 回退策略。
 
 ## 需求（Requirements）
@@ -87,11 +88,11 @@
 
 ### 接口清单（Inventory）
 
-| 接口（Name）           | 类型（Kind） | 范围（Scope） | 变更（Change） | 契约文档（Contract Doc） | 负责人（Owner） | 使用方（Consumers）                                | 备注（Notes）            |
-| ---------------------- | ------------ | ------------- | -------------- | ------------------------ | --------------- | -------------------------------------------------- | ------------------------ |
-| Frontend icon registry | ui-runtime   | internal      | New            | None                     | web             | public/admin/console/login pages, Storybook, tests | 只影响前端图标数据来源   |
-| `/api/**`              | http-api     | external      | None           | None                     | server          | web                                                | 无接口变更               |
-| `/favicon.svg`         | static-asset | internal      | None           | None                     | web/server      | browser                                            | 继续沿用既有静态资源路径 |
+| 接口（Name）           | 类型（Kind） | 范围（Scope） | 变更（Change） | 契约文档（Contract Doc） | 负责人（Owner） | 使用方（Consumers）                                | 备注（Notes）                              |
+| ---------------------- | ------------ | ------------- | -------------- | ------------------------ | --------------- | -------------------------------------------------- | ------------------------------------------ |
+| Frontend icon registry | ui-runtime   | internal      | New            | None                     | web             | public/admin/console/login pages, Storybook, tests | 只影响前端图标数据来源                     |
+| `/api/**`              | http-api     | external      | None           | None                     | server          | web                                                | 无接口变更                                 |
+| `/favicon.svg`         | static-asset | internal      | None           | None                     | web/server      | browser                                            | 路径合同保持不变，视觉内容可由品牌工作更新 |
 
 ### 契约文档（按 Kind 拆分）
 
@@ -165,7 +166,7 @@ None
 
 ## 实现里程碑（Milestones / Delivery checklist）
 
-- [x] M1: 新建 spec 并冻结“运行时图标内置、favicon 不动、后端无改动”的边界
+- [x] M1: 新建 spec 并冻结“运行时图标内置、favicon 路径不变、后端无改动”的边界
 - [x] M2: 新增共享离线图标注册层并收口现有 Iconify React 导入
 - [x] M3: PublicHome/UserConsole 改为本地图标映射并移除远程 Iconify URL
 - [x] M4: 补齐自动化验证并确认构建产物无 `api.iconify.design`
@@ -192,6 +193,7 @@ None
 - 2026-04-08: follow-up 修复 `mdi:cog-outline` 漏登记，并补齐 `mdi:alert-circle`、`mdi:check-circle`、`mdi:circle-outline`、`mdi:lock-outline`、`mdi:map-marker-radius-outline`、`mdi:minus-circle-outline` 的本地 bundle。
 - 2026-04-08: 将 Forward Proxy 相关模块残留的 `@iconify/react` 入口切回共享离线 `Icon`，重新确认 `cd web && bun run build` 与 `cd web && bun run build-storybook` 产物均不包含 `api.iconify.design`。
 - 2026-04-08: 为 `Admin/Pages` 的 `System Settings` Storybook 页面补充侧栏图标显式断言，并新增本地视觉证据资产 `system-settings-nav-icon.png`。
+- 2026-06-25: 边界澄清：本 spec 只冻结运行时图标的离线 bundle 与 `/favicon.svg` 的静态路径，不再把 favicon 的品牌视觉内容视为不可变资产。
 
 ## 参考（References）
 

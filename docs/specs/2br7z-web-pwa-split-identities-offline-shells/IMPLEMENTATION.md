@@ -2,13 +2,14 @@
 
 ## 当前实现状态
 
-- 状态：已完成（待 Safari / iOS 手工补验）
-- 分支：`th/2br7z-web-pwa-split-identities-offline-shells`
+- 状态：已完成（含 Relay Mesh 品牌接入；待 Safari / iOS 手工补验）
+- 分支：`th/relay-mesh-branding`
 
 ## 实现决策
 
 - 采用现有 Vite multipage 构建，新增 build manifest 输出与 post-build 脚本。
 - 通过生成脚本构造 public/admin 两套 asset graph、manifest、service worker 与图标，不引入单 manifest 注入式 PWA 插件。
+- 品牌资产采用 `SVG 源资产 + 位图导出` 双轨：仓库保留 Relay Mesh 主 logo/icon 源文件，构建后稳定导出 favicon、touch icon 与 public/admin PWA PNG。
 - 继续沿用服务端对 `/admin` 与 `/console` 的既有鉴权入口；PWA 不改变认证契约。
 - 页面离线失败语义优先复用现有 unavailable/error surface，不引入离线成功假象。
 - 为避免 public root service worker 抢占已安装 admin app 的离线入口，admin 入口在运行时归一到 `/admin/`，并让 admin manifest/scope 与 SW 都锁定 `/admin/`。
@@ -23,8 +24,9 @@
 - `cd web && bun test src/pwa/assetGraph.test.ts`
 - `cd web && bun test`
 - `cd web && bun run build-storybook`
-- `bun run test:e2e:pwa-offline`
+- `cd web && bun run test:e2e:pwa-offline`
 - `cargo test`
+- `cd docs-site && bun run build`
 
 ## 已实现内容
 
@@ -51,6 +53,11 @@
   - `AdminDashboardRuntime`
   - `AdminLogin`
 - `web/src/api/runtime.ts` 统一将浏览器裸网络失败归一为离线错误消息，减少 `Failed to fetch` 直出。
+- Relay Mesh 品牌接入包括：
+  - `web/public/relay-mesh-logo.svg` / `relay-mesh-icon.svg` 作为站点与 PWA 品牌源资产
+  - `web/scripts/generate_pwa_assets.py` 从同一视觉方向导出 public/admin 两套 PNG、touch icon 与 manifest 主题字段
+  - `BrandLockup` 组件统一 public home、console header、admin shell、login、registration-paused 与 404 fallback 的显式品牌位
+  - `docs-site/rspress.config.ts` 与 `docs-site/docs/public/*` 接入同一套文档站品牌入口
 - Chromium 离线 proof 已覆盖：
   - 公共首页离线壳可打开，并显示 `Offline shell loaded`
   - 用户控制台离线壳可打开，并显示 `Console structure is available`
@@ -63,10 +70,19 @@
 - `docs/specs/2br7z-web-pwa-split-identities-offline-shells/assets/console-offline-shell.png`
 - `docs/specs/2br7z-web-pwa-split-identities-offline-shells/assets/admin-offline-shell.png`
 - `docs/specs/2br7z-web-pwa-split-identities-offline-shells/assets/offline-banner-web-off.png`
+- `docs/specs/2br7z-web-pwa-split-identities-offline-shells/assets/relay-mesh-public-home.png`
+- `docs/specs/2br7z-web-pwa-split-identities-offline-shells/assets/relay-mesh-console-header.png`
+- `docs/specs/2br7z-web-pwa-split-identities-offline-shells/assets/relay-mesh-admin-shell.png`
+- `docs/specs/2br7z-web-pwa-split-identities-offline-shells/assets/relay-mesh-admin-login.png`
+- `docs/specs/2br7z-web-pwa-split-identities-offline-shells/assets/relay-mesh-registration-paused.png`
+- `docs/specs/2br7z-web-pwa-split-identities-offline-shells/assets/relay-mesh-docs-site.png`
+- `docs/specs/2br7z-web-pwa-split-identities-offline-shells/assets/relay-mesh-pwa-icons.png`
 
 ## 后续微调
 
 - 2026-06-24: 统一离线提示 banner 的图标从 `mdi:earth-off` 微调为 `mdi:web-off`，以匹配“经纬线地球 + 无网络斜杠”的语义预期。
+- 2026-06-25: 品牌层切换到 Relay Mesh 方案，图标颜色重映射到 light tropical clay 主题，并复用既有 public/admin 双身份 PWA 产线导出所有安装资产。
+- 2026-06-25: 修正 `web/package.json` 中 `test:e2e:pwa-offline` 的仓库相对路径，恢复按命令名直接执行的离线 PWA E2E 验证链。
 
 ## 已知未完成验证
 

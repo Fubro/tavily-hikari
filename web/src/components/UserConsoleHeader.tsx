@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 
+import BrandLockup from './BrandLockup'
 import { Icon } from '../lib/icons'
 
 import LanguageSwitcher from './LanguageSwitcher'
@@ -92,6 +93,15 @@ export default function UserConsoleHeader(props: UserConsoleHeaderProps): JSX.El
     <section className="surface app-header user-console-header">
       <div className="user-console-header-primary">
         <div className="user-console-header-context" title={contextSummary}>
+          <BrandLockup
+            title="Tavily Hikari"
+            subtitle="Relay Mesh"
+            compact
+            className="user-console-header-brand"
+            titleClassName="user-console-header-brand-title"
+            subtitleClassName="user-console-header-brand-subtitle"
+            markClassName="user-console-header-brand-mark"
+          />
           <span className="user-console-header-eyebrow">{props.eyebrow}</span>
           <span className="user-console-header-summary">{contextSummary}</span>
         </div>

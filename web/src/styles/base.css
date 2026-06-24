@@ -575,6 +575,61 @@
   gap: 24px;
 }
 
+.brand-lockup {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+.brand-lockup-compact {
+  gap: 10px;
+}
+
+.brand-lockup-mark {
+  display: inline-flex;
+  width: 52px;
+  height: 52px;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+}
+
+.brand-lockup-mark-compact {
+  width: 40px;
+  height: 40px;
+}
+
+.brand-mark-svg {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+.brand-lockup-copy {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.brand-lockup-title {
+  font-family: 'Nunito', 'Noto Sans SC', sans-serif;
+  font-size: 1.05rem;
+  font-weight: 800;
+  line-height: 1;
+  letter-spacing: -0.025em;
+  color: hsl(var(--foreground));
+}
+
+.brand-lockup-subtitle {
+  font-size: 0.7rem;
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: hsl(var(--muted-foreground));
+}
+
 body.not-found-page-body,
 .not-found-page-body {
   margin: 0;
@@ -609,19 +664,22 @@ body.not-found-page-body,
   box-shadow: 0 32px 65px hsl(222 47% 4% / 0.54);
 }
 
-.not-found-badge {
-  display: inline-flex;
-  align-items: center;
+.not-found-brand {
   justify-content: center;
-  gap: 6px;
-  padding: 8px 16px;
-  border-radius: 999px;
-  background: hsl(var(--primary) / 0.16);
-  color: hsl(var(--primary));
-  font-size: 0.85rem;
-  font-weight: 600;
-  letter-spacing: 0.02em;
-  text-transform: uppercase;
+  margin-bottom: 8px;
+}
+
+.not-found-brand-mark {
+  width: 48px;
+  height: 48px;
+}
+
+.not-found-brand-title {
+  font-size: 0.98rem;
+}
+
+.not-found-brand-subtitle {
+  font-size: 0.66rem;
 }
 
 .not-found-code {
@@ -732,8 +790,6 @@ body.not-found-page-body,
   display: flex;
   align-items: center;
   gap: 10px;
-  font-weight: 700;
-  letter-spacing: 0.01em;
   padding: 8px 10px 14px;
 }
 
@@ -744,12 +800,38 @@ body.not-found-page-body,
   gap: 12px;
 }
 
-.admin-sidebar-brand-dot {
-  width: 10px;
-  height: 10px;
-  border-radius: 999px;
-  background: linear-gradient(135deg, #13c2a3, #00a6fb);
-  box-shadow: 0 0 0 6px rgba(19, 194, 163, 0.18);
+.admin-sidebar-brand-mark {
+  width: 38px;
+  height: 38px;
+}
+
+.admin-sidebar-brand-title {
+  font-size: 0.98rem;
+}
+
+.admin-sidebar-brand-subtitle {
+  font-size: 0.66rem;
+}
+
+.auth-brand-lockup,
+.registration-paused-brand-lockup {
+  margin-bottom: 10px;
+}
+
+.auth-brand-mark,
+.registration-paused-brand-mark {
+  width: 46px;
+  height: 46px;
+}
+
+.auth-brand-title,
+.registration-paused-brand-title {
+  font-size: 1rem;
+}
+
+.auth-brand-subtitle,
+.registration-paused-brand-subtitle {
+  font-size: 0.68rem;
 }
 
 .admin-menu-toggle {
