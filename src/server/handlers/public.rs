@@ -1153,6 +1153,9 @@ async fn build_dashboard_overview_payload(
     let summary_windows = state.proxy.summary_windows().await?;
     let hourly_request_window = state.proxy.dashboard_hourly_request_window().await?;
     let month_series = state.proxy.dashboard_month_series(&summary_windows).await?;
+    let quota_sample_window_start = summary_windows
+        .yesterday_start
+        .min(start_of_month_dt(state.proxy.backend_time().now_utc()).timestamp());
     let dashboard_rollup_signature = state
         .proxy
         .dashboard_rollup_freshness_signature(summary_windows.previous_month_start)
@@ -1174,7 +1177,7 @@ async fn build_dashboard_overview_payload(
         .await?;
     let dashboard_quota_sample_signature = state
         .proxy
-        .dashboard_quota_sample_signature(summary_windows.previous_month_start)
+        .dashboard_quota_sample_signature(quota_sample_window_start, summary_windows.today_end)
         .await?;
     let forward_proxy = state.proxy.get_forward_proxy_dashboard_summary().await?;
     let (request_log_retention_days, retention_since) =
@@ -1421,6 +1424,9 @@ async fn compute_dashboard_overview_freshness(
 ) -> Result<DashboardOverviewFreshness, ProxyError> {
     let summary = state.proxy.summary().await?;
     let summary_windows = state.proxy.summary_windows().await?;
+    let quota_sample_window_start = summary_windows
+        .yesterday_start
+        .min(start_of_month_dt(state.proxy.backend_time().now_utc()).timestamp());
     let dashboard_rollup_signature = state
         .proxy
         .dashboard_rollup_freshness_signature(summary_windows.previous_month_start)
@@ -1442,7 +1448,7 @@ async fn compute_dashboard_overview_freshness(
         .await?;
     let dashboard_quota_sample_signature = state
         .proxy
-        .dashboard_quota_sample_signature(summary_windows.previous_month_start)
+        .dashboard_quota_sample_signature(quota_sample_window_start, summary_windows.today_end)
         .await?;
     let forward_proxy = state.proxy.get_forward_proxy_dashboard_summary().await?;
     let summary_window_starts =

@@ -2968,6 +2968,133 @@ use super::upstream_support_and_manual_jobs::*;
     }
 
     #[tokio::test]
+    async fn dashboard_overview_snapshot_rebuilds_when_quota_baseline_backfills() {
+        let db_path = temp_db_path("dashboard-overview-quota-baseline-backfill");
+        let db_str = db_path.to_string_lossy().to_string();
+        let proxy = TavilyProxy::with_endpoint(
+            vec!["tvly-dashboard-overview-quota-baseline-backfill".to_string()],
+            DEFAULT_UPSTREAM,
+            &db_str,
+        )
+        .await
+        .expect("proxy created");
+
+        let state = Arc::new(AppState {
+            proxy: proxy.clone(),
+            static_dir: None,
+            forward_auth: ForwardAuthConfig::new(None, None, None, None),
+            forward_auth_enabled: false,
+            builtin_admin: BuiltinAdminAuth::new(false, None, None),
+            linuxdo_oauth: LinuxDoOAuthOptions::disabled(),
+            linuxdo_credit: LinuxDoCreditOptions::disabled(),
+            ha: tavily_hikari::HaRuntime::new(tavily_hikari::HaConfig::default()),
+            dev_open_admin: false,
+            usage_base: "http://127.0.0.1:58088".to_string(),
+            api_key_ip_geo_origin: "https://api.country.is".to_string(),
+            dashboard_overview_cache: new_dashboard_overview_cache(),
+        });
+        let pool = connect_sqlite_test_pool(&db_str).await;
+        let summary_windows = proxy.summary_windows().await.expect("summary windows");
+        let key_id = proxy
+            .list_api_key_metrics()
+            .await
+            .expect("key metrics")
+            .into_iter()
+            .next()
+            .expect("seeded key")
+            .id;
+        let quota_sample_window_start = summary_windows
+            .yesterday_start
+            .min(start_of_month_dt(Utc::now()).timestamp());
+        let window_sample_at = quota_sample_window_start + 120;
+
+        sqlx::query(
+            r#"
+            INSERT INTO api_key_quota_sync_samples (
+                key_id,
+                quota_limit,
+                quota_remaining,
+                captured_at,
+                source
+            ) VALUES (?, ?, ?, ?, ?)
+            "#,
+        )
+        .bind(&key_id)
+        .bind(2_000_i64)
+        .bind(1_000_i64)
+        .bind(window_sample_at)
+        .bind("window_sample")
+        .execute(&pool)
+        .await
+        .expect("insert window sample");
+
+        let first = load_dashboard_overview_snapshot(&state)
+            .await
+            .expect("first overview snapshot");
+        let first_upstream_actual = first
+            .payload
+            .summary_windows
+            .month
+            .quota_charge
+            .upstream_actual_credits;
+        let first_latest_sync = first
+            .payload
+            .summary_windows
+            .month
+            .quota_charge
+            .latest_sync_at;
+        let first_quota_signature = first.freshness.dashboard_quota_sample_signature;
+
+        reset_dashboard_overview_build_count(&state).await;
+
+        sqlx::query(
+            r#"
+            INSERT INTO api_key_quota_sync_samples (
+                key_id,
+                quota_limit,
+                quota_remaining,
+                captured_at,
+                source
+            ) VALUES (?, ?, ?, ?, ?)
+            "#,
+        )
+        .bind(&key_id)
+        .bind(2_000_i64)
+        .bind(1_400_i64)
+        .bind(quota_sample_window_start - 60)
+        .bind("baseline_backfill")
+        .execute(&pool)
+        .await
+        .expect("insert baseline backfill sample");
+
+        let second = load_dashboard_overview_snapshot(&state)
+            .await
+            .expect("second overview snapshot");
+
+        assert!(
+            dashboard_overview_build_count(&state).await >= 1,
+            "baseline quota sample backfills should rebuild the shared snapshot",
+        );
+        assert_ne!(
+            second.freshness.dashboard_quota_sample_signature,
+            first_quota_signature,
+            "quota freshness signature should include baseline rows that feed quota charge calculations",
+        );
+        assert_eq!(
+            second.payload.summary_windows.month.quota_charge.latest_sync_at,
+            first_latest_sync,
+            "baseline backfills should not need a newer in-window sample timestamp to refresh the cache",
+        );
+        assert!(
+            second.payload.summary_windows.month.quota_charge.upstream_actual_credits
+                > first_upstream_actual,
+            "backfilled baseline rows should change the derived upstream actual credits",
+        );
+
+        let _ = std::fs::remove_file(db_path);
+    }
+
+    #[tokio::test]
     async fn admin_dashboard_sse_snapshot_refreshes_when_quota_totals_change() {
         let db_path = temp_db_path("admin-dashboard-snapshot-quota-change");
         let db_str = db_path.to_string_lossy().to_string();

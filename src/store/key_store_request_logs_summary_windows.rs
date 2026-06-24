@@ -120,20 +120,54 @@ impl KeyStore {
 
     pub(crate) async fn fetch_dashboard_quota_sample_signature(
         &self,
-        range_start: i64,
+        window_start: i64,
+        window_end: i64,
     ) -> Result<[i64; 4], ProxyError> {
+        if window_end <= window_start {
+            return Ok([0, 0, 0, 0]);
+        }
         let row = sqlx::query(
             r#"
+            WITH window_rows AS (
+                SELECT key_id, quota_remaining, captured_at
+                FROM api_key_quota_sync_samples
+                WHERE captured_at >= ?
+                  AND captured_at < ?
+            ),
+            sampled_keys AS (
+                SELECT DISTINCT key_id FROM window_rows
+            ),
+            baseline_rows AS (
+                SELECT s.key_id, s.quota_remaining, s.captured_at
+                FROM api_key_quota_sync_samples s
+                INNER JOIN (
+                    SELECT key_id, MAX(captured_at) AS captured_at
+                    FROM api_key_quota_sync_samples
+                    WHERE captured_at < ?
+                      AND key_id IN (SELECT key_id FROM sampled_keys)
+                    GROUP BY key_id
+                ) latest
+                    ON latest.key_id = s.key_id
+                   AND latest.captured_at = s.captured_at
+            ),
+            signature_rows AS (
+                SELECT key_id, quota_remaining, captured_at
+                FROM window_rows
+                UNION ALL
+                SELECT key_id, quota_remaining, captured_at
+                FROM baseline_rows
+            )
             SELECT
                 COALESCE(COUNT(*), 0) AS sample_count,
                 COALESCE(MAX(captured_at), 0) AS max_captured_at,
                 COALESCE(SUM(captured_at), 0) AS captured_at_sum,
                 COALESCE(SUM(quota_remaining), 0) AS remaining_sum
-            FROM api_key_quota_sync_samples
-            WHERE captured_at >= ?
+            FROM signature_rows
             "#,
         )
-        .bind(range_start)
+        .bind(window_start)
+        .bind(window_end)
+        .bind(window_start)
         .fetch_one(&self.pool)
         .await?;
         Ok([

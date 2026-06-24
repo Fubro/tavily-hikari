@@ -680,10 +680,11 @@ impl TavilyProxy {
 
     pub async fn dashboard_quota_sample_signature(
         &self,
-        range_start: i64,
+        window_start: i64,
+        window_end: i64,
     ) -> Result<[i64; 4], ProxyError> {
         self.key_store
-            .fetch_dashboard_quota_sample_signature(range_start)
+            .fetch_dashboard_quota_sample_signature(window_start, window_end)
             .await
     }
 
