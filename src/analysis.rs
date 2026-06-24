@@ -1444,7 +1444,7 @@ pub(crate) fn request_log_request_kind_key_sql(
         "
         CASE
             WHEN {path} = '/mcp' AND json_valid({body_json}) AND json_type({body_json}) = 'object'
-                THEN COALESCE(({object_kind}), 'mcp:unknown-payload')
+                THEN COALESCE({object_kind}, 'mcp:unknown-payload')
             WHEN {path} = '/mcp' AND json_valid({body_json}) AND json_type({body_json}) = 'array'
                 THEN CASE
                     WHEN NOT EXISTS (SELECT 1 FROM json_each({body_json}) AS items)
@@ -1454,10 +1454,10 @@ pub(crate) fn request_log_request_kind_key_sql(
                         WHERE ({array_item_kind}) IS NULL
                     ) THEN 'mcp:unknown-payload'
                     WHEN (
-                        SELECT COUNT(DISTINCT ({array_item_kind}))
+                        SELECT COUNT(DISTINCT {array_item_kind})
                         FROM json_each({body_json}) AS items
                     ) = 1 THEN (
-                        SELECT MIN(({array_item_kind}))
+                        SELECT MIN({array_item_kind})
                         FROM json_each({body_json}) AS items
                     )
                     ELSE 'mcp:batch'
