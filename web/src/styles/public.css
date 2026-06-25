@@ -143,6 +143,16 @@
   line-height: 1.1;
 }
 
+.user-console-header-brand {
+  flex: 0 0 auto;
+  margin-right: 2px;
+}
+
+.user-console-header-brand-mark {
+  width: 150px;
+  height: auto;
+}
+
 .user-console-header-eyebrow {
   flex: 0 0 auto;
   max-width: 11ch;
@@ -410,6 +420,10 @@
 @media (max-width: 767px) {
   .user-console-header-summary {
     display: none;
+  }
+
+  .user-console-header-brand {
+    margin-right: 4px;
   }
 
   .user-console-header-eyebrow {

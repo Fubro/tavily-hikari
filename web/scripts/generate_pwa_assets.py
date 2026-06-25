@@ -6,12 +6,14 @@ import json
 from pathlib import Path
 from typing import Any
 
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image
 
 
 WEB_ROOT = Path(__file__).resolve().parent.parent
 DIST_DIR = WEB_ROOT / "dist"
 VITE_MANIFEST_PATH = DIST_DIR / ".vite" / "manifest.json"
+ICON_SIZES = (64, 96, 128, 144, 152, 167, 180, 192, 256, 384, 512, 1024)
+MASKABLE_SIZES = (192, 512)
 
 PUBLIC_HTML_FILES = {
     "index.html",
@@ -64,59 +66,80 @@ def ensure_not_empty(name: str, values: list[str]) -> None:
         raise RuntimeError(f"PWA asset graph '{name}' is empty")
 
 
-def make_gradient(size: int, top: tuple[int, int, int], bottom: tuple[int, int, int]) -> Image.Image:
-    image = Image.new("RGBA", (size, size))
-    for y in range(size):
-        ratio = y / max(size - 1, 1)
-        color = tuple(int(top[i] * (1 - ratio) + bottom[i] * ratio) for i in range(3))
-        ImageDraw.Draw(image).line([(0, y), (size, y)], fill=color + (255,))
-    return image
-
-
-def draw_icon(prefix: str, top: tuple[int, int, int], bottom: tuple[int, int, int], accent: tuple[int, int, int], text: str, text_fill: tuple[int, int, int]) -> dict[str, str]:
-    base = make_gradient(512, top, bottom)
-    draw = ImageDraw.Draw(base)
-
-    draw.rounded_rectangle((24, 24, 488, 488), radius=108, outline=accent + (255,), width=18)
-    draw.rounded_rectangle((88, 96, 424, 424), radius=72, fill=(255, 255, 255, 210))
-    draw.rounded_rectangle((136, 148, 376, 324), radius=46, fill=text_fill + (36,))
-    draw.rounded_rectangle((166, 338, 346, 372), radius=18, fill=text_fill + (52,))
-    draw.ellipse((372, 84, 452, 164), fill=accent + (255,))
-    draw.ellipse((384, 96, 440, 152), fill=(255, 255, 255, 235))
-
-    try:
-        font_large = ImageFont.truetype("Arial Bold.ttf", 84)
-    except OSError:
-        font_large = ImageFont.load_default()
-
-    bbox = draw.textbbox((0, 0), text, font=font_large)
-    text_width = bbox[2] - bbox[0]
-    text_height = bbox[3] - bbox[1]
-    draw.text(
-        ((512 - text_width) / 2, 384 - text_height / 2),
-        text,
-        fill=text_fill + (255,),
-        font=font_large,
-    )
-
-    output: dict[str, str] = {}
+def draw_icon(prefix: str, source_file: Path) -> dict[str, dict[str, str] | str]:
+    base = Image.open(source_file).convert("RGBA")
+    output_any: dict[str, str] = {}
+    output_maskable: dict[str, str] = {}
     pwa_dir = DIST_DIR / "pwa"
     pwa_dir.mkdir(parents=True, exist_ok=True)
-    for size in (192, 512):
-      rel = f"pwa/{prefix}-{size}.png"
-      base.resize((size, size), Image.Resampling.LANCZOS).save(DIST_DIR / rel)
-      output[str(size)] = rel
+    for size in ICON_SIZES:
+        rel = f"pwa/{prefix}-{size}.png"
+        base.resize((size, size), Image.Resampling.LANCZOS).save(DIST_DIR / rel)
+        output_any[str(size)] = rel
+    for size in MASKABLE_SIZES:
+        rel = f"pwa/{prefix}-maskable-{size}.png"
+        base.resize((size, size), Image.Resampling.LANCZOS).save(DIST_DIR / rel)
+        output_maskable[str(size)] = rel
     touch_rel = f"pwa/{prefix}-touch-icon.png"
     base.resize((180, 180), Image.Resampling.LANCZOS).save(DIST_DIR / touch_rel)
-    output["touch"] = touch_rel
-    return output
+    return {
+        "any": output_any,
+        "maskable": output_maskable,
+        "touch": touch_rel,
+    }
 
 
 def hash_cache_key(values: list[str]) -> str:
     return hashlib.sha256("|".join(values).encode("utf-8")).hexdigest()[:12]
 
 
-def make_manifest(name: str, short_name: str, start_url: str, scope: str, theme_color: str, background_color: str, icons: dict[str, str]) -> dict[str, Any]:
+def collect_icon_files(icons: dict[str, dict[str, str] | str]) -> list[str]:
+    output: list[str] = []
+    any_icons = icons.get("any")
+    maskable_icons = icons.get("maskable")
+    touch_icon = icons.get("touch")
+    if isinstance(any_icons, dict):
+        output.extend(any_icons.values())
+    if isinstance(maskable_icons, dict):
+        output.extend(maskable_icons.values())
+    if isinstance(touch_icon, str):
+        output.append(touch_icon)
+    return normalize(output)
+
+
+def make_manifest(
+    name: str,
+    short_name: str,
+    start_url: str,
+    scope: str,
+    theme_color: str,
+    background_color: str,
+    icons: dict[str, dict[str, str] | str],
+) -> dict[str, Any]:
+    icon_entries: list[dict[str, str]] = []
+    any_icons = icons["any"]
+    maskable_icons = icons["maskable"]
+    if not isinstance(any_icons, dict) or not isinstance(maskable_icons, dict):
+        raise RuntimeError("PWA icon export graph is malformed")
+    for size in ICON_SIZES:
+        rel = any_icons[str(size)]
+        icon_entries.append(
+            {
+                "src": f"/{rel}",
+                "sizes": f"{size}x{size}",
+                "type": "image/png",
+            }
+        )
+    for size in MASKABLE_SIZES:
+        rel = maskable_icons[str(size)]
+        icon_entries.append(
+            {
+                "src": f"/{rel}",
+                "sizes": f"{size}x{size}",
+                "type": "image/png",
+                "purpose": "maskable",
+            }
+        )
     return {
         "name": name,
         "short_name": short_name,
@@ -125,18 +148,7 @@ def make_manifest(name: str, short_name: str, start_url: str, scope: str, theme_
         "display": "standalone",
         "theme_color": theme_color,
         "background_color": background_color,
-        "icons": [
-            {
-                "src": f"/{icons['192']}",
-                "sizes": "192x192",
-                "type": "image/png",
-            },
-            {
-                "src": f"/{icons['512']}",
-                "sizes": "512x512",
-                "type": "image/png",
-            },
-        ],
+        "icons": icon_entries,
     }
 
 
@@ -251,22 +263,14 @@ def main() -> None:
     ensure_not_empty("public", public_files)
     ensure_not_empty("admin", admin_files)
 
-    public_icons = draw_icon(
-        prefix="public",
-        top=(255, 244, 214),
-        bottom=(252, 211, 77),
-        accent=(217, 119, 6),
-        text="TH",
-        text_fill=(146, 64, 14),
-    )
-    admin_icons = draw_icon(
-        prefix="admin",
-        top=(240, 253, 250),
-        bottom=(153, 246, 228),
-        accent=(15, 118, 110),
-        text="ADM",
-        text_fill=(17, 94, 89),
-    )
+    public_source_icon = WEB_ROOT / "public" / "relay-mesh-icon-light.png"
+    admin_source_icon = WEB_ROOT / "public" / "relay-mesh-icon-dark.png"
+    public_icons = draw_icon(prefix="public", source_file=public_source_icon)
+    admin_icons = draw_icon(prefix="admin", source_file=admin_source_icon)
+    public_icon_files = collect_icon_files(public_icons)
+    admin_icon_files = collect_icon_files(admin_icons)
+    public_precache_files = normalize(public_files + public_icon_files)
+    admin_precache_files = normalize(admin_files + admin_icon_files)
 
     write_json(
         "manifest.webmanifest",
@@ -275,8 +279,8 @@ def main() -> None:
             short_name="Hikari",
             start_url="/",
             scope="/",
-            theme_color="#d97706",
-            background_color="#fff9ec",
+            theme_color="#7c3aed",
+            background_color="#f4f1fa",
             icons=public_icons,
         ),
     )
@@ -287,8 +291,8 @@ def main() -> None:
             short_name="Hikari Admin",
             start_url="/admin/",
             scope="/admin/",
-            theme_color="#0f766e",
-            background_color="#f0fdfa",
+            theme_color="#0ea5e9",
+            background_color="#eef1fa",
             icons=admin_icons,
         ),
     )
@@ -296,8 +300,8 @@ def main() -> None:
     write_text(
         "sw-public.js",
         make_service_worker(
-            cache_name=f"tavily-hikari-public-{hash_cache_key(public_files)}",
-            files=public_files + [public_icons["192"], public_icons["512"], public_icons["touch"]],
+            cache_name=f"tavily-hikari-public-{hash_cache_key(public_precache_files)}",
+            files=public_precache_files,
             offline_fallbacks={
                 "/console": "/console.html",
                 "/login": "/login.html",
@@ -310,8 +314,8 @@ def main() -> None:
     write_text(
         "sw-admin.js",
         make_service_worker(
-            cache_name=f"tavily-hikari-admin-{hash_cache_key(admin_files)}",
-            files=admin_files + [admin_icons["192"], admin_icons["512"], admin_icons["touch"]],
+            cache_name=f"tavily-hikari-admin-{hash_cache_key(admin_precache_files)}",
+            files=admin_precache_files,
             offline_fallbacks={"/admin/": "/admin.html", "/admin": "/admin.html"},
             reject_admin=False,
         ),
@@ -325,12 +329,14 @@ def main() -> None:
                 "manifest": "manifest.webmanifest",
                 "serviceWorker": "sw-public.js",
                 "files": public_files,
+                "precacheFiles": public_precache_files,
                 "icons": public_icons,
             },
             "admin": {
                 "manifest": "manifest-admin.webmanifest",
                 "serviceWorker": "sw-admin.js",
                 "files": admin_files,
+                "precacheFiles": admin_precache_files,
                 "icons": admin_icons,
             },
         },

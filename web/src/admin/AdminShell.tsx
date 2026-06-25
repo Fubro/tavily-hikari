@@ -1,3 +1,4 @@
+import BrandLockup from '../components/BrandLockup'
 import { Icon } from '../lib/icons'
 import { createContext, type PropsWithChildren, type ReactNode, useCallback, useContext, useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
@@ -106,10 +107,12 @@ export default function AdminShell({
 
         <aside className={`admin-sidebar surface${isStackedSidebar ? ' is-stacked' : ''}`} aria-label="Admin navigation">
           <div className="admin-sidebar-topbar">
-            <div className="admin-sidebar-brand">
-              <span className="admin-sidebar-brand-dot" aria-hidden="true" />
-              <span>Tavily Hikari</span>
-            </div>
+            <BrandLockup
+              title="Tavily Hikari"
+              compact
+              className="admin-sidebar-brand"
+              markClassName="admin-sidebar-brand-mark"
+            />
             {isStackedSidebar && (
               <button
                 type="button"

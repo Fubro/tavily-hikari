@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 
 import { fetchProfile, requestJson } from '../api'
 import { isDemoMode } from '../api/demo'
+import BrandLockup from '../components/BrandLockup'
 import LanguageSwitcher from '../components/LanguageSwitcher'
 import OfflineStatusBanner from '../components/OfflineStatusBanner'
 import ThemeToggle from '../components/ThemeToggle'
@@ -83,6 +84,11 @@ function AdminLogin(): JSX.Element {
       <div className="mx-auto flex w-full max-w-4xl flex-col gap-6 px-6 py-10">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="space-y-1">
+            <BrandLockup
+              title="Tavily Hikari"
+              className="auth-brand-lockup"
+              markClassName="auth-brand-mark"
+            />
             <h1 className="auth-title text-3xl font-semibold tracking-tight">{ui.title}</h1>
             <p className="auth-subtitle text-sm text-muted-foreground">{ui.description}</p>
           </div>

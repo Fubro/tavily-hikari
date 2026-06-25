@@ -1,4 +1,5 @@
 import React, { type ReactNode } from 'react'
+import BrandLockup from './BrandLockup'
 import { Icon } from '../lib/icons'
 
 import type { PublicMetrics } from '../api'
@@ -71,6 +72,13 @@ function PublicHomeHeroCard({
   return (
     <section className="surface public-home-hero">
       <div className="language-switcher-row">{topControls}</div>
+      <div className="public-home-brand-wrap">
+        <BrandLockup
+          title="Tavily Hikari"
+          className="public-home-brand-lockup"
+          markClassName="public-home-brand-mark"
+        />
+      </div>
       <h1 className="hero-title">{publicStrings.heroTitle}</h1>
       <p className="public-home-description">{publicStrings.heroDescription}</p>
       {error && <div className="surface error-banner" role="status">{error}</div>}

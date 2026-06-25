@@ -61,6 +61,8 @@ describe('UserConsoleHeader', () => {
     expect(html).toContain('User Console')
     expect(html).toContain('Token Detail')
     expect(html).toContain('User Workspace')
+    expect(html).toContain('/relay-mesh-lockup-light.png')
+    expect(html).toContain('/relay-mesh-lockup-dark.png')
     expect(html).toContain('Your account dashboard and token management')
     expect(html).toContain('Same token-level modules as home page.')
     expect(html).toContain('Signed in as: Ivan')

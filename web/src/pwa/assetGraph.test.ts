@@ -3,6 +3,8 @@ import { expect, test } from 'bun:test'
 import fs from 'node:fs'
 import path from 'node:path'
 
+const REQUIRED_ICON_SIZES = ['64x64', '96x96', '128x128', '144x144', '152x152', '167x167', '180x180', '192x192', '256x256', '384x384', '512x512', '1024x1024']
+
 test('built asset graph keeps public and admin identities separated', () => {
   const graphPath = path.resolve(import.meta.dir, '../../dist/pwa/asset-graphs.json')
 
@@ -12,8 +14,8 @@ test('built asset graph keeps public and admin identities separated', () => {
   }
 
   const graph = JSON.parse(fs.readFileSync(graphPath, 'utf8')) as {
-    public: { files: string[] }
-    admin: { files: string[] }
+    public: { files: string[]; precacheFiles: string[] }
+    admin: { files: string[]; precacheFiles: string[] }
   }
 
   expect(graph.public.files).toContain('index.html')
@@ -22,4 +24,37 @@ test('built asset graph keeps public and admin identities separated', () => {
   expect(graph.public.files).not.toContain('admin.html')
   expect(graph.admin.files).toContain('admin.html')
   expect(graph.admin.files).not.toContain('index.html')
+  expect(graph.public.precacheFiles).toContain('pwa/public-1024.png')
+  expect(graph.public.precacheFiles).toContain('pwa/public-maskable-512.png')
+  expect(graph.public.precacheFiles).toContain('pwa/public-touch-icon.png')
+  expect(graph.admin.precacheFiles).toContain('pwa/admin-1024.png')
+  expect(graph.admin.precacheFiles).toContain('pwa/admin-maskable-512.png')
+  expect(graph.admin.precacheFiles).toContain('pwa/admin-touch-icon.png')
+})
+
+test('built manifests expose full icon coverage and maskable entries', () => {
+  const manifestPaths = [
+    path.resolve(import.meta.dir, '../../dist/manifest.webmanifest'),
+    path.resolve(import.meta.dir, '../../dist/manifest-admin.webmanifest'),
+  ]
+
+  if (!manifestPaths.every((manifestPath) => fs.existsSync(manifestPath))) {
+    expect(true).toBe(true)
+    return
+  }
+
+  for (const manifestPath of manifestPaths) {
+    const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8')) as {
+      icons: Array<{ sizes: string; purpose?: string }>
+    }
+    const sizes = manifest.icons.map((icon) => icon.sizes)
+    for (const size of REQUIRED_ICON_SIZES) {
+      expect(sizes).toContain(size)
+    }
+    const maskableSizes = manifest.icons
+      .filter((icon) => icon.purpose === 'maskable')
+      .map((icon) => icon.sizes)
+    expect(maskableSizes).toContain('192x192')
+    expect(maskableSizes).toContain('512x512')
+  }
 })

@@ -33,5 +33,7 @@ describe('NotFoundFallbackPreview Storybook proofs', () => {
     expect(markup).toContain('/accounts?view=dark')
     expect(markup).toContain('Return to dashboard')
     expect(markup).toContain('Error reference: 404')
+    expect(markup).toContain('/relay-mesh-lockup-light.png')
+    expect(markup).toContain('/relay-mesh-lockup-dark.png')
   })
 })
