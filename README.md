@@ -28,7 +28,7 @@ Tavily Hikari is a Rust + Axum proxy for Tavily's MCP endpoint. It multiplexes m
 - **Operator UI** – the SPA in `web/` visualizes key health, request logs, and admin actions (soft delete, restore, reveal real keys).
 - **Path-based web console routes** – the user console now uses `/console`, `/console/dashboard`, `/console/tokens`, and `/console/tokens/:id`; homepage token bootstrap intentionally remains hash-based (`/#<token>` or `/#<token-id>`) so full tokens never move into path/query logging surfaces.
 - **Split PWA identities** – the public/user web app installs from `/`, `/console`, `/login`, and `/registration-paused`, while the admin web app installs only from `/admin/*`; both can reopen their shell offline, but live data and mutations stay network-only.
-- **Repo-local Relay Mesh brand assets** – the favicon, touch icons, public/admin PWA icons, and docs-site logo all derive from checked-in approved Relay Mesh source crops, so the brand layer stays consistent without runtime image/CDN dependencies.
+- **Repo-local Relay Mesh brand assets** – the favicon, touch icons, public/admin PWA icons, and docs-site logo all derive from checked-in approved Relay Mesh lockup/icon assets, so the brand layer stays consistent without runtime image/CDN dependencies.
 - **CI + Release** – GitHub Actions runs lint/tests; releases are driven by PR intent labels and publish `ghcr.io/ivanli-cn/tavily-hikari:<tag>` with prebuilt web assets.
 
 ## Architecture Snapshot

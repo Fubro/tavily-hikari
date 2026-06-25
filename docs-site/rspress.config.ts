@@ -15,8 +15,8 @@ export default defineConfig({
   base: docsBase,
   icon: '/relay-mesh-icon.png',
   logo: {
-    light: '/relay-mesh-logo.png',
-    dark: '/relay-mesh-logo.png',
+    light: '/relay-mesh-lockup.png',
+    dark: '/relay-mesh-lockup.png',
   },
   logoText: 'Tavily Hikari Docs',
   lang: 'en',
@@ -55,7 +55,7 @@ export default defineConfig({
         label: 'English',
         title: 'Tavily Hikari Docs',
         description: 'Product, deployment, API, and operator guidance for Tavily Hikari.',
-        logo: '/relay-mesh-logo.png',
+        logo: '/relay-mesh-lockup.png',
         logoText: 'Tavily Hikari Docs',
         nav: [
           { text: 'Home', link: '/' },
@@ -86,7 +86,7 @@ export default defineConfig({
         label: '简体中文',
         title: 'Tavily Hikari 文档',
         description: 'Tavily Hikari 的产品、部署、API 与运维文档。',
-        logo: '/relay-mesh-logo.png',
+        logo: '/relay-mesh-lockup.png',
         logoText: 'Tavily Hikari 文档',
         nav: [
           { text: '首页', link: '/zh/' },

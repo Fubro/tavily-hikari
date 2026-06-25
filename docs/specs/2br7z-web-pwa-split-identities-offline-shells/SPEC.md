@@ -20,7 +20,7 @@
 - 让已在线访问过相应页面的用户在离线时仍可打开公共首页、用户控制台与管理员后台的页面壳。
 - 所有业务数据请求、SSE、MCP、登录提交与保存/操作在离线时都保持明确失败语义，不伪造成功，不回显旧快照。
 - 非管理员不注册 admin service worker、不看到 admin manifest 安装入口、不在 public SW cache 中形成 admin 壳页长期缓存。
-- 将 public/admin 双身份 PWA 的图标、touch icon 与站点 favicon 收口到 repo-local 的经批准 Relay Mesh 原稿裁切导出链，不改变 identity/scope/start_url。
+- 将 public/admin 双身份 PWA 的图标、touch icon 与站点 favicon 收口到 repo-local 的经批准 Relay Mesh lockup/icon 导出链，不改变 identity/scope/start_url。
 - 补齐测试、Storybook 状态、浏览器离线验证与视觉证据，并将合同冻结到本 spec。
 
 ### Non-goals
@@ -39,11 +39,7 @@
 - `web/scripts/**`
 - `web/*.html`
 - `web/public/relay-mesh-lockup.png`
-- `web/public/relay-mesh-mark.png`
-- `web/public/relay-mesh-wordmark.png`
 - `web/public/relay-mesh-icon.png`
-- `web/public/relay-mesh-logo.svg`
-- `web/public/relay-mesh-icon.svg`
 - `web/src/*main.tsx`
 - `web/src/api/runtime.ts`
 - `web/src/components/**`
@@ -52,11 +48,7 @@
 - `web/src/admin/AdminDashboardRuntime.tsx`
 - `docs-site/rspress.config.ts`
 - `docs-site/docs/public/relay-mesh-lockup.png`
-- `docs-site/docs/public/relay-mesh-mark.png`
-- `docs-site/docs/public/relay-mesh-wordmark.png`
 - `docs-site/docs/public/relay-mesh-icon.png`
-- `docs-site/docs/public/relay-mesh-logo.svg`
-- `docs-site/docs/public/relay-mesh-icon.svg`
 - `src/server/spa.rs`
 - `src/server/serve.rs`
 - `docs/specs/README.md`
@@ -120,17 +112,9 @@
 - `web/dist/pwa/public-touch-icon.png`
 - `web/dist/pwa/admin-touch-icon.png`
 - `web/public/relay-mesh-lockup.png`
-- `web/public/relay-mesh-mark.png`
-- `web/public/relay-mesh-wordmark.png`
 - `web/public/relay-mesh-icon.png`
-- `web/public/relay-mesh-logo.svg`
-- `web/public/relay-mesh-icon.svg`
 - `docs-site/docs/public/relay-mesh-lockup.png`
-- `docs-site/docs/public/relay-mesh-mark.png`
-- `docs-site/docs/public/relay-mesh-wordmark.png`
 - `docs-site/docs/public/relay-mesh-icon.png`
-- `docs-site/docs/public/relay-mesh-logo.svg`
-- `docs-site/docs/public/relay-mesh-icon.svg`
 
 ### 构建输入
 
@@ -214,4 +198,4 @@
 - 2026-06-24: 完成 Vite multipage 双 manifest / 双 service worker 生成、PWA 图标产线、前端入口注册、Rust 静态托管与主界面离线提示第一版。
 - 2026-06-24: 补齐 Chromium 离线视觉证据，确认 public identity 离线访问 `/admin` 不会命中 cached admin shell。
 - 2026-06-24: 将统一离线提示 banner 图标从 `mdi:earth-off` 调整为更贴近无网络语义的 `mdi:web-off`，并更新对应视觉证据。
-- 2026-06-25: 将 split public/admin PWA 图标、touch icon 与站点 favicon 切换到经批准的 Relay Mesh 原稿裁切导出链，并同步接入 public/console/admin/docs-site 品牌位而不改变 PWA identity 合同。
+- 2026-06-25: 将 split public/admin PWA 图标、touch icon 与站点 favicon 切换到经批准的 Relay Mesh lockup/icon 导出链，并同步接入 public/console/admin/docs-site 品牌位而不改变 PWA identity 合同。

@@ -139,7 +139,7 @@ function PublicHomeHeroCard({
             <span className="traffic-node-icon">
               <Icon icon="mdi:shield-key-outline" width={25} height={25} />
             </span>
-            <strong>Relay Mesh</strong>
+            <strong>Hikari</strong>
             <small>{publicStrings.metrics.monthly.subtitle}</small>
           </div>
           <div className="traffic-pulse-track traffic-pulse-track-alt">
