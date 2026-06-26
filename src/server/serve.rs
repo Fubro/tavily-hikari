@@ -267,6 +267,7 @@ pub async fn serve(
         .route("/api/tavily/usage", get(tavily_http_usage))
         .route("/api/summary", get(fetch_summary))
         .route("/api/summary/windows", get(fetch_summary_windows))
+        .route("/api/analysis/pressure", get(get_analysis_pressure_snapshot))
         .route("/api/users/rankings", get(get_user_rankings))
         .route("/api/users/rankings/events", get(sse_user_rankings))
         .route("/api/settings", get(get_settings))
@@ -892,8 +893,28 @@ fn spawn_business_background_tasks(state: Arc<AppState>) {
     spawn_db_compaction_scheduler(state);
 }
 
+fn background_tasks_disabled_via_env() -> bool {
+    std::env::var("TAVILY_DISABLE_BACKGROUND_TASKS")
+        .ok()
+        .map(|value| {
+            matches!(
+                value.trim().to_ascii_lowercase().as_str(),
+                "1" | "true" | "yes" | "on"
+            )
+        })
+        .unwrap_or(false)
+}
+
 async fn spawn_background_tasks_for_current_role(state: Arc<AppState>) -> bool {
     if !state.ha.role().await.allows_basic_business() {
+        return false;
+    }
+    if background_tasks_disabled_via_env() {
+        tracing::info!(
+            component = "startup",
+            event = "background_tasks_disabled_via_env",
+            "background tasks disabled via TAVILY_DISABLE_BACKGROUND_TASKS"
+        );
         return false;
     }
     spawn_business_background_tasks(state);

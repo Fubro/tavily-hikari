@@ -106,6 +106,12 @@ struct UserBusinessCalls1hBackfillRow {
     outcome: UserBusinessCallOutcome,
 }
 
+#[derive(Clone, Debug)]
+struct CurrentUserBusinessCalls1hRow {
+    user_id: String,
+    counts: UserBusinessCallCounts,
+}
+
 impl RequestRateSubject {
     fn user(user_id: &str) -> Self {
         Self {
@@ -155,6 +161,12 @@ struct CachedUserRankingsSnapshot {
 }
 
 #[derive(Clone, Debug)]
+struct CachedAnalysisPressureSnapshot {
+    generated_at: Instant,
+    value: AnalysisPressureSnapshot,
+}
+
+#[derive(Clone, Debug)]
 struct SummaryWindowsCacheState {
     cached: Option<CachedSummaryWindows>,
     loading: bool,
@@ -185,6 +197,13 @@ struct UserRankingsCacheState {
     notify: Arc<tokio::sync::Notify>,
 }
 
+#[derive(Clone, Debug)]
+struct AnalysisPressureCacheState {
+    cached: Option<CachedAnalysisPressureSnapshot>,
+    loading: bool,
+    notify: Arc<tokio::sync::Notify>,
+}
+
 type SharedTokenBillingLockMap = Arc<Mutex<HashMap<String, Weak<Mutex<()>>>>>;
 
 fn shared_token_billing_locks() -> SharedTokenBillingLockMap {
@@ -205,6 +224,16 @@ impl Default for DashboardHourlyRequestWindowCacheState {
 }
 
 impl Default for UserRankingsCacheState {
+    fn default() -> Self {
+        Self {
+            cached: None,
+            loading: false,
+            notify: Arc::new(tokio::sync::Notify::new()),
+        }
+    }
+}
+
+impl Default for AnalysisPressureCacheState {
     fn default() -> Self {
         Self {
             cached: None,
@@ -481,6 +510,38 @@ impl Drop for UserRankingsLoadGuard {
     }
 }
 
+struct AnalysisPressureLoadGuard {
+    state: Arc<Mutex<AnalysisPressureCacheState>>,
+    armed: bool,
+}
+
+impl AnalysisPressureLoadGuard {
+    fn new(state: Arc<Mutex<AnalysisPressureCacheState>>) -> Self {
+        Self { state, armed: true }
+    }
+
+    fn disarm(&mut self) {
+        self.armed = false;
+    }
+}
+
+impl Drop for AnalysisPressureLoadGuard {
+    fn drop(&mut self) {
+        if !self.armed {
+            return;
+        }
+
+        let state = self.state.clone();
+        tokio::spawn(async move {
+            let mut cache = state.lock().await;
+            if cache.loading {
+                cache.loading = false;
+                cache.notify.notify_waiters();
+            }
+        });
+    }
+}
+
 /// 负责均衡 Tavily API key 并透传请求的代理。
 #[derive(Clone, Debug)]
 pub struct TavilyProxy {
@@ -504,6 +565,7 @@ pub struct TavilyProxy {
     summary_windows_cache: Arc<Mutex<SummaryWindowsCacheState>>,
     dashboard_hourly_request_window_cache: Arc<Mutex<DashboardHourlyRequestWindowCacheState>>,
     user_rankings_cache: Arc<Mutex<UserRankingsCacheState>>,
+    analysis_pressure_cache: Arc<Mutex<AnalysisPressureCacheState>>,
     pub(crate) ha_state_coalescer: HaStateCoalescer,
     // Fast in-process lock to collapse duplicate work within one instance.
     pub(crate) token_billing_locks: Arc<Mutex<HashMap<String, Weak<Mutex<()>>>>>,
@@ -1497,18 +1559,7 @@ impl UserBusinessCalls1hWindow {
               AND request_user_id IS NOT NULL
               AND counts_business_quota = 1
               AND result_status != ?
-              AND (
-                upstream_operation IS NOT NULL
-                OR (
-                  api_key_id IS NOT NULL
-                  AND path IN (
-                    '/api/tavily/search',
-                    '/api/tavily/extract',
-                    '/api/tavily/crawl',
-                    '/api/tavily/map'
-                )
-                )
-              )
+              AND upstream_operation IS NOT NULL
             ORDER BY created_at ASC, id ASC
             "#,
         )
@@ -1662,6 +1713,16 @@ impl UserBusinessCalls1hWindow {
         }
         points
     }
+
+    pub(crate) async fn current_distribution(&self) -> Vec<CurrentUserBusinessCalls1hRow> {
+        let now_ts = self.backend_time.now_ts();
+        self.backend
+            .snapshot_all(now_ts, self.rolling_window_secs, self.retention_secs)
+            .await
+            .into_iter()
+            .map(|(user_id, counts)| CurrentUserBusinessCalls1hRow { user_id, counts })
+            .collect()
+    }
 }
 
 impl RequestRateLimitBackend {
@@ -1787,6 +1848,21 @@ impl UserBusinessCalls1hBackend {
             Self::Memory(backend) => {
                 backend
                     .retained_events_for_user(user_id, now_ts, retention_secs)
+                    .await
+            }
+        }
+    }
+
+    async fn snapshot_all(
+        &self,
+        now_ts: i64,
+        rolling_window_secs: i64,
+        retention_secs: i64,
+    ) -> HashMap<String, UserBusinessCallCounts> {
+        match self {
+            Self::Memory(backend) => {
+                backend
+                    .snapshot_all(now_ts, rolling_window_secs, retention_secs)
                     .await
             }
         }
@@ -2026,6 +2102,31 @@ impl MemoryUserBusinessCalls1hBackend {
         let out = queue.iter().cloned().collect();
         if queue.is_empty() {
             state.entries.remove(user_id);
+        }
+        out
+    }
+
+    async fn snapshot_all(
+        &self,
+        now_ts: i64,
+        rolling_window_secs: i64,
+        retention_secs: i64,
+    ) -> HashMap<String, UserBusinessCallCounts> {
+        let mut state = self.state.lock().await;
+        Self::maybe_gc(&mut state, now_ts, retention_secs);
+        let mut empty_keys = Vec::new();
+        let mut out = HashMap::with_capacity(state.entries.len());
+        for (user_id, queue) in &mut state.entries {
+            Self::prune_queue(queue, now_ts, retention_secs);
+            let counts = Self::rolling_counts(queue, now_ts, rolling_window_secs);
+            if queue.is_empty() {
+                empty_keys.push(user_id.clone());
+            } else if counts.total_count() > 0 {
+                out.insert(user_id.clone(), counts);
+            }
+        }
+        for key in empty_keys {
+            state.entries.remove(&key);
         }
         out
     }
