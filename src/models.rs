@@ -1697,6 +1697,7 @@ pub struct AnalysisServerPressure24h {
 pub struct AnalysisServerPressure7d {
     pub bucket_seconds: i64,
     pub points: Vec<AnalysisPressurePoint>,
+    pub moving_averages: Vec<AnalysisPressureMovingAverageSeries>,
     pub peak: Option<AnalysisPressurePeak>,
 }
 
@@ -1706,6 +1707,29 @@ pub struct AnalysisPressurePeak {
     pub bucket_start: i64,
     pub display_bucket_start: i64,
     pub pressure: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct AnalysisPressureMovingAverageSeries {
+    pub key: AnalysisPressureMovingAverageKey,
+    pub window_hours: i64,
+    pub points: Vec<AnalysisPressureMovingAveragePoint>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct AnalysisPressureMovingAveragePoint {
+    pub bucket_start: i64,
+    pub display_bucket_start: i64,
+    pub value: i64,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum AnalysisPressureMovingAverageKey {
+    Sma6h,
+    Sma24h,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

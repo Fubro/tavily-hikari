@@ -427,6 +427,27 @@ use super::upstream_support_and_manual_jobs::*;
         );
         assert_eq!(
             pressure_json
+                .pointer("/server7d/movingAverages")
+                .and_then(|value| value.as_array())
+                .map(Vec::len),
+            Some(2)
+        );
+        assert_eq!(
+            pressure_json
+                .pointer("/server7d/movingAverages/0/points")
+                .and_then(|value| value.as_array())
+                .map(Vec::len),
+            Some(168)
+        );
+        assert_eq!(
+            pressure_json
+                .pointer("/server7d/movingAverages/1/points")
+                .and_then(|value| value.as_array())
+                .map(Vec::len),
+            Some(168)
+        );
+        assert_eq!(
+            pressure_json
                 .pointer("/currentUserDistribution/rows")
                 .and_then(|value| value.as_array())
                 .map(Vec::len),

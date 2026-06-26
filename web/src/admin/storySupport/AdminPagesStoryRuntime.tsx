@@ -157,6 +157,30 @@ const defaultDashboardHourlyRequestWindow = buildDashboardHourlyRequestWindowFix
   }),
 })
 
+const pressureStoryServer7dPoints = Array.from({ length: 168 }, (_item, index) => {
+  const displayBucketStart = now - (167 - index) * 3600
+  const pressure = Math.max(0, 20 + Math.round(Math.cos(index / 7) * 16) + ((index * 4) % 13))
+  const failureCount = pressure > 0 ? Math.round(pressure * 0.08) : 0
+  const successCount = Math.max(0, pressure - failureCount)
+  return {
+    bucketStart: displayBucketStart,
+    displayBucketStart,
+    pressure,
+    successCount,
+    failureCount,
+  }
+})
+
+const pressureStoryMovingAverage = (windowHours: number) => pressureStoryServer7dPoints.map((_item, index) => {
+  const start = Math.max(0, index - windowHours + 1)
+  const window = pressureStoryServer7dPoints.slice(start, index + 1)
+  return {
+    bucketStart: pressureStoryServer7dPoints[index]!.bucketStart,
+    displayBucketStart: pressureStoryServer7dPoints[index]!.displayBucketStart,
+    value: Math.round(window.reduce((sum, item) => sum + item.pressure, 0) / window.length),
+  }
+})
+
 const pressureStorySnapshot: AnalysisPressureSnapshot = {
   generatedAt: now,
   server24h: {
@@ -222,19 +246,11 @@ const pressureStorySnapshot: AnalysisPressureSnapshot = {
   },
   server7d: {
     bucketSeconds: 3600,
-    points: Array.from({ length: 168 }, (_item, index) => {
-      const displayBucketStart = now - (167 - index) * 3600
-      const pressure = Math.max(0, 20 + Math.round(Math.cos(index / 7) * 16) + ((index * 4) % 13))
-      const failureCount = pressure > 0 ? Math.round(pressure * 0.08) : 0
-      const successCount = Math.max(0, pressure - failureCount)
-      return {
-        bucketStart: displayBucketStart,
-        displayBucketStart,
-        pressure,
-        successCount,
-        failureCount,
-      }
-    }),
+    points: pressureStoryServer7dPoints,
+    movingAverages: [
+      { key: 'sma6h', windowHours: 6, points: pressureStoryMovingAverage(6) },
+      { key: 'sma24h', windowHours: 24, points: pressureStoryMovingAverage(24) },
+    ],
     peak: { bucketStart: now - 18 * 3600, displayBucketStart: now - 18 * 3600, pressure: 58 },
   },
 }

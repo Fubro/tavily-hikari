@@ -6,6 +6,23 @@ export function buildDemoAnalysisPressureSnapshot(
     username: string | null
   }>,
 ) {
+  const buildMovingAverage = (
+    windowHours: number,
+    points: Array<{
+      bucketStart: number
+      displayBucketStart: number
+      pressure: number
+    }>,
+  ) => points.map((_point, index) => {
+    const start = Math.max(0, index - windowHours + 1)
+    const window = points.slice(start, index + 1)
+    return {
+      bucketStart: points[index]!.bucketStart,
+      displayBucketStart: points[index]!.displayBucketStart,
+      value: Math.round(window.reduce((sum, item) => sum + item.pressure, 0) / window.length),
+    }
+  })
+
   const base = nowSeconds()
   const current = Array.from({ length: 288 }, (_item, index) => {
     const displayBucketStart = base - (287 - index) * 300
@@ -87,6 +104,10 @@ export function buildDemoAnalysisPressureSnapshot(
     server7d: {
       bucketSeconds: 3600,
       points: hourlyPoints,
+      movingAverages: [
+        { key: 'sma6h', windowHours: 6, points: buildMovingAverage(6, hourlyPoints) },
+        { key: 'sma24h', windowHours: 24, points: buildMovingAverage(24, hourlyPoints) },
+      ],
       peak: hourlyPoints.reduce((best, point) => (!best || point.pressure > best.pressure ? point : best), null as typeof hourlyPoints[number] | null),
     },
   }

@@ -99,6 +99,11 @@ impl TavilyProxy {
     ) -> Result<AnalysisPressureSnapshot, ProxyError> {
         const PRESSURE_WINDOW_SECONDS: i64 = SECS_PER_HOUR;
         const PRESSURE_24H_POINT_COUNT: usize = 288;
+        const SERVER_7D_POINT_COUNT: usize = 168;
+        const SERVER_7D_MA_WINDOWS: &[(AnalysisPressureMovingAverageKey, i64)] = &[
+            (AnalysisPressureMovingAverageKey::Sma6h, 6),
+            (AnalysisPressureMovingAverageKey::Sma24h, 24),
+        ];
 
         let local_now = self.backend_time.local_now();
         let current_five_minute_bucket_start =
@@ -215,21 +220,44 @@ impl TavilyProxy {
         let zero_pressure_users = all_user_stats.total_users.saturating_sub(active_users);
         let current_pressure = rows.iter().map(|row| row.pressure).sum::<i64>();
 
+        let server_7d_warmup_hours = SERVER_7D_MA_WINDOWS
+            .iter()
+            .map(|(_key, window_hours)| window_hours.saturating_sub(1))
+            .max()
+            .unwrap_or_default();
+        let server_7d_warmup_start = seven_day_start - server_7d_warmup_hours * SECS_PER_HOUR;
         let server_7d_bucket_points = build_pressure_slot_series(
-            seven_day_start,
-            168,
+            server_7d_warmup_start,
+            SERVER_7D_POINT_COUNT + server_7d_warmup_hours as usize,
             SECS_PER_HOUR,
             &self
                 .key_store
                 .fetch_server_pressure_points(
                     "hour",
-                    seven_day_start,
+                    server_7d_warmup_start,
                     current_hour_bucket_start + SECS_PER_HOUR,
                 )
                 .await?,
         );
-        let server_7d_points =
+        let server_7d_points_raw =
             build_rolling_pressure_series(&server_7d_bucket_points, SECS_PER_HOUR, SECS_PER_HOUR);
+        let server_7d_points = server_7d_points_raw
+            .iter()
+            .skip(server_7d_warmup_hours as usize)
+            .cloned()
+            .collect::<Vec<_>>();
+        let server_7d_moving_averages = SERVER_7D_MA_WINDOWS
+            .iter()
+            .map(|(key, window_hours)| AnalysisPressureMovingAverageSeries {
+                key: *key,
+                window_hours: *window_hours,
+                points: build_pressure_moving_average_series(
+                    &server_7d_points_raw,
+                    *window_hours as usize,
+                    server_7d_warmup_hours as usize,
+                ),
+            })
+            .collect::<Vec<_>>();
 
         Ok(AnalysisPressureSnapshot {
             generated_at,
@@ -256,6 +284,7 @@ impl TavilyProxy {
             },
             server_7d: AnalysisServerPressure7d {
                 bucket_seconds: SECS_PER_HOUR,
+                moving_averages: server_7d_moving_averages,
                 peak: peak_pressure_point(&server_7d_points),
                 points: server_7d_points,
             },
@@ -1260,6 +1289,43 @@ fn peak_pressure_point(points: &[AnalysisPressurePoint]) -> Option<AnalysisPress
             display_bucket_start: point.display_bucket_start,
             pressure: point.pressure,
         })
+}
+
+fn build_pressure_moving_average_series(
+    points: &[AnalysisPressurePoint],
+    window_size: usize,
+    visible_skip_count: usize,
+) -> Vec<AnalysisPressureMovingAveragePoint> {
+    if window_size == 0 {
+        return Vec::new();
+    }
+
+    let mut rolling_sum = 0_i64;
+    let mut recent = std::collections::VecDeque::<i64>::new();
+    let mut averaged_points = Vec::with_capacity(points.len().saturating_sub(visible_skip_count));
+
+    for point in points {
+        rolling_sum += point.pressure;
+        recent.push_back(point.pressure);
+        while recent.len() > window_size {
+            if let Some(removed) = recent.pop_front() {
+                rolling_sum -= removed;
+            }
+        }
+
+        if recent.len() == window_size {
+            averaged_points.push(AnalysisPressureMovingAveragePoint {
+                bucket_start: point.bucket_start,
+                display_bucket_start: point.display_bucket_start,
+                value: rolling_sum / window_size as i64,
+            });
+        }
+    }
+
+    averaged_points
+        .into_iter()
+        .skip(visible_skip_count.saturating_sub(window_size.saturating_sub(1)))
+        .collect()
 }
 
 fn percentile_pressure(values: &[i64], percentile: usize) -> i64 {
