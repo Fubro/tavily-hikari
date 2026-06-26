@@ -7,7 +7,7 @@ const EXCEPTIONS: &[(&str, usize, &str)] = &[
     (
         "src/models.rs",
         3200,
-        "Alert center semantic DTO growth and the new admin analysis pressure snapshot contracts both extend the shared model surface while the broader extraction pass remains pending.",
+        "Alert center semantic DTO growth plus the pressure and snapshot contracts both extend the shared model surface while the broader extraction pass remains pending.",
     ),
     (
         "src/server/tests/admin_users_and_tokens.rs",

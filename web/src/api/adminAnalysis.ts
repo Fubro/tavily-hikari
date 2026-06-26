@@ -52,7 +52,22 @@ export interface AnalysisCurrentUserPressureDistribution {
 export interface AnalysisServerPressure7d {
   bucketSeconds: number
   points: AnalysisPressurePoint[]
+  movingAverages: AnalysisPressureMovingAverageSeries[]
   peak: AnalysisPressurePeak | null
+}
+
+export type AnalysisPressureMovingAverageKey = 'sma6h' | 'sma24h'
+
+export interface AnalysisPressureMovingAveragePoint {
+  bucketStart: number
+  displayBucketStart: number
+  value: number
+}
+
+export interface AnalysisPressureMovingAverageSeries {
+  key: AnalysisPressureMovingAverageKey
+  windowHours: number
+  points: AnalysisPressureMovingAveragePoint[]
 }
 
 export interface AnalysisPressureSnapshot {

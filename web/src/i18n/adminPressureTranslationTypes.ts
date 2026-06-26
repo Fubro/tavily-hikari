@@ -24,17 +24,21 @@ export interface AdminPressureTranslations {
       description: string
       currentLabel: string
       previousLabel: string
+      averageLabel: string
     }
     userDistribution: {
       title: string
       description: string
       seriesLabel: string
+      rankLabel: string
       empty: string
     }
     last7d: {
       title: string
       description: string
       seriesLabel: string
+      sma6hLabel: string
+      sma24hLabel: string
     }
   }
 }

@@ -188,7 +188,7 @@ describe('AdminPages Storybook proofs', () => {
     )
 
     expect(markup).toContain('最近 24 小时服务器 1 小时窗口压力')
-    expect(markup).toContain('当前 1 小时用户压力分布')
+    expect(markup).toContain('当前 1 小时活跃用户压力曲线')
     expect(markup).toContain('最近 7 天服务器小时压力')
     expect(markup).toContain('admin-nav-subitem-active')
     expect(markup).toContain('pressure-analysis-page')

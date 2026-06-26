@@ -195,6 +195,11 @@ async fn analysis_pressure_snapshot_uses_rolling_1h_and_excludes_non_upstream_ev
     assert_eq!(snapshot.server_24h.current.len(), 288);
     assert_eq!(snapshot.server_24h.previous.len(), 288);
     assert_eq!(snapshot.server_7d.points.len(), 168);
+    assert_eq!(snapshot.server_7d.moving_averages.len(), 2);
+    assert_eq!(snapshot.server_7d.moving_averages[0].window_hours, 6);
+    assert_eq!(snapshot.server_7d.moving_averages[0].points.len(), 168);
+    assert_eq!(snapshot.server_7d.moving_averages[1].window_hours, 24);
+    assert_eq!(snapshot.server_7d.moving_averages[1].points.len(), 168);
 
     let current_point = snapshot
         .server_24h
@@ -226,6 +231,22 @@ async fn analysis_pressure_snapshot_uses_rolling_1h_and_excludes_non_upstream_ev
     assert_eq!(latest_hour.pressure, 1);
     assert_eq!(latest_hour.success_count, 1);
     assert_eq!(latest_hour.failure_count, 0);
+    assert_eq!(
+        snapshot.server_7d.moving_averages[0]
+            .points
+            .last()
+            .expect("latest 6h moving average")
+            .value,
+        0
+    );
+    assert_eq!(
+        snapshot.server_7d.moving_averages[1]
+            .points
+            .last()
+            .expect("latest 24h moving average")
+            .value,
+        0
+    );
 
     let previous_last = snapshot
         .server_24h
@@ -434,6 +455,9 @@ async fn analysis_pressure_snapshot_warms_up_24h_rolling_window_edges() {
     assert_eq!(previous_first.pressure, 1);
     assert_eq!(previous_first.success_count, 1);
     assert_eq!(previous_first.failure_count, 0);
+    assert_eq!(snapshot.server_7d.moving_averages.len(), 2);
+    assert_eq!(snapshot.server_7d.moving_averages[0].points.len(), 168);
+    assert_eq!(snapshot.server_7d.moving_averages[1].points.len(), 168);
 
     let _ = std::fs::remove_file(db_path);
 }

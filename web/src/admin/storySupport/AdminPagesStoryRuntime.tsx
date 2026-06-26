@@ -108,6 +108,7 @@ import ModulePlaceholder from '../ModulePlaceholder'
 import SystemSettingsModule from '../SystemSettingsModule'
 import type { ApiKeyBulkSyncProgressState } from '../apiKeyBulkSyncProgress'
 import { retainVisibleApiKeySelection } from '../apiKeySelection'
+import { buildPressureDemoFixture } from '../../api/pressureDemoFixture'
 import {
   forwardProxyStorySavedAt,
   forwardProxyStoryErrorStats,
@@ -137,6 +138,7 @@ import AnnouncementsModule from '../AnnouncementsModule'
 import { createStoryUserRechargeAudit } from './userRechargeFixtures'
 import { rankingsStoryEmptySnapshot, rankingsStorySnapshot } from '../rankingsStoryData'
 const now = 1_762_380_000
+const pressureStoryNow = now + 33_600
 const ADMIN_USERS_DEFAULT_SORT_FIELD: AdminUsersSortField = 'lastLoginAt'
 const ADMIN_USERS_DEFAULT_SORT_ORDER: SortDirection = 'desc'
 const ADMIN_UNBOUND_TOKEN_USAGE_DEFAULT_SORT_FIELD: AdminUnboundTokenUsageSortField = 'lastUsedAt'
@@ -157,87 +159,7 @@ const defaultDashboardHourlyRequestWindow = buildDashboardHourlyRequestWindowFix
   }),
 })
 
-const pressureStorySnapshot: AnalysisPressureSnapshot = {
-  generatedAt: now,
-  server24h: {
-    windowMinutes: 60,
-    bucketSeconds: 300,
-    current: Array.from({ length: 288 }, (_item, index) => {
-      const displayBucketStart = now - (287 - index) * 300
-      const pressure = Math.max(0, 18 + Math.round(Math.sin(index / 14) * 22) + ((index * 9) % 19))
-      const failureCount = pressure > 0 ? Math.round(pressure * 0.12) : 0
-      const successCount = Math.max(0, pressure - failureCount)
-      return {
-        bucketStart: displayBucketStart,
-        displayBucketStart,
-        pressure,
-        successCount,
-        failureCount,
-      }
-    }),
-    previous: Array.from({ length: 288 }, (_item, index) => {
-      const displayBucketStart = now - (287 - index) * 300
-      const pressure = Math.max(0, 12 + Math.round(Math.cos(index / 12) * 18) + ((index * 5) % 13))
-      const failureCount = pressure > 0 ? Math.round(pressure * 0.09) : 0
-      const successCount = Math.max(0, pressure - failureCount)
-      return {
-        bucketStart: displayBucketStart - 86400,
-        displayBucketStart,
-        pressure,
-        successCount,
-        failureCount,
-      }
-    }),
-    currentPeak: { bucketStart: now - 3600, displayBucketStart: now - 3600, pressure: 64 },
-    previousPeak: { bucketStart: now - 86400 - 5400, displayBucketStart: now - 5400, pressure: 51 },
-  },
-  currentUserDistribution: {
-    windowMinutes: 60,
-    rows: [
-      { userId: 'usr_noa', displayName: 'Noa Jin', username: 'noa', avatarUrl: null, pressure: 2, successCount: 2, failureCount: 0 },
-      { userId: 'usr_iris', displayName: 'Iris Lin', username: 'iris', avatarUrl: null, pressure: 4, successCount: 4, failureCount: 0 },
-      { userId: 'usr_ella', displayName: 'Ella Zhou', username: 'ella', avatarUrl: null, pressure: 5, successCount: 4, failureCount: 1 },
-      { userId: 'usr_daisy', displayName: 'Daisy Sun', username: 'daisy', avatarUrl: null, pressure: 7, successCount: 6, failureCount: 1 },
-      { userId: 'usr_fiona', displayName: 'Fiona Qiu', username: 'fiona', avatarUrl: null, pressure: 9, successCount: 8, failureCount: 1 },
-      { userId: 'usr_charlie', displayName: 'Charlie Li', username: 'charlie', avatarUrl: null, pressure: 11, successCount: 10, failureCount: 1 },
-      { userId: 'usr_harper', displayName: 'Harper Xu', username: 'harper', avatarUrl: null, pressure: 12, successCount: 11, failureCount: 1 },
-      { userId: 'usr_bob', displayName: 'Bob Chen', username: 'bob', avatarUrl: null, pressure: 16, successCount: 14, failureCount: 2 },
-      { userId: 'usr_jasper', displayName: 'Jasper Wu', username: 'jasper', avatarUrl: null, pressure: 18, successCount: 16, failureCount: 2 },
-      { userId: 'usr_charlotte', displayName: 'Charlotte Gu', username: 'charlotte', avatarUrl: null, pressure: 19, successCount: 17, failureCount: 2 },
-      { userId: 'usr_kevin', displayName: 'Kevin Shen', username: 'kevin', avatarUrl: null, pressure: 24, successCount: 21, failureCount: 3 },
-      { userId: 'usr_alice', displayName: 'Alice Wang', username: 'alice', avatarUrl: null, pressure: 31, successCount: 28, failureCount: 3 },
-      { userId: 'usr_luna', displayName: 'Luna He', username: 'luna', avatarUrl: null, pressure: 37, successCount: 33, failureCount: 4 },
-      { userId: 'usr_mika', displayName: 'Mika Du', username: 'mika', avatarUrl: null, pressure: 49, successCount: 44, failureCount: 5 },
-      { userId: 'usr_owen', displayName: 'Owen Pei', username: 'owen', avatarUrl: null, pressure: 68, successCount: 61, failureCount: 7 },
-    ],
-    summary: {
-      activeUsers: 15,
-      zeroPressureUsers: 3,
-      median: 12,
-      p90: 49,
-      peak: 68,
-      currentPressure: 314,
-      vsYesterdayDelta: 14,
-    },
-  },
-  server7d: {
-    bucketSeconds: 3600,
-    points: Array.from({ length: 168 }, (_item, index) => {
-      const displayBucketStart = now - (167 - index) * 3600
-      const pressure = Math.max(0, 20 + Math.round(Math.cos(index / 7) * 16) + ((index * 4) % 13))
-      const failureCount = pressure > 0 ? Math.round(pressure * 0.08) : 0
-      const successCount = Math.max(0, pressure - failureCount)
-      return {
-        bucketStart: displayBucketStart,
-        displayBucketStart,
-        pressure,
-        successCount,
-        failureCount,
-      }
-    }),
-    peak: { bucketStart: now - 18 * 3600, displayBucketStart: now - 18 * 3600, pressure: 58 },
-  },
-}
+const pressureStorySnapshot: AnalysisPressureSnapshot = buildPressureDemoFixture(pressureStoryNow, [])
 
 function useAdminTranslations(): AdminTranslations {
   const { language } = useLanguage()
