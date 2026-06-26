@@ -8,6 +8,7 @@ import {
   createBrowserTodayWindow,
   createAdminUserToken,
   deleteAdminUserToken,
+  finalizeLinuxDoAuth,
   fetchAdminRegistrationSettings,
   fetchAdminUserRankings,
   fetchAdminUnboundTokenUsage,
@@ -142,6 +143,34 @@ describe('admin user tag api helpers', () => {
     expect(fetchMock.mock.calls[4]?.[1]).toMatchObject({ method: 'POST' })
     expect(fetchMock.mock.calls[5]?.[0]).toBe('/api/user/announcements')
     expect(fetchMock.mock.calls[6]?.[0]).toBe('/api/user/announcements/history')
+  })
+
+  it('posts linuxdo finalize with credentialed requests so the session cookie persists', async () => {
+    const fetchMock = mock((_input: RequestInfo | URL, _init?: RequestInit) =>
+      Promise.resolve(
+        new Response(JSON.stringify({
+          outcome: 'success',
+          provider: 'linuxdo',
+          redirectTo: '/console',
+          detail: null,
+        }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      ),
+    )
+    globalThis.fetch = fetchMock as typeof fetch
+
+    await finalizeLinuxDoAuth('oauth-code', 'oauth-state')
+
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(fetchMock.mock.calls[0]?.[0]).toBe('/auth/linuxdo/finalize')
+    expect(fetchMock.mock.calls[0]?.[1]).toMatchObject({
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ code: 'oauth-code', state: 'oauth-state' }),
+    })
   })
 
   it('formats browser today windows with explicit ISO8601 offsets', () => {

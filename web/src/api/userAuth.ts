@@ -22,6 +22,7 @@ export function finalizeLinuxDoAuth(
 ): Promise<LinuxDoFinalizeResult> {
   return requestJson('/auth/linuxdo/finalize', {
     method: 'POST',
+    credentials: 'include',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ code, state }),
     signal,
