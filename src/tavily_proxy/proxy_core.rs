@@ -908,6 +908,15 @@ impl TavilyProxy {
                     .await
                 {
                     Ok(crate::store::ServerPressureBucketsRebuildOutcome::Completed) => {
+                        if proxy
+                            .server_pressure_rebuild_generation
+                            .load(Ordering::SeqCst)
+                            == generation
+                        {
+                            proxy
+                                .server_pressure_rebuild_started
+                                .store(false, Ordering::SeqCst);
+                        }
                         proxy.invalidate_analysis_pressure_cache().await;
                         tracing::info!(
                             component = "analysis_pressure",
