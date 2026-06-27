@@ -515,6 +515,105 @@ async fn analysis_pressure_background_rebuild_retries_after_transient_failure() 
 }
 
 #[tokio::test]
+async fn analysis_pressure_background_rebuild_cancels_and_can_be_rescheduled() {
+    let (backend_time, manual_clock) = crate::BackendTime::manual_from_ts(1_700_400_000);
+    let db_path = temp_db_path("analysis-pressure-background-cancel");
+    let db_str = db_path.to_string_lossy().to_string();
+    let proxy = TavilyProxy::with_options_and_time(
+        Vec::<String>::new(),
+        DEFAULT_UPSTREAM,
+        &db_str,
+        TavilyProxyOptions::from_database_path(&db_str),
+        backend_time.clone(),
+    )
+    .await
+    .expect("proxy created");
+    let now = manual_clock.now_ts();
+    sqlx::query(
+        r#"
+        INSERT INTO observability.request_logs (
+            method,
+            path,
+            status_code,
+            tavily_status_code,
+            result_status,
+            request_kind_key,
+            request_kind_label,
+            counts_business_quota,
+            request_user_id,
+            upstream_operation,
+            created_at
+        ) VALUES ('POST', '/api/tavily/search', 200, 200, 'success', 'api:search', 'API | search', 1, ?, 'search', ?)
+        "#,
+    )
+    .bind("analysis-pressure-cancel-user")
+    .bind(now - 120)
+    .execute(&proxy.key_store.pool)
+    .await
+    .expect("seed pressure request log");
+    drop(proxy);
+
+    manual_clock.set_now_ts(now);
+    let reopened = TavilyProxy::with_options_and_time(
+        Vec::<String>::new(),
+        DEFAULT_UPSTREAM,
+        &db_str,
+        TavilyProxyOptions::from_database_path(&db_str),
+        backend_time,
+    )
+    .await
+    .expect("reopen proxy");
+
+    let lock_handle =
+        hold_sqlite_write_lock_for_test_for(&reopened.key_store.pool, Duration::from_secs(6)).await;
+    assert!(
+        reopened.spawn_server_pressure_buckets_rebuild_once(),
+        "first background rebuild attempt should schedule"
+    );
+    reopened.cancel_server_pressure_buckets_rebuild();
+    lock_handle
+        .await
+        .expect("held sqlite write lock should release cleanly");
+
+    tokio::time::sleep(Duration::from_secs(2)).await;
+
+    let cancelled_bucket_count: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM observability.server_pressure_buckets WHERE bucket_kind = 'five_minute'",
+    )
+    .fetch_one(&reopened.key_store.pool)
+    .await
+    .expect("count buckets after cancelling rebuild");
+    assert_eq!(
+        cancelled_bucket_count, 0,
+        "cancelled rebuild must not keep writing after role demotion"
+    );
+
+    assert!(
+        reopened.spawn_server_pressure_buckets_rebuild_once(),
+        "serving promotion should be able to reschedule rebuild after cancellation"
+    );
+
+    tokio::time::timeout(Duration::from_secs(8), async {
+        loop {
+            let bucket_count: i64 = sqlx::query_scalar(
+                "SELECT COUNT(*) FROM observability.server_pressure_buckets WHERE bucket_kind = 'five_minute'",
+            )
+            .fetch_one(&reopened.key_store.pool)
+            .await
+            .expect("count rebuilt buckets after reschedule");
+            if bucket_count >= 1 {
+                return bucket_count;
+            }
+            tokio::time::sleep(Duration::from_millis(25)).await;
+        }
+    })
+    .await
+    .expect("rescheduled rebuild should eventually repopulate server pressure buckets");
+
+    let _ = std::fs::remove_file(db_path);
+}
+
+#[tokio::test]
 async fn analysis_pressure_snapshot_warms_up_24h_rolling_window_edges() {
     let (backend_time, manual_clock) = crate::BackendTime::manual_from_ts(1_700_500_000);
     let db_path = temp_db_path("analysis-pressure-snapshot-warmup");

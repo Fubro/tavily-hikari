@@ -102,6 +102,11 @@ source when a usable persisted runtime already exists.
   first healthy image status. Once the process is already serving business traffic, it may run once
   as a best-effort background rebuild whose failure is isolated to logs/observability and does not
   turn serving `/health` red.
+- If a later HA transition promotes the process back into a business-serving role, the same
+  best-effort `server_pressure_buckets` rebuild must be scheduled for that serving tenure too.
+- If HA demotes the process out of a business-serving role while that rebuild is still pending, the
+  rebuild must cancel or roll back instead of committing new pressure buckets from a standby or
+  recovery process.
 - The default image `HEALTHCHECK` must align with the stricter serving contract by using
   `start-period=20s`, `interval=5s`, `timeout=5s`, and `retries=18`, while the healthcheck command
   itself keeps the first green transition at or after the intended 20-second hold window without
@@ -237,6 +242,11 @@ source when a usable persisted runtime already exists.
 - `server_pressure_buckets` rebuild no longer appears on the listener-before-ready critical path.
   After the process is already serving, one background rebuild repopulates historical buckets
   without making owner-facing pressure analysis return `500`.
+- Manual or internal HA promotions that return the node to `provisional_master` / `full_master`
+  still trigger the same post-ready `server_pressure_buckets` rebuild path as initial serving
+  startup.
+- If the node is demoted to `standby` / `recovery` before that rebuild finishes, the detached task
+  exits without committing new `server_pressure_buckets` rows from the non-serving role.
 - Under mock/local upstream startup, the image `HEALTHCHECK` becomes healthy only after the stricter
   serving `/health` is truly green and remains stable within the
   builder-compatible 20-second minimum-gate plus `start-period=20s/interval=5s/timeout=5s/retries=18`

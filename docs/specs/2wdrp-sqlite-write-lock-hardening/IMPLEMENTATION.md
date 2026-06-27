@@ -59,9 +59,15 @@
   roles trigger one background rebuild after the listener is already ready, invalidate the cached
   analysis-pressure snapshot on success, and isolate rebuild failure to logs instead of business
   readiness.
-- The server-pressure rebuild now computes aggregate rows before taking the SQLite write
-  transaction and only holds the writer slot during the final table replace, shrinking the live
-  rebuild write window.
+- The same post-ready rebuild hook now runs on later HA promotions that restore a
+  `provisional_master` / `full_master` serving role, including the shared admin/internal finalize
+  path that persists HA status snapshots.
+- HA demotion now cancels any in-flight `server_pressure_buckets` rebuild generation before the
+  node finishes leaving business-serving mode, so standby/recovery do not keep detached rebuild
+  writes alive.
+- Each `server_pressure_buckets` rebuild now reads and replaces buckets from one transactional
+  request-log snapshot and rolls back if cancellation lands before commit, avoiding mixed snapshots
+  from concurrent request-log maintenance changes.
 - Cold startup now fans subscription-URL fetches across the whole configured set in one wave, so a
   5-8 URL subscription config no longer stretches strict readiness across multiple 60-second
   timeout batches before xray/runtime can finish initializing.

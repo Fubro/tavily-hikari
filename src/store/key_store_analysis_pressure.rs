@@ -1,3 +1,9 @@
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum ServerPressureBucketsRebuildOutcome {
+    Completed,
+    Cancelled,
+}
+
 impl KeyStore {
     async fn request_logs_support_server_pressure_rebuild(&self) -> Result<bool, ProxyError> {
         for column in [
@@ -45,82 +51,33 @@ impl KeyStore {
     }
 
     pub(crate) async fn rebuild_server_pressure_buckets(&self) -> Result<(), ProxyError> {
+        match self
+            .rebuild_server_pressure_buckets_with_cancel(|| true)
+            .await?
+        {
+            ServerPressureBucketsRebuildOutcome::Completed
+            | ServerPressureBucketsRebuildOutcome::Cancelled => Ok(()),
+        }
+    }
+
+    pub(crate) async fn rebuild_server_pressure_buckets_with_cancel<F>(
+        &self,
+        should_continue: F,
+    ) -> Result<ServerPressureBucketsRebuildOutcome, ProxyError>
+    where
+        F: Fn() -> bool,
+    {
         self.ensure_server_pressure_bucket_schema().await?;
         if self.uses_legacy_single_db_observability_compatibility() {
-            return Ok(());
+            return Ok(ServerPressureBucketsRebuildOutcome::Completed);
         }
         if !self.request_logs_support_server_pressure_rebuild().await? {
-            return Ok(());
+            return Ok(ServerPressureBucketsRebuildOutcome::Completed);
         }
 
         let updated_at = self.backend_time.now_ts();
         let five_minute_since = updated_at.saturating_sub(48 * SECS_PER_HOUR);
         let hour_since = updated_at.saturating_sub(8 * SECS_PER_DAY);
-        let snapshot_max_request_log_id: i64 =
-            sqlx::query_scalar("SELECT COALESCE(MAX(id), 0) FROM observability.request_logs")
-                .fetch_one(&self.pool)
-                .await?;
-
-        let five_minute_rows = sqlx::query_as::<_, (i64, i64, i64)>(
-            r#"
-            SELECT
-                (created_at / ?) * ? AS bucket_start,
-                SUM(CASE WHEN result_status = ? THEN 1 ELSE 0 END) AS success_count,
-                SUM(CASE WHEN result_status != ? THEN 1 ELSE 0 END) AS failure_count
-            FROM observability.request_logs
-            WHERE visibility = ?
-              AND created_at >= ?
-              AND id <= ?
-              AND request_user_id IS NOT NULL
-              AND counts_business_quota = 1
-              AND upstream_operation IS NOT NULL
-              AND result_status != ?
-            GROUP BY bucket_start
-            ORDER BY bucket_start
-            "#,
-        )
-        .bind(SECS_PER_FIVE_MINUTES)
-        .bind(SECS_PER_FIVE_MINUTES)
-        .bind(OUTCOME_SUCCESS)
-        .bind(OUTCOME_SUCCESS)
-        .bind(REQUEST_LOG_VISIBILITY_VISIBLE)
-        .bind(five_minute_since)
-        .bind(snapshot_max_request_log_id)
-        .bind(OUTCOME_QUOTA_EXHAUSTED)
-        .fetch_all(&self.pool)
-        .await?;
-        let hour_rows = sqlx::query_as::<_, (i64, i64, i64)>(
-            r#"
-            SELECT
-                CAST(
-                    strftime(
-                        '%s',
-                        strftime('%Y-%m-%d %H:00:00', created_at, 'unixepoch', 'localtime'),
-                        'utc'
-                    ) AS INTEGER
-                ) AS bucket_start,
-                SUM(CASE WHEN result_status = ? THEN 1 ELSE 0 END) AS success_count,
-                SUM(CASE WHEN result_status != ? THEN 1 ELSE 0 END) AS failure_count
-            FROM observability.request_logs
-            WHERE visibility = ?
-              AND created_at >= ?
-              AND id <= ?
-              AND request_user_id IS NOT NULL
-              AND counts_business_quota = 1
-              AND upstream_operation IS NOT NULL
-              AND result_status != ?
-            GROUP BY bucket_start
-            ORDER BY bucket_start
-            "#,
-        )
-        .bind(OUTCOME_SUCCESS)
-        .bind(OUTCOME_SUCCESS)
-        .bind(REQUEST_LOG_VISIBILITY_VISIBLE)
-        .bind(hour_since)
-        .bind(snapshot_max_request_log_id)
-        .bind(OUTCOME_QUOTA_EXHAUSTED)
-        .fetch_all(&self.pool)
-        .await?;
         let insert_sql = r#"
             INSERT INTO observability.server_pressure_buckets (
                 bucket_kind,
@@ -132,21 +89,6 @@ impl KeyStore {
             )
             VALUES (?, ?, ?, ?, ?, ?)
         "#;
-        let upsert_sql = r#"
-            INSERT INTO observability.server_pressure_buckets (
-                bucket_kind,
-                bucket_start,
-                bucket_secs,
-                success_count,
-                failure_count,
-                updated_at
-            )
-            VALUES (?, ?, ?, ?, ?, ?)
-            ON CONFLICT(bucket_kind, bucket_start) DO UPDATE SET
-                success_count = server_pressure_buckets.success_count + excluded.success_count,
-                failure_count = server_pressure_buckets.failure_count + excluded.failure_count,
-                updated_at = excluded.updated_at
-        "#;
 
         let mut conn = begin_immediate_sqlite_connection_with_retry(
             &self.pool,
@@ -156,24 +98,71 @@ impl KeyStore {
         )
         .await?;
         let result = async {
-            let tail_rows = sqlx::query_as::<_, (i64, String)>(
+            if !should_continue() {
+                return Ok(ServerPressureBucketsRebuildOutcome::Cancelled);
+            }
+
+            let five_minute_rows = sqlx::query_as::<_, (i64, i64, i64)>(
                 r#"
-                SELECT created_at, result_status
+                SELECT
+                    (created_at / ?) * ? AS bucket_start,
+                    SUM(CASE WHEN result_status = ? THEN 1 ELSE 0 END) AS success_count,
+                    SUM(CASE WHEN result_status != ? THEN 1 ELSE 0 END) AS failure_count
                 FROM observability.request_logs
-                WHERE id > ?
-                  AND visibility = ?
+                WHERE visibility = ?
+                  AND created_at >= ?
                   AND request_user_id IS NOT NULL
                   AND counts_business_quota = 1
                   AND upstream_operation IS NOT NULL
                   AND result_status != ?
-                ORDER BY id
+                GROUP BY bucket_start
+                ORDER BY bucket_start
                 "#,
             )
-            .bind(snapshot_max_request_log_id)
+            .bind(SECS_PER_FIVE_MINUTES)
+            .bind(SECS_PER_FIVE_MINUTES)
+            .bind(OUTCOME_SUCCESS)
+            .bind(OUTCOME_SUCCESS)
             .bind(REQUEST_LOG_VISIBILITY_VISIBLE)
+            .bind(five_minute_since)
             .bind(OUTCOME_QUOTA_EXHAUSTED)
             .fetch_all(&mut *conn)
             .await?;
+            let hour_rows = sqlx::query_as::<_, (i64, i64, i64)>(
+                r#"
+                SELECT
+                    CAST(
+                        strftime(
+                            '%s',
+                            strftime('%Y-%m-%d %H:00:00', created_at, 'unixepoch', 'localtime'),
+                            'utc'
+                        ) AS INTEGER
+                    ) AS bucket_start,
+                    SUM(CASE WHEN result_status = ? THEN 1 ELSE 0 END) AS success_count,
+                    SUM(CASE WHEN result_status != ? THEN 1 ELSE 0 END) AS failure_count
+                FROM observability.request_logs
+                WHERE visibility = ?
+                  AND created_at >= ?
+                  AND request_user_id IS NOT NULL
+                  AND counts_business_quota = 1
+                  AND upstream_operation IS NOT NULL
+                  AND result_status != ?
+                GROUP BY bucket_start
+                ORDER BY bucket_start
+                "#,
+            )
+            .bind(OUTCOME_SUCCESS)
+            .bind(OUTCOME_SUCCESS)
+            .bind(REQUEST_LOG_VISIBILITY_VISIBLE)
+            .bind(hour_since)
+            .bind(OUTCOME_QUOTA_EXHAUSTED)
+            .fetch_all(&mut *conn)
+            .await?;
+
+            if !should_continue() {
+                return Ok(ServerPressureBucketsRebuildOutcome::Cancelled);
+            }
+
             sqlx::query("DELETE FROM observability.server_pressure_buckets")
                 .execute(&mut *conn)
                 .await?;
@@ -199,52 +188,26 @@ impl KeyStore {
                     .execute(&mut *conn)
                     .await?;
             }
-            for (created_at, result_status) in tail_rows {
-                let success = if result_status == OUTCOME_SUCCESS {
-                    1_i64
-                } else {
-                    0_i64
-                };
-                let failure = if result_status == OUTCOME_SUCCESS {
-                    0_i64
-                } else {
-                    1_i64
-                };
-                let Some(utc_dt) = chrono::Utc.timestamp_opt(created_at, 0).single() else {
-                    continue;
-                };
-                let local_dt = utc_dt.with_timezone(&chrono::Local);
-                let five_minute_bucket_start =
-                    created_at - created_at.rem_euclid(SECS_PER_FIVE_MINUTES);
-                let hour_bucket_start = start_of_local_hour_utc_ts(local_dt);
-
-                sqlx::query(upsert_sql)
-                    .bind("five_minute")
-                    .bind(five_minute_bucket_start)
-                    .bind(SECS_PER_FIVE_MINUTES)
-                    .bind(success)
-                    .bind(failure)
-                    .bind(updated_at)
-                    .execute(&mut *conn)
-                    .await?;
-                sqlx::query(upsert_sql)
-                    .bind("hour")
-                    .bind(hour_bucket_start)
-                    .bind(SECS_PER_HOUR)
-                    .bind(success)
-                    .bind(failure)
-                    .bind(updated_at)
-                    .execute(&mut *conn)
-                    .await?;
+            if !should_continue() {
+                return Ok(ServerPressureBucketsRebuildOutcome::Cancelled);
             }
             sqlx::query("COMMIT").execute(&mut *conn).await?;
-            Ok::<(), ProxyError>(())
+            Ok(ServerPressureBucketsRebuildOutcome::Completed)
         }
         .await;
-        if result.is_err() {
-            let _ = sqlx::query("ROLLBACK").execute(&mut *conn).await;
+        match result {
+            Ok(ServerPressureBucketsRebuildOutcome::Completed) => {
+                Ok(ServerPressureBucketsRebuildOutcome::Completed)
+            }
+            Ok(ServerPressureBucketsRebuildOutcome::Cancelled) => {
+                let _ = sqlx::query("ROLLBACK").execute(&mut *conn).await;
+                Ok(ServerPressureBucketsRebuildOutcome::Cancelled)
+            }
+            Err(err) => {
+                let _ = sqlx::query("ROLLBACK").execute(&mut *conn).await;
+                Err(err)
+            }
         }
-        result
     }
 
     pub(crate) async fn upsert_server_pressure_event(

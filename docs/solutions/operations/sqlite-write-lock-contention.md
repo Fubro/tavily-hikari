@@ -83,9 +83,10 @@ month-tail public metrics scan.
   of masking that gap with a grace-period green state; preserve any explicit HA standby/recovery
   minimal-health carve-out separately.
 - If a derived observability rebuild is not core truth, do not keep it on the startup critical
-  path. Trigger it once after the listener is already serving, keep failure isolated to logs or
-  stale/empty analysis views, and shorten the live writer window by computing aggregates before the
-  final replace transaction.
+  path. Trigger it once after the listener is already serving, trigger it again when a later HA
+  promotion turns the node back into a business-serving role, keep failure isolated to logs or
+  stale/empty analysis views, and cancel or roll back the rebuild if the node is demoted before it
+  commits.
 - If strict cold startup still depends on subscription-backed forward-proxy runtime, do not let a
   small configured subscription set spill into fixed-size timeout batches before readiness. Fan the
   whole startup set out in one wave, and keep the fail-closed rule tied to “every subscription

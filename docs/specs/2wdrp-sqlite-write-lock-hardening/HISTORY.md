@@ -167,8 +167,9 @@
 - Preserved the accepted `f36b4` HA carve-out: `standby` / `recovery` still report `200 ok` on
   `/health` while business runtime warmup is intentionally skipped.
 - Moved `server_pressure_buckets` historical rebuild out of the startup critical path into one
-  post-listener background rebuild, and shortened its writer-slot hold time by computing aggregate
-  rows before the final replace transaction.
+  post-listener background rebuild, then tightened that background path so later HA promotions also
+  trigger it, HA demotions cancel it cleanly, and each rebuild commits from one transactional
+  request-log snapshot.
 - Cold startup subscription refresh now fans out across the whole configured URL set in one wave,
   so 5-8 slow feeds no longer turn strict readiness into multiple 60-second timeout batches.
 - Tightened the image `HEALTHCHECK` timing to a builder-compatible 20-second minimum gate plus
