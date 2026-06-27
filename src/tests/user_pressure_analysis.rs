@@ -481,25 +481,14 @@ async fn analysis_pressure_background_rebuild_retries_after_transient_failure() 
         .await
         .expect("held sqlite write lock should release cleanly");
 
-    tokio::time::timeout(Duration::from_secs(5), async {
-        loop {
-            if reopened.spawn_server_pressure_buckets_rebuild_once() {
-                return;
-            }
-            tokio::time::sleep(Duration::from_millis(25)).await;
-        }
-    })
-    .await
-    .expect("background rebuild should become retryable after a transient failure");
-
-    tokio::time::timeout(Duration::from_secs(5), async {
+    tokio::time::timeout(Duration::from_secs(8), async {
         loop {
             let bucket_count: i64 = sqlx::query_scalar(
                 "SELECT COUNT(*) FROM observability.server_pressure_buckets WHERE bucket_kind = 'five_minute'",
             )
             .fetch_one(&reopened.key_store.pool)
             .await
-            .expect("count rebuilt server pressure buckets after retry");
+            .expect("count rebuilt server pressure buckets after automatic retry");
             if bucket_count >= 1 {
                 return bucket_count;
             }
@@ -507,7 +496,7 @@ async fn analysis_pressure_background_rebuild_retries_after_transient_failure() 
         }
     })
     .await
-    .expect("retried background rebuild should complete in time");
+    .expect("background rebuild should retry automatically after transient failure");
 
     let snapshot = reopened
         .analysis_pressure_snapshot()

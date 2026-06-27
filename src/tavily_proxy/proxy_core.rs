@@ -857,33 +857,55 @@ impl TavilyProxy {
 
         let proxy = self.clone();
         tokio::spawn(async move {
-            let started = Instant::now();
-            tracing::info!(
-                component = "analysis_pressure",
-                event = "server_pressure_buckets_rebuild_started",
-                "rebuilding server pressure buckets after listener readiness"
-            );
-            match proxy.key_store.rebuild_server_pressure_buckets().await {
-                Ok(()) => {
-                    proxy.invalidate_analysis_pressure_cache().await;
-                    tracing::info!(
-                        component = "analysis_pressure",
-                        event = "server_pressure_buckets_rebuild_completed",
-                        elapsed_ms = started.elapsed().as_millis() as u64,
-                        "server pressure buckets rebuild completed"
-                    );
-                }
-                Err(err) => {
-                    proxy
-                        .server_pressure_rebuild_started
-                        .store(false, Ordering::SeqCst);
-                    tracing::warn!(
-                        component = "analysis_pressure",
-                        event = "server_pressure_buckets_rebuild_failed",
-                        elapsed_ms = started.elapsed().as_millis() as u64,
-                        err = %err,
-                        "server pressure buckets rebuild failed"
-                    );
+            let mut attempt = 0usize;
+            loop {
+                let started = Instant::now();
+                tracing::info!(
+                    component = "analysis_pressure",
+                    event = "server_pressure_buckets_rebuild_started",
+                    attempt = attempt + 1,
+                    "rebuilding server pressure buckets after listener readiness"
+                );
+                match proxy.key_store.rebuild_server_pressure_buckets().await {
+                    Ok(()) => {
+                        proxy.invalidate_analysis_pressure_cache().await;
+                        tracing::info!(
+                            component = "analysis_pressure",
+                            event = "server_pressure_buckets_rebuild_completed",
+                            attempt = attempt + 1,
+                            elapsed_ms = started.elapsed().as_millis() as u64,
+                            "server pressure buckets rebuild completed"
+                        );
+                        return;
+                    }
+                    Err(err) if crate::store::is_transient_sqlite_write_error(&err) => {
+                        let retry_delay = Duration::from_secs(1);
+                        attempt += 1;
+                        tracing::warn!(
+                            component = "analysis_pressure",
+                            event = "server_pressure_buckets_rebuild_retry_scheduled",
+                            attempt,
+                            retry_delay_ms = retry_delay.as_millis() as u64,
+                            elapsed_ms = started.elapsed().as_millis() as u64,
+                            err = %err,
+                            "server pressure buckets rebuild hit transient contention; retrying in background"
+                        );
+                        proxy.backend_time.sleep(retry_delay).await;
+                    }
+                    Err(err) => {
+                        proxy
+                            .server_pressure_rebuild_started
+                            .store(false, Ordering::SeqCst);
+                        tracing::warn!(
+                            component = "analysis_pressure",
+                            event = "server_pressure_buckets_rebuild_failed",
+                            attempt = attempt + 1,
+                            elapsed_ms = started.elapsed().as_millis() as u64,
+                            err = %err,
+                            "server pressure buckets rebuild failed"
+                        );
+                        return;
+                    }
                 }
             }
         });
