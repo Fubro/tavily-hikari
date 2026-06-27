@@ -14,11 +14,12 @@ function assetWithBase(assetPath: string): string {
 
 const docsBase = normalizeBase(process.env.DOCS_BASE)
 const localStorybookDevOrigin = process.env.VITE_STORYBOOK_DEV_ORIGIN?.trim() ?? ''
+const docsFaviconSource = new URL('./docs/public/favicon.svg', import.meta.url)
 
 export default defineConfig({
   root: 'docs',
   base: docsBase,
-  icon: 'docs/public/favicon.svg',
+  icon: docsFaviconSource,
   logo: {
     light: assetWithBase('/assets/relay-mesh-lockup-light.png'),
     dark: assetWithBase('/assets/relay-mesh-lockup-dark.png'),
