@@ -17,7 +17,6 @@ import { Line } from 'react-chartjs-2'
 
 import type {
   AnalysisCurrentUserPressureDistribution,
-  AnalysisCurrentUserPressureRow,
   AnalysisPressureMovingAverageKey,
   AnalysisPressureSnapshot,
 } from '../api'
@@ -26,12 +25,9 @@ import AdminLoadingRegion from '../components/AdminLoadingRegion'
 
 ChartJS.register(CategoryScale, LinearScale, LineElement, PointElement, Filler, Tooltip, Legend)
 
-type ActiveUserPressurePoint = {
-  rank: number
-  label: string
+export type ActiveUserPressureDistributionPoint = {
   pressure: number
-  successCount: number
-  failureCount: number
+  userCount: number
 }
 
 function readChartColorVar(name: string, fallback: string): string {
@@ -76,32 +72,21 @@ function formatAxisHour(language: Language, timestamp: number): string {
   }).format(new Date(timestamp * 1000))
 }
 
-function formatUserLabel(
-  language: Language,
-  row: AnalysisCurrentUserPressureRow,
-  fallbackLabel: string,
-): string {
-  const primary = row.displayName?.trim() || row.username?.trim() || fallbackLabel
-  if (!row.username?.trim() || row.username === row.displayName) return primary
-  return language === 'zh'
-    ? `${primary}（@${row.username}）`
-    : `${primary} (@${row.username})`
-}
-
-function buildActiveUserPressureCurve(
+export function buildActiveUserPressureDistribution(
   distribution: AnalysisCurrentUserPressureDistribution,
-  language: Language,
-  fallbackLabel: string,
-): ActiveUserPressurePoint[] {
-  return distribution.rows
-    .filter((row) => row.pressure > 0)
-    .sort((left, right) => right.pressure - left.pressure || left.userId.localeCompare(right.userId))
-    .map((row, index) => ({
-      rank: index + 1,
-      label: formatUserLabel(language, row, fallbackLabel),
-      pressure: row.pressure,
-      successCount: row.successCount,
-      failureCount: row.failureCount,
+): ActiveUserPressureDistributionPoint[] {
+  const pressureToUserCount = new Map<number, number>()
+
+  for (const row of distribution.rows) {
+    if (row.pressure <= 0) continue
+    pressureToUserCount.set(row.pressure, (pressureToUserCount.get(row.pressure) ?? 0) + 1)
+  }
+
+  return [...pressureToUserCount.entries()]
+    .sort((left, right) => left[0] - right[0])
+    .map(([pressure, userCount]) => ({
+      pressure,
+      userCount,
     }))
 }
 
@@ -180,10 +165,14 @@ function buildPressureLineOptions(
   }
 }
 
-function buildUserPressureCurveOptions(
+function buildUserPressureDistributionOptions(
   language: Language,
-  rankLabel: string,
-  points: ActiveUserPressurePoint[],
+  labels: {
+    xAxisLabel: string
+    yAxisLabel: string
+    pressureLabel: string
+    userCountLabel: string
+  },
 ): ChartOptions<'line'> {
   const tickColor = readChartColorVar('--dashboard-chart-tick', '#635f69')
   const legendColor = readChartColorVar('--muted-foreground', '#635f69')
@@ -209,35 +198,33 @@ function buildUserPressureCurveOptions(
           title(items) {
             const first = items[0]
             if (!first) return ''
-            const point = points[first.dataIndex]
-            return point?.label ?? ''
+            const pressure = typeof first.parsed.x === 'number' ? first.parsed.x : 0
+            return `${labels.pressureLabel}: ${formatNumber(language, pressure)}`
           },
           label(context) {
-            const point = points[context.dataIndex]
-            if (!point) return ''
-            const successLabel = language === 'zh' ? '成功' : 'Success'
-            const failureLabel = language === 'zh' ? '失败' : 'Failure'
-            const rankText = `${rankLabel}: ${formatNumber(language, point.rank)}`
-            const pressureText = `${context.dataset.label ?? ''}: ${formatNumber(language, point.pressure)}`
-            const successText = `${successLabel}: ${formatNumber(language, point.successCount)}`
-            const failureText = `${failureLabel}: ${formatNumber(language, point.failureCount)}`
-            return [rankText, pressureText, successText, failureText]
+            const userCount = typeof context.parsed.y === 'number' ? context.parsed.y : 0
+            return `${labels.userCountLabel}: ${formatNumber(language, userCount)}`
           },
         },
       },
     },
     scales: {
       x: {
+        type: 'linear',
         title: {
           display: true,
-          text: rankLabel,
+          text: labels.xAxisLabel,
           color: legendColor,
         },
         ticks: {
           color: tickColor,
+          callback(value) {
+            return formatNumber(language, Number(value))
+          },
           maxRotation: 0,
           autoSkip: true,
           maxTicksLimit: 10,
+          precision: 0,
         },
         grid: {
           color: withOpacity(gridColor, 0.34),
@@ -246,8 +233,14 @@ function buildUserPressureCurveOptions(
       },
       y: {
         beginAtZero: true,
+        title: {
+          display: true,
+          text: labels.yAxisLabel,
+          color: legendColor,
+        },
         ticks: {
           color: tickColor,
+          precision: 0,
         },
         grid: {
           color: withOpacity(gridColor, 0.5),
@@ -400,8 +393,8 @@ export default function PressureAnalysisScreen({
     strings.charts.last7d.sma6hLabel,
   ])
 
-  const userCurvePoints = useMemo(
-    () => buildActiveUserPressureCurve(
+  const userDistributionPoints = useMemo(
+    () => buildActiveUserPressureDistribution(
       snapshot?.currentUserDistribution ?? {
         windowMinutes: 60,
         rows: [],
@@ -415,17 +408,17 @@ export default function PressureAnalysisScreen({
           vsYesterdayDelta: 0,
         },
       },
-      language,
-      strings.userFallback,
     ),
-    [language, snapshot, strings.userFallback],
+    [snapshot],
   )
-  const userCurveData = useMemo<ChartData<'line'>>(() => ({
-    labels: userCurvePoints.map((point) => String(point.rank)),
+  const userDistributionData = useMemo<ChartData<'line'>>(() => ({
     datasets: [
       {
         label: strings.charts.userDistribution.seriesLabel,
-        data: userCurvePoints.map((point) => point.pressure),
+        data: userDistributionPoints.map((point) => ({
+          x: point.pressure,
+          y: point.userCount,
+        })),
         borderColor: currentColor,
         backgroundColor: withOpacity(currentColor, 0.12),
         pointRadius: 2.75,
@@ -436,7 +429,7 @@ export default function PressureAnalysisScreen({
         fill: true,
       },
     ],
-  }), [currentColor, strings.charts.userDistribution.seriesLabel, userCurvePoints])
+  }), [currentColor, strings.charts.userDistribution.seriesLabel, userDistributionPoints])
 
   if (loading && !snapshot) {
     return (
@@ -493,19 +486,23 @@ export default function PressureAnalysisScreen({
             <p className="panel-description">{strings.charts.userDistribution.description}</p>
           </div>
         </div>
-        {userCurvePoints.length === 0 ? (
+        {userDistributionPoints.length === 0 ? (
           <div className="empty-state alert">{strings.charts.userDistribution.empty}</div>
         ) : (
           <div
             className="pressure-chart-shell pressure-chart-shell-distribution"
-            data-testid="pressure-distribution-histogram"
+            data-testid="pressure-distribution-chart"
           >
             <Line
-              data={userCurveData}
-              options={buildUserPressureCurveOptions(
+              data={userDistributionData}
+              options={buildUserPressureDistributionOptions(
                 language,
-                strings.charts.userDistribution.rankLabel,
-                userCurvePoints,
+                {
+                  xAxisLabel: strings.charts.userDistribution.xAxisLabel,
+                  yAxisLabel: strings.charts.userDistribution.yAxisLabel,
+                  pressureLabel: strings.charts.userDistribution.seriesLabel,
+                  userCountLabel: strings.charts.userDistribution.userCountLabel,
+                },
               )}
             />
           </div>

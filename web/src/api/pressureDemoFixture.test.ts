@@ -35,4 +35,16 @@ describe('buildPressureDemoFixture', () => {
       true,
     )
   })
+
+  it('exposes repeated active-user pressure values so distribution charts can prove aggregation', () => {
+    const snapshot = buildPressureDemoFixture(1_762_413_600, [])
+    const frequencyByPressure = new Map<number, number>()
+
+    for (const row of snapshot.currentUserDistribution.rows) {
+      frequencyByPressure.set(row.pressure, (frequencyByPressure.get(row.pressure) ?? 0) + 1)
+    }
+
+    const duplicatePressures = [...frequencyByPressure.values()].filter((count) => count > 1)
+    expect(duplicatePressures.length).toBeGreaterThan(0)
+  })
 })

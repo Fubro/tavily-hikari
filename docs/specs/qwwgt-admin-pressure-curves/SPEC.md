@@ -4,7 +4,7 @@
 
 - Status: 进行中（快车道）
 - Created: 2026-06-26
-- Last: 2026-06-26
+- Last: 2026-06-27
 
 ## 背景
 
@@ -17,14 +17,14 @@
 - 保持 `/admin/analysis/pressure` 三面板结构不变，但把三个 panel 统一提升为平滑曲线表达。
 - 在最近 24 小时服务器 rolling 1h pressure 图中，保留“当前 / 昨日同期”对比，并新增“最近 24 小时平均压力”水平虚线。
 - 在最近 7 天服务器小时压力图中，保留原始小时压力曲线，并叠加 `SMA 6h` 与 `SMA 24h` 两条移动均线虚线。
-- 把“当前 1 小时用户压力分布”改成“活跃用户 pressure rank 曲线”，按 pressure 降序呈现用户头部与长尾。
+- 把“当前 1 小时用户压力分布”改成“活跃用户 pressure 分布曲线”，按精确 pressure 值聚合用户数。
 - 让 API、TS 类型、Storybook mock、视觉证据与 i18n 文案围绕同一新语义同步。
 
 ## Non-goals
 
 - 不引入“今日 / 自然日” pressure 口径。
 - 不新增新的后端用户 pressure 统计真相源，继续复用 `businessCalls1h` active rows。
-- 不把 zero-pressure 用户画进 rank 曲线，也不保留旧的粗分桶区间图。
+- 不把 zero-pressure 用户画进分布曲线，也不保留旧的粗分桶区间图。
 - 不修改 admin 其他 analysis 页面、导航结构、权限逻辑或 summary card band。
 
 ## 数据与 UI 合同
@@ -39,11 +39,12 @@
 - 最近 24 小时平均压力
   - 定义为 `server24h.current[*].pressure` 288 个点的算术平均值。
   - 不新增后端字段；前端直接计算并渲染水平虚线。
-- 活跃用户 pressure rank 曲线
+- 活跃用户 pressure 分布曲线
   - 数据源固定为 `currentUserDistribution.rows`
-  - 前端按 `pressure DESC, userId ASC` 排序
+  - 前端按精确 `pressure` 值聚合用户数，并按 `pressure ASC` 排序
   - 仅展示 `pressure > 0` 用户
-  - x 轴为 rank，tooltip 展示 displayName/username、pressure、success、failure
+  - x 轴为线性 pressure 数值轴，y 轴为用户数
+  - tooltip 仅展示 pressure 与用户数
 
 ## 验收标准
 
@@ -52,18 +53,20 @@
 - `/admin/analysis/pressure` 的三张图都只使用平滑曲线表达，不出现 step/直方/折角折线。
 - 最近 24 小时图可同时看见 `当前`、`昨日同期`、`最近 24 小时平均` 三条线；平均线为水平虚线，图例带可读数值。
 - 最近 7 天图可同时看见 `小时压力`、`SMA 6h`、`SMA 24h` 三条曲线；两条移动均线为虚线且可在 legend / tooltip 中区分。
-- 活跃用户曲线只包含 active users；任意 zero-pressure 用户不出现在点位、tooltip 或尾部占位中。
+- 活跃用户分布曲线只包含 active users；任意 zero-pressure 用户不出现在点位、tooltip 或尾部占位中。
+- 当多个 active users 共享同一 pressure 值时，图表必须合并成同一 x 轴点位，y 值为该 pressure 下的用户数。
 - `cargo test`、`cd web && bun test`、`cd web && bun run build`、`cd web && bun run build-storybook` 全部通过。
 
 ## Visual Evidence
 
 - source_type: `storybook_canvas`
   story_id_or_title: `admin-pages--pressure`
-  state: `Analysis / Pressure desktop render with 24h average, SMA 6h/24h, and active-user rank curve`
+  state: `Analysis / Pressure desktop render with 24h average, SMA 6h/24h, and active-user pressure distribution`
   target_program: `mock-only`
   capture_scope: `element`
   requested_viewport: `1440x2200`
   viewport_strategy: `storybook-viewport`
+  evidence_note: 该证据已按精确 pressure 分布语义重新截图；第二张图现使用线性 `压力` 数值轴与 `用户数` 轴标题，tooltip 只保留 pressure 与用户数。空白裁剪脚本返回 `ambiguous_border`，因此按原图保留；证据绑定 `d43125dbdda29b9a9a5b49fc6c5a5dde2cad8292`。
 
   PR: include
   ![Analysis pressure desktop](./assets/pressure-desktop.png)
@@ -75,6 +78,7 @@
   capture_scope: `element`
   requested_viewport: `390x2600`
   viewport_strategy: `storybook-viewport`
+  evidence_note: 移动端证据与桌面端基于同一最新实现重新截图；活跃用户图继续保持 `压力 -> 用户数` 的精确聚合语义。空白裁剪脚本返回 `ambiguous_border`，因此按原图保留；证据绑定 `d43125dbdda29b9a9a5b49fc6c5a5dde2cad8292`。
 
   PR: include
   ![Analysis pressure mobile](./assets/pressure-mobile.png)

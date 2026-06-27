@@ -31,10 +31,12 @@ export const adminPressureTranslations: Record<Language, AdminPressureTranslatio
         averageLabel: '最近 24 小时平均',
       },
       userDistribution: {
-        title: '当前 1 小时活跃用户压力曲线',
-        description: '按当前 pressure 从高到低排列活跃用户，观察头部集中与长尾衰减。',
+        title: '当前 1 小时活跃用户压力分布曲线',
+        description: '按精确 pressure 值聚合活跃用户，观察不同压力值下的用户数分布。',
         seriesLabel: '压力',
-        rankLabel: '用户排名',
+        xAxisLabel: '压力',
+        yAxisLabel: '用户数',
+        userCountLabel: '用户数',
         empty: '当前 1 小时内还没有产生压力的用户。',
       },
       last7d: {
@@ -75,10 +77,12 @@ export const adminPressureTranslations: Record<Language, AdminPressureTranslatio
         averageLabel: '24h average',
       },
       userDistribution: {
-        title: 'Current 1h active user pressure curve',
-        description: 'Sort active users by current pressure to reveal head concentration and tail decay.',
+        title: 'Current 1h active user pressure distribution',
+        description: 'Group active users by exact pressure to show how many users occupy each pressure value.',
         seriesLabel: 'Pressure',
-        rankLabel: 'User rank',
+        xAxisLabel: 'Pressure',
+        yAxisLabel: 'Users',
+        userCountLabel: 'Users',
         empty: 'No users have produced pressure in the current 1h window.',
       },
       last7d: {

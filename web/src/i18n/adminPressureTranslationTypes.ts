@@ -30,7 +30,9 @@ export interface AdminPressureTranslations {
       title: string
       description: string
       seriesLabel: string
-      rankLabel: string
+      xAxisLabel: string
+      yAxisLabel: string
+      userCountLabel: string
       empty: string
     }
     last7d: {
