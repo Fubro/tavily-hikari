@@ -408,6 +408,124 @@ async fn analysis_pressure_snapshot_background_rebuild_rehydrates_server_pressur
 }
 
 #[tokio::test]
+async fn analysis_pressure_background_rebuild_retries_after_transient_failure() {
+    let (backend_time, manual_clock) = crate::BackendTime::manual_from_ts(1_700_350_000);
+    let db_path = temp_db_path("analysis-pressure-background-retry");
+    let db_str = db_path.to_string_lossy().to_string();
+    let proxy = TavilyProxy::with_options_and_time(
+        Vec::<String>::new(),
+        DEFAULT_UPSTREAM,
+        &db_str,
+        TavilyProxyOptions::from_database_path(&db_str),
+        backend_time.clone(),
+    )
+    .await
+    .expect("proxy created");
+
+    let user = proxy
+        .upsert_oauth_account(&OAuthAccountProfile {
+            provider: "github".to_string(),
+            provider_user_id: "analysis-pressure-retry".to_string(),
+            username: Some("retry".to_string()),
+            name: Some("Retry".to_string()),
+            avatar_template: None,
+            active: true,
+            trust_level: None,
+            raw_payload_json: None,
+        })
+        .await
+        .expect("upsert retry user");
+    let token = proxy
+        .ensure_user_token_binding(&user.user_id, Some("analysis-pressure-retry"))
+        .await
+        .expect("bind retry token");
+    let now = manual_clock.now_ts();
+    let request_kind = TokenRequestKind::new("api:search", "API | search", None);
+
+    seed_pressure_attempt(
+        &proxy,
+        &manual_clock,
+        now,
+        &token.id,
+        &user.user_id,
+        now - 120,
+        OUTCOME_SUCCESS,
+        Some("search"),
+        &request_kind,
+    )
+    .await;
+    drop(proxy);
+
+    manual_clock.set_now_ts(now);
+    let reopened = TavilyProxy::with_options_and_time(
+        Vec::<String>::new(),
+        DEFAULT_UPSTREAM,
+        &db_str,
+        TavilyProxyOptions::from_database_path(&db_str),
+        backend_time,
+    )
+    .await
+    .expect("reopen proxy");
+
+    let lock_handle =
+        hold_sqlite_write_lock_for_test_for(&reopened.key_store.pool, Duration::from_secs(6)).await;
+    assert!(
+        reopened.spawn_server_pressure_buckets_rebuild_once(),
+        "first background rebuild attempt should schedule"
+    );
+    assert!(
+        !reopened.spawn_server_pressure_buckets_rebuild_once(),
+        "concurrent background rebuild attempts should still dedupe"
+    );
+    lock_handle
+        .await
+        .expect("held sqlite write lock should release cleanly");
+
+    tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            if reopened.spawn_server_pressure_buckets_rebuild_once() {
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(25)).await;
+        }
+    })
+    .await
+    .expect("background rebuild should become retryable after a transient failure");
+
+    tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            let bucket_count: i64 = sqlx::query_scalar(
+                "SELECT COUNT(*) FROM observability.server_pressure_buckets WHERE bucket_kind = 'five_minute'",
+            )
+            .fetch_one(&reopened.key_store.pool)
+            .await
+            .expect("count rebuilt server pressure buckets after retry");
+            if bucket_count >= 1 {
+                return bucket_count;
+            }
+            tokio::time::sleep(Duration::from_millis(25)).await;
+        }
+    })
+    .await
+    .expect("retried background rebuild should complete in time");
+
+    let snapshot = reopened
+        .analysis_pressure_snapshot()
+        .await
+        .expect("analysis pressure snapshot after retry rebuild");
+    let current_point = snapshot
+        .server_24h
+        .current
+        .last()
+        .expect("latest current pressure point after retry rebuild");
+    assert_eq!(current_point.pressure, 1);
+    assert_eq!(current_point.success_count, 1);
+    assert_eq!(current_point.failure_count, 0);
+
+    let _ = std::fs::remove_file(db_path);
+}
+
+#[tokio::test]
 async fn analysis_pressure_snapshot_warms_up_24h_rolling_window_edges() {
     let (backend_time, manual_clock) = crate::BackendTime::manual_from_ts(1_700_500_000);
     let db_path = temp_db_path("analysis-pressure-snapshot-warmup");

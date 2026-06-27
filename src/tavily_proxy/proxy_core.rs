@@ -874,6 +874,9 @@ impl TavilyProxy {
                     );
                 }
                 Err(err) => {
+                    proxy
+                        .server_pressure_rebuild_started
+                        .store(false, Ordering::SeqCst);
                     tracing::warn!(
                         component = "analysis_pressure",
                         event = "server_pressure_buckets_rebuild_failed",
