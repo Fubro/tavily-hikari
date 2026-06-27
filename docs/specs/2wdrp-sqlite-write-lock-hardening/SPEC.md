@@ -100,7 +100,8 @@ source when a usable persisted runtime already exists.
   as a best-effort background rebuild whose failure is isolated to logs/observability and does not
   turn serving `/health` red.
 - The default image `HEALTHCHECK` must align with the stricter serving contract by using
-  `start-period=20s`, `interval=5s`, `timeout=5s`, and `retries=18`.
+  `start-period=20s`, `start-interval=20s`, `interval=5s`, `timeout=5s`, and `retries=18` so a
+  fast green probe cannot bypass the intended startup hold window.
 - Scheduled job records must preserve the logical job type and record the trigger source separately
   as `scheduler`, `manual`, or `auto`. Manual runs must not be encoded by appending suffixes to
   `job_type`.
@@ -230,7 +231,8 @@ source when a usable persisted runtime already exists.
   After the process is already serving, one background rebuild repopulates historical buckets
   without making owner-facing pressure analysis return `500`.
 - Under mock/local upstream startup, the image `HEALTHCHECK` becomes healthy only after the stricter
-  serving `/health` is truly green and remains stable within the `20s/5s/5s/18` timing contract.
+  serving `/health` is truly green and remains stable within the
+  `start-period=20s/start-interval=20s/interval=5s/timeout=5s/retries=18` timing contract.
 - With a large backlog of old request logs, one scheduler pass records bounded progress instead of
   running indefinitely; later catch-up passes eventually remove all rows older than the retention
   threshold.

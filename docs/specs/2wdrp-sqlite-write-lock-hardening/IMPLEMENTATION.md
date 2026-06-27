@@ -63,8 +63,9 @@
   transaction and only holds the writer slot during the final table replace, shrinking the live
   rebuild write window.
 - The container image `HEALTHCHECK` now polls the stricter `/health` contract with
-  `start-period=20s`, `interval=5s`, `timeout=5s`, and `retries=18` so deploy green state tracks
-  real serving readiness more closely.
+  `start-period=20s`, `start-interval=20s`, `interval=5s`, `timeout=5s`, and `retries=18`.
+  Shared-testbox smoke showed that `start-period` alone only masks startup failures; matching
+  `start-interval` is what keeps the first green transition near the intended 20-second floor.
 - LinuxDo system tag binding backfill now uses a single indexed startup precheck and only repairs
   mismatched rows before readiness. A background scheduler periodically refreshes the bindings and
   quota snapshots after the service is already listening.

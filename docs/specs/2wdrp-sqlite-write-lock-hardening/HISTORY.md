@@ -169,5 +169,6 @@
 - Moved `server_pressure_buckets` historical rebuild out of the startup critical path into one
   post-listener background rebuild, and shortened its writer-slot hold time by computing aggregate
   rows before the final replace transaction.
-- Tightened the image `HEALTHCHECK` timing to `20s/5s/5s/18` so container healthy state tracks the
-  stricter serving contract more closely.
+- Tightened the image `HEALTHCHECK` timing to
+  `start-period=20s/start-interval=20s/interval=5s/timeout=5s/retries=18` so container healthy
+  state tracks the stricter serving contract instead of flipping green on an early success probe.

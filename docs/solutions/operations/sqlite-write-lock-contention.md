@@ -87,9 +87,10 @@ month-tail public metrics scan.
   stale/empty analysis views, and shorten the live writer window by computing aggregates before the
   final replace transaction.
 - Align deploy health timing with that stricter contract. In this service the accepted image
-  baseline is `start-period=20s`, `interval=5s`, `timeout=5s`, and `retries=18`, which avoids a
-  minute-long “starting” mask without letting containers flip healthy before serving readiness is
-  real.
+  baseline is `start-period=20s`, `start-interval=20s`, `interval=5s`, `timeout=5s`, and
+  `retries=18`. Shared-testbox smoke showed that `start-period` alone only masks failures; the
+  matching `start-interval` is what stops a fast successful probe from flipping the container
+  healthy before the intended startup hold window has elapsed.
 - Keep retention cleanup bounded. Large `request_logs` backlogs should be deleted in small batches
   with a runtime/batch budget and a catch-up delay, rather than one daily job holding or repeatedly
   contesting the writer until the whole backlog is gone.
