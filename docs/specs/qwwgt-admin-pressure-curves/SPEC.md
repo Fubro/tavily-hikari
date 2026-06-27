@@ -66,7 +66,7 @@
   capture_scope: `element`
   requested_viewport: `1440x2200`
   viewport_strategy: `storybook-viewport`
-  evidence_note: 该证据已按精确 pressure 分布语义重新截图；第二张图现使用线性 `压力` 数值轴与 `用户数` 轴标题，tooltip 只保留 pressure 与用户数。空白裁剪脚本返回 `ambiguous_border`，因此按原图保留；证据绑定 `d43125dbdda29b9a9a5b49fc6c5a5dde2cad8292`。
+  evidence_note: 该证据已按精确 pressure 分布语义重新截图；第二张图现使用线性 `压力` 数值轴与 `用户数` 轴标题，tooltip 只保留 pressure 与用户数。空白裁剪脚本返回 `ambiguous_border`，因此按原图保留；证据绑定当前实现提交。
 
   PR: include
   ![Analysis pressure desktop](./assets/pressure-desktop.png)
@@ -78,7 +78,7 @@
   capture_scope: `element`
   requested_viewport: `390x2600`
   viewport_strategy: `storybook-viewport`
-  evidence_note: 移动端证据与桌面端基于同一最新实现重新截图；活跃用户图继续保持 `压力 -> 用户数` 的精确聚合语义。空白裁剪脚本返回 `ambiguous_border`，因此按原图保留；证据绑定 `d43125dbdda29b9a9a5b49fc6c5a5dde2cad8292`。
+  evidence_note: 移动端证据与桌面端基于同一最新实现重新截图；活跃用户图继续保持 `压力 -> 用户数` 的精确聚合语义。空白裁剪脚本返回 `ambiguous_border`，因此按原图保留；证据绑定当前实现提交。
 
   PR: include
   ![Analysis pressure mobile](./assets/pressure-mobile.png)
