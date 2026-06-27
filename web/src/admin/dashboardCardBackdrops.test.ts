@@ -45,6 +45,8 @@ describe('dashboardCardBackdrops helpers', () => {
     const currentHourStart = Date.UTC(2026, 3, 7, 12, 0, 0) / 1000
     const window = buildDashboardHourlyRequestWindowFixture({
       currentHourStart,
+      bucketSeconds: 3600,
+      visibleBuckets: 2,
       retainedBuckets: 2,
       mapBucket: ({ index }) => ({
         secondarySuccess: index === 0 ? 10 : 20,
@@ -72,7 +74,6 @@ describe('dashboardCardBackdrops helpers', () => {
     const currentHourStart = Date.UTC(2026, 3, 7, 13, 0, 0) / 1000
     const window = buildDashboardHourlyRequestWindowFixture({
       currentHourStart,
-      retainedBuckets: 49,
       mapBucket: ({ index, bucketStart, bucket }) => ({
         total: bucketStart >= Date.UTC(2026, 3, 7, 0, 0, 0) / 1000 && bucketStart <= currentHourStart
           ? index + 1
@@ -108,7 +109,6 @@ describe('dashboardCardBackdrops helpers', () => {
     const currentHourStart = Date.UTC(2026, 3, 7, 13, 0, 0) / 1000
     const window = buildDashboardHourlyRequestWindowFixture({
       currentHourStart,
-      retainedBuckets: 49,
       mapBucket: ({ bucketStart, bucket }) => ({
         total: bucketStart >= Date.UTC(2026, 3, 1, 0, 0, 0) / 1000 && bucketStart <= currentHourStart
           ? bucket.total + 1

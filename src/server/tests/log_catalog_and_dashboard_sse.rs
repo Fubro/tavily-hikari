@@ -1352,7 +1352,7 @@ use super::upstream_support_and_manual_jobs::*;
                 .pointer("/hourlyRequestWindow/buckets")
                 .and_then(|value| value.as_array())
                 .map(Vec::len),
-            Some(49)
+            Some(589)
         );
         assert!(
             snapshot_json
