@@ -292,8 +292,13 @@ export interface AdminTranslationsShape {
     tokenCoverageError: string
     recentAlertsTitle: string
     recentAlertsDescription: string
-    recentAlertsEvents: string
-    recentAlertsGroups: string
+    recentAlertsWindowLabels: {
+      hour1: string
+      hour24: string
+      day7: string
+    }
+    recentAlertsHits: string
+    recentAlertsTimeRange: string
     recentAlertsEmpty: string
     recentAlertsOpen: string
     recentAlertsTypeLabels: {

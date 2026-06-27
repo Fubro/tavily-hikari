@@ -110,8 +110,13 @@ const strings = {
   tokenCoverageError: 'Token scope failed to load.',
   recentAlertsTitle: 'Alerts · Last 24 hours',
   recentAlertsDescription: 'A compact 24-hour summary with a deep-link into the grouped Alerts view for the same explicit time slice.',
-  recentAlertsEvents: 'Events',
-  recentAlertsGroups: 'Groups',
+  recentAlertsWindowLabels: {
+    hour1: 'Last 1 hour',
+    hour24: 'Last 24 hours',
+    day7: 'Last 7 days',
+  },
+  recentAlertsHits: 'Grouped alerts',
+  recentAlertsTimeRange: 'Alert window',
   recentAlertsEmpty: 'No alert events were recorded in the current 24-hour window.',
   recentAlertsOpen: 'Open alerts',
   recentAlertsTypeLabels: {
@@ -127,6 +132,11 @@ const recentAlerts: RecentAlertsSummary = {
   windowHours: 24,
   totalEvents: 19,
   groupedCount: 6,
+  groupedCountWindows: [
+    { windowHours: 1, groupedCount: 2 },
+    { windowHours: 24, groupedCount: 6 },
+    { windowHours: 168, groupedCount: 9 },
+  ],
   countsByType: [
     { type: 'upstream_rate_limited_429', count: 7 },
     { type: 'upstream_usage_limit_432', count: 4 },
@@ -571,8 +581,13 @@ const zhStrings = {
   tokenCoverageError: '令牌范围数据加载失败。',
   recentAlertsTitle: '告警 · 最近 24 小时',
   recentAlertsDescription: '按最近 24 小时展示事件总数、分组数与高频告警主体，并可进入同口径的聚合告警视图。',
-  recentAlertsEvents: '事件数',
-  recentAlertsGroups: '分组数',
+  recentAlertsWindowLabels: {
+    hour1: '最近 1 小时',
+    hour24: '最近 24 小时',
+    day7: '最近 7 天',
+  },
+  recentAlertsHits: '聚合告警',
+  recentAlertsTimeRange: '告警区间',
   recentAlertsEmpty: '当前 24 小时窗口内没有记录到告警事件。',
   recentAlertsOpen: '打开告警中心',
   recentAlertsTypeLabels: {

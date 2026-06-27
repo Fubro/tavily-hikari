@@ -134,8 +134,13 @@ export interface DashboardOverviewStrings {
   tokenCoverageError: string
   recentAlertsTitle: string
   recentAlertsDescription: string
-  recentAlertsEvents: string
-  recentAlertsGroups: string
+  recentAlertsWindowLabels: {
+    hour1: string
+    hour24: string
+    day7: string
+  }
+  recentAlertsHits: string
+  recentAlertsTimeRange: string
   recentAlertsEmpty: string
   recentAlertsOpen: string
   recentAlertsTypeLabels: Record<'upstream_rate_limited_429' | 'upstream_usage_limit_432' | 'upstream_key_blocked' | 'user_request_rate_limited' | 'user_quota_exhausted', string>
@@ -457,6 +462,32 @@ function alertSummaryTone(type: keyof DashboardOverviewStrings['recentAlertsType
       return 'warning'
     default:
       return 'neutral'
+  }
+}
+
+function formatAlertRange(timestamp: number): string {
+  const parsed = new Date(timestamp * 1000)
+  const month = String(parsed.getMonth() + 1).padStart(2, '0')
+  const day = String(parsed.getDate()).padStart(2, '0')
+  const hours = String(parsed.getHours()).padStart(2, '0')
+  const minutes = String(parsed.getMinutes()).padStart(2, '0')
+  const seconds = String(parsed.getSeconds()).padStart(2, '0')
+  return `${month}/${day} ${hours}:${minutes}:${seconds}`
+}
+
+function windowCountLabel(
+  strings: DashboardOverviewStrings,
+  windowHours: number,
+): string {
+  switch (windowHours) {
+    case 1:
+      return strings.recentAlertsWindowLabels.hour1
+    case 24:
+      return strings.recentAlertsWindowLabels.hour24
+    case 24 * 7:
+      return strings.recentAlertsWindowLabels.day7
+    default:
+      return `${windowHours}h`
   }
 }
 
@@ -867,7 +898,7 @@ export default function DashboardOverview({
           </div>
           <p className="panel-description">
             {priorityCount > 0
-              ? `${strings.riskDescription} · ${strings.recentAlertsEvents}: ${recentAlerts.totalEvents}`
+              ? `${strings.riskDescription} · ${strings.recentAlertsHits}: ${recentAlerts.groupedCount}`
               : strings.currentStatusDescription}
           </p>
         </div>
@@ -1052,18 +1083,10 @@ export default function DashboardOverview({
         ) : (
           <div className="dashboard-alerts-summary">
             <div className="dashboard-alerts-summary__metrics">
-              <article className="dashboard-alerts-summary__metric-card">
-                <span>{strings.recentAlertsEvents}</span>
-                <strong>{recentAlerts.totalEvents}</strong>
-              </article>
-              <article className="dashboard-alerts-summary__metric-card">
-                <span>{strings.recentAlertsGroups}</span>
-                <strong>{recentAlerts.groupedCount}</strong>
-              </article>
-              {recentAlerts.countsByType.map((item) => (
-                <article className="dashboard-alerts-summary__metric-card" key={item.type}>
-                  <span>{strings.recentAlertsTypeLabels[item.type]}</span>
-                  <strong>{item.count}</strong>
+              {recentAlerts.groupedCountWindows.map((item) => (
+                <article className="dashboard-alerts-summary__metric-card" key={item.windowHours}>
+                  <span>{windowCountLabel(strings, item.windowHours)}</span>
+                  <strong>{item.groupedCount}</strong>
                 </article>
               ))}
             </div>
@@ -1078,6 +1101,9 @@ export default function DashboardOverview({
                     <span>x{group.count}</span>
                   </div>
                   <div className="dashboard-alerts-summary__group-body">
+                    <span className="dashboard-alerts-summary__meta">
+                      {strings.recentAlertsHits}
+                    </span>
                     {group.requestKind ? (
                       <RequestKindBadge
                         requestKindKey={group.requestKind.key}
@@ -1085,7 +1111,11 @@ export default function DashboardOverview({
                         size="sm"
                       />
                     ) : null}
-                    <span>{group.latestEvent.summary}</span>
+                    <span className="dashboard-alerts-summary__time-range">
+                      <strong>{strings.recentAlertsTimeRange}</strong>
+                      <span>{`${formatAlertRange(group.firstSeen)} → ${formatAlertRange(group.lastSeen)}`}</span>
+                    </span>
+                    <span className="dashboard-alerts-summary__summary">{group.latestEvent.summary}</span>
                   </div>
                 </article>
               ))}

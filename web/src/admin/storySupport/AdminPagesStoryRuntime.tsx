@@ -1029,6 +1029,11 @@ const STORY_RECENT_ALERTS: RecentAlertsSummary = {
   windowHours: 24,
   totalEvents: 5,
   groupedCount: 4,
+  groupedCountWindows: [
+    { windowHours: 1, groupedCount: 1 },
+    { windowHours: 24, groupedCount: 4 },
+    { windowHours: 168, groupedCount: 6 },
+  ],
   countsByType: [
     { type: 'upstream_rate_limited_429', count: 1 },
     { type: 'upstream_usage_limit_432', count: 1 },

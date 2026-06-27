@@ -111,3 +111,35 @@
   "perPage": 20
 }
 ```
+
+## `GET /api/dashboard/overview`
+
+### `recentAlerts`
+
+```json
+{
+  "windowHours": 24,
+  "totalEvents": 12,
+  "groupedCount": 8,
+  "groupedCountWindows": [
+    { "windowHours": 1, "groupedCount": 1 },
+    { "windowHours": 24, "groupedCount": 8 },
+    { "windowHours": 168, "groupedCount": 14 }
+  ],
+  "countsByType": [
+    { "type": "user_request_rate_limited", "count": 6 }
+  ],
+  "topGroups": [
+    {
+      "id": "user_request_rate_limited:user:usr_alice",
+      "count": 3,
+      "firstSeen": 1765388200,
+      "lastSeen": 1765389200
+    }
+  ]
+}
+```
+
+- `windowHours` 固定表示 dashboard 列表口径，当前为最近 `24h`。
+- `groupedCountWindows` 固定返回三项，顺序固定为 `1h / 24h / 168h`，表示对应时间窗内的聚合告警条数。
+- `topGroups` 固定代表最近 `24h` 聚合告警，按 `lastSeen DESC` 排序，dashboard 当前消费前 `10` 条。

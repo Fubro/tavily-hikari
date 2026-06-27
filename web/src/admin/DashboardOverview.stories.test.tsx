@@ -33,6 +33,15 @@ describe('DashboardOverview Storybook coverage', () => {
     expect(markup).toContain('dashboard-summary-card-backdrop')
   })
 
+  it('renders three grouped alert window cards and range copy in the default story', () => {
+    const args = dashboardStories.Default.args
+    const markup = renderToStaticMarkup(createElement(meta.component, args as never))
+    expect(markup).toContain('Last 1 hour')
+    expect(markup).toContain('Last 24 hours')
+    expect(markup).toContain('Last 7 days')
+    expect(markup).toContain('Alert window')
+  })
+
   it('exposes a fixed-range gap story for visual evidence', () => {
     const args = dashboardStories.FixedRangeWithGaps.args
     expect(args?.initialChartMode).toBe('resultsDelta')

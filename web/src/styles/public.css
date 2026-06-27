@@ -1617,7 +1617,7 @@ button:disabled {
 .dashboard-alerts-summary__metrics {
   display: grid;
   gap: 10px;
-  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
 .dashboard-alerts-summary__metric-card,
@@ -1663,12 +1663,29 @@ button:disabled {
 }
 
 .dashboard-alerts-summary__group-body {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  flex-wrap: wrap;
+  display: grid;
+  gap: 8px;
   color: hsl(var(--muted-foreground));
   font-size: 0.9rem;
+}
+
+.dashboard-alerts-summary__meta {
+  font-size: 0.8rem;
+  color: hsl(var(--muted-foreground));
+}
+
+.dashboard-alerts-summary__time-range {
+  display: grid;
+  gap: 2px;
+}
+
+.dashboard-alerts-summary__time-range strong {
+  font-size: 0.78rem;
+  color: hsl(var(--foreground));
+}
+
+.dashboard-alerts-summary__summary {
+  color: hsl(var(--muted-foreground));
 }
 
 .token-stats {

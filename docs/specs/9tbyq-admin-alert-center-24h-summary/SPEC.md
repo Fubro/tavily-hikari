@@ -24,6 +24,7 @@
   - `user_quota_exhausted`
 - 基于现有日志与维护记录派生告警读模型，支持共享筛选、分页、URL 状态同步，以及用户 / 令牌 / Key / 请求关联跳转。
 - 为 `/api/dashboard/overview` 增加最近 24 小时告警摘要；仪表盘摘要固定 24h，CTA 显式进入同口径 `聚合告警` 时间切片，而直接打开告警中心默认展示 retention 内全部历史。
+- 将仪表盘“近期告警”收口为“顶部三窗聚合计数 + 下方 24h 聚合列表”：顶部展示最近 `1h / 24h / 7d` 的聚合告警条数，下方列表固定展示最近 `24h`、最多 `10` 条聚合告警，并显示连续区间时间。
 - 为 Web UI 补齐 Storybook 稳定入口、页面/交互覆盖与视觉证据。
 
 ## Non-goals
@@ -113,6 +114,7 @@
 ### `/admin/alerts`
 
 - URL 查询串是视图真相源。
+- Header tabs、页面内 tabs 与窄屏 tabs 的显示顺序统一为 `聚合告警` 在前、`事件记录` 在后，但 `view=groups|events` 查询语义与默认值不变。
 - 支持：
   - `view=events|groups`
   - `type=<alert_type>`
@@ -194,9 +196,11 @@
   - `windowHours`
   - `totalEvents`
   - `groupedCount`
+  - `groupedCountWindows[]`
   - `countsByType`
   - `topGroups[]`
 - 默认口径固定为最近 24 小时。
+- `groupedCountWindows[]` 固定返回 `1h / 24h / 168h` 三个聚合告警计数；`topGroups[]` 固定仍为最近 24 小时聚合结果，且 dashboard 读取前 `10` 条。
 - `recentAlerts` 不改变 `/api/alerts/*` direct-open 默认口径；仪表盘 CTA 需要显式携带 `24h + view=groups`。
 
 ## 展示约束
@@ -210,11 +214,10 @@
   - 令牌
   - Key
   - request kind
-- 仪表盘新增 24h 告警摘要卡，至少展示：
-  - 总事件数
-  - 总分组数
-  - 五类计数
-  - Top groups
+- 仪表盘“近期告警”改为：
+  - 顶部三张聚合计数卡：最近 `1 小时 / 24 小时 / 7 天`
+  - 下方固定 `24h` 聚合告警列表，最多 `10` 条
+  - 每条列表至少展示告警类型、主体、命中数、连续区间 `firstSeen -> lastSeen`、请求类型（若有）与最新摘要
   - 进入 `/admin/alerts` 的 CTA
 
 ## 验收标准
@@ -229,6 +232,9 @@
 - `request_kind` 若需要展示，仅作为子窗口明细或原始事件属性出现。
 - 关联跳转可用：用户 / 令牌 / Key 进入详情页，请求进入当前页抽屉。
 - `/admin/dashboard` 新增最近 24 小时告警摘要；CTA 可直接进入同口径 grouped 视图，而 `/admin/alerts` direct-open 默认展示全部历史。
+- `/api/dashboard/overview.recentAlerts.groupedCountWindows` 固定返回 `1h / 24h / 168h` 三项，且仪表盘顶部只展示这三张聚合计数卡。
+- 仪表盘“近期告警”下方只展示聚合记录，不再展示旧的“事件数 / 分组数 / 类型分布”卡组。
+- 每条仪表盘聚合记录必须展示连续区间 `firstSeen -> lastSeen`，不得缺失告警时间。
 - 后端验证至少包含：
   - `cargo test`
   - `cargo clippy -- -D warnings`
@@ -254,23 +260,22 @@
 
 ## Visual Evidence
 
-- Alerts 页面筛选区已统一到时间输入的控件语言：
-  - `请求类型`、`用户`、`令牌`、`Key`、`应用时间`、`清空筛选` 与 `datetime-local` 输入现在共享同一套高度、圆角、pressed surface、padding 与 focus ring。
-  - grouped 读侧已改为 SQLite 兼容写法，`/api/alerts/groups` 在 101 上不再依赖命名 `WINDOW` 语法。
-  - grouped 读侧的 request-kind canonicalization 也必须避免为 `COALESCE`、`COUNT(DISTINCT ...)`、`MIN(...)` 包裹旧版 SQLite 会在 `near "("` 处拒绝的多余 `CASE` 外层括号；`/api/alerts/groups` 的外部接口契约保持不变。
-  - grouped 读侧在补全 mother group 子事件时，面向多个 mother group 的 `OR` 条件块必须通过 `QueryBuilder::separated(" OR ")` 正确插入分隔符；若把整段条件块都写成 `push_unseparated(...)`，SQLite 会收到 `(...)(...)` 这种非法谓词并在 `/api/alerts/groups` 上报 `near "("`。
+- Storybook canvas 组件证据：
+  - `Admin/Components/DashboardOverview / Default` 已改为“顶部三窗聚合计数 + 下方 24h 聚合告警列表”。
+  - 仪表盘近期告警顶部只保留最近 `1 小时 / 24 小时 / 7 天` 三张聚合计数卡。
+  - 24h 列表每条聚合记录都展示连续区间 `firstSeen -> lastSeen`，并保留主体、请求类型与最新摘要。
 
-- Web demo 真实页面视口：
-  - `/admin/alerts?demo=1&view=groups`：direct-open 默认进入 `聚合告警`，`用户请求限流` 以 `母 -> 子 -> 原始事件明细` 两层半结构展示，子窗口不再按 `request_kind` 拆主结构。
+    ![仪表盘近期告警聚合摘要 Storybook 证据](assets/dashboard-alerts-24h-grouped-summary.png)
 
-    ![告警中心母子语义聚合 Web Demo 真实页面视口](assets/alerts-center-web-demo-viewport-trimmed.png)
+- Storybook page fallback 证据：
+  - `Admin/Pages / Alerts` 的 header tabs 与页面内 tabs 顺序已统一为 `聚合告警 -> 事件记录`。
+  - 默认激活态仍为 `view=groups`，仅调整展示顺序，不改变查询语义。
 
-  - 子窗口“调用记录”使用右侧滑出抽屉承载筛选后的调用列表；抽屉本体贴合浏览器视口上下边缘，不再复用旧的底部抽屉高度约束。
-
-    ![告警中心子窗口调用记录右侧抽屉真实页面视口](assets/alerts-center-child-drawer-viewport.png)
+    ![告警中心 tabs 顺序统一 Storybook 证据](assets/alerts-center-groups-first-tabs.png)
 
 - Chrome DevTools 复核：
-  - Web demo 页面复核确认告警中心默认选中 `聚合告警`，并可在同一表格内展开母组、子窗口与原始告警明细。
+  - `iframe.html?id=admin-components-dashboardoverview--default` 已确认近期告警区显示 `Last 1 hour / Last 24 hours / Last 7 days` 三窗计数，以及 `Alert window` 连续区间文案。
+  - `iframe.html?id=admin-pages--alerts` 已确认顶部 header tabs 与页面内 segmented tabs 都以 `Groups` 在前、`Events` 在后。
 
 ## 101 验证 Runbook
 

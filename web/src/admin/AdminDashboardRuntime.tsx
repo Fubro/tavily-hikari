@@ -1782,6 +1782,11 @@ function AdminDashboard(): JSX.Element {
     windowHours: 24,
     totalEvents: 0,
     groupedCount: 0,
+    groupedCountWindows: [
+      { windowHours: 1, groupedCount: 0 },
+      { windowHours: 24, groupedCount: 0 },
+      { windowHours: 168, groupedCount: 0 },
+    ],
     countsByType: [],
     topGroups: [],
   })
@@ -2801,6 +2806,11 @@ function AdminDashboard(): JSX.Element {
           windowHours: 24,
           totalEvents: 0,
           groupedCount: 0,
+          groupedCountWindows: [
+            { windowHours: 1, groupedCount: 0 },
+            { windowHours: 24, groupedCount: 0 },
+            { windowHours: 168, groupedCount: 0 },
+          ],
           countsByType: [],
           topGroups: [],
         })
@@ -9796,8 +9806,8 @@ function AdminDashboard(): JSX.Element {
         }))
       }}
       options={[
-        { value: 'events', label: alertTabsCopy.events },
         { value: 'groups', label: alertTabsCopy.groups },
+        { value: 'events', label: alertTabsCopy.events },
       ]}
       ariaLabel={moduleDesktopIntro.title}
     />

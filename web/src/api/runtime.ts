@@ -285,8 +285,14 @@ export interface RecentAlertsSummary {
   windowHours: number
   totalEvents: number
   groupedCount: number
+  groupedCountWindows: RecentAlertsGroupedWindowCount[]
   countsByType: AlertTypeCount[]
   topGroups: AlertGroup[]
+}
+
+export interface RecentAlertsGroupedWindowCount {
+  windowHours: number
+  groupedCount: number
 }
 
 export interface AlertsPage<T> {
@@ -633,6 +639,13 @@ interface ServerAlertTypeCount {
   count: number
 }
 
+interface ServerRecentAlertsGroupedWindowCount {
+  windowHours?: number
+  window_hours?: number
+  groupedCount?: number
+  grouped_count?: number
+}
+
 interface ServerRecentAlertsSummary {
   windowHours?: number
   window_hours?: number
@@ -640,6 +653,8 @@ interface ServerRecentAlertsSummary {
   total_events?: number
   groupedCount?: number
   grouped_count?: number
+  groupedCountWindows?: ServerRecentAlertsGroupedWindowCount[]
+  grouped_count_windows?: ServerRecentAlertsGroupedWindowCount[]
   countsByType?: ServerAlertTypeCount[]
   counts_by_type?: ServerAlertTypeCount[]
   topGroups?: ServerAlertGroup[]
@@ -908,6 +923,10 @@ function normalizeRecentAlertsSummary(value: ServerRecentAlertsSummary): RecentA
     windowHours: value.windowHours ?? value.window_hours ?? 24,
     totalEvents: value.totalEvents ?? value.total_events ?? 0,
     groupedCount: value.groupedCount ?? value.grouped_count ?? 0,
+    groupedCountWindows: (value.groupedCountWindows ?? value.grouped_count_windows ?? []).map((item) => ({
+      windowHours: item.windowHours ?? item.window_hours ?? 0,
+      groupedCount: item.groupedCount ?? item.grouped_count ?? 0,
+    })),
     countsByType: (value.countsByType ?? value.counts_by_type ?? []).map((item) => ({
       type: item.type,
       count: item.count,

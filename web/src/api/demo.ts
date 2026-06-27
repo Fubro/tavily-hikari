@@ -1353,6 +1353,11 @@ function demoRecentAlerts() {
     windowHours: 24,
     totalEvents: events.length,
     groupedCount: topGroups.length,
+    groupedCountWindows: [
+      { windowHours: 1, groupedCount: 1 },
+      { windowHours: 24, groupedCount: topGroups.length },
+      { windowHours: 24 * 7, groupedCount: topGroups.length + 3 },
+    ],
     countsByType: [
       { type: 'upstream_usage_limit_432', count: 4 },
       { type: 'user_request_rate_limited', count: 4 },

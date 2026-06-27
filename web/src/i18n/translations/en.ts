@@ -306,8 +306,13 @@ export const EN: TranslationShape = {
         tokenCoverageError: 'Token risk scope could not be loaded. Open Tokens to retry.',
         recentAlertsTitle: 'Recent alerts',
         recentAlertsDescription: 'Summarizes the last 24 hours and deep-links into the grouped Alerts view with the same time slice.',
-        recentAlertsEvents: 'Events',
-        recentAlertsGroups: 'Groups',
+        recentAlertsWindowLabels: {
+          hour1: 'Last 1 hour',
+          hour24: 'Last 24 hours',
+          day7: 'Last 7 days',
+        },
+        recentAlertsHits: 'Grouped alerts',
+        recentAlertsTimeRange: 'Alert window',
         recentAlertsEmpty: 'No alert activity in the last 24 hours.',
         recentAlertsOpen: 'Review alerts',
         recentAlertsTypeLabels: {

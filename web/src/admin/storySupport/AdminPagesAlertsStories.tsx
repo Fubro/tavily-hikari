@@ -217,8 +217,8 @@ function AlertsPageCanvas({ inlineTabsVariant = 'all' }: { inlineTabsVariant?: '
       value={currentView}
       onChange={(nextView) => setSearch(alertsPath({ view: nextView }).replace('/admin/alerts', ''))}
       options={[
-        { value: 'events', label: language === 'zh' ? '事件记录' : 'Events' },
         { value: 'groups', label: language === 'zh' ? '聚合告警' : 'Groups' },
+        { value: 'events', label: language === 'zh' ? '事件记录' : 'Events' },
       ]}
       ariaLabel="告警视图"
     />

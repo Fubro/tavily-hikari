@@ -1092,10 +1092,27 @@ impl From<tavily_hikari::AlertCatalog> for AlertCatalogView {
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
+struct DashboardRecentAlertsGroupedWindowCountView {
+    window_hours: i64,
+    grouped_count: i64,
+}
+
+impl From<tavily_hikari::RecentAlertsGroupedWindowCount> for DashboardRecentAlertsGroupedWindowCountView {
+    fn from(value: tavily_hikari::RecentAlertsGroupedWindowCount) -> Self {
+        Self {
+            window_hours: value.window_hours,
+            grouped_count: value.grouped_count,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
 struct DashboardRecentAlertsView {
     window_hours: i64,
     total_events: i64,
     grouped_count: i64,
+    grouped_count_windows: Vec<DashboardRecentAlertsGroupedWindowCountView>,
     counts_by_type: Vec<AlertTypeCountView>,
     top_groups: Vec<AlertGroupView>,
 }
@@ -1106,6 +1123,11 @@ impl From<tavily_hikari::RecentAlertsSummary> for DashboardRecentAlertsView {
             window_hours: value.window_hours,
             total_events: value.total_events,
             grouped_count: value.grouped_count,
+            grouped_count_windows: value
+                .grouped_count_windows
+                .into_iter()
+                .map(DashboardRecentAlertsGroupedWindowCountView::from)
+                .collect(),
             counts_by_type: value
                 .counts_by_type
                 .into_iter()

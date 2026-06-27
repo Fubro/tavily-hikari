@@ -1330,10 +1330,17 @@ pub struct AlertTypeCount {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RecentAlertsGroupedWindowCount {
+    pub window_hours: i64,
+    pub grouped_count: i64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RecentAlertsSummary {
     pub window_hours: i64,
     pub total_events: i64,
     pub grouped_count: i64,
+    pub grouped_count_windows: Vec<RecentAlertsGroupedWindowCount>,
     pub counts_by_type: Vec<AlertTypeCount>,
     pub top_groups: Vec<AlertGroupRecord>,
     pub coverage: String,
@@ -1347,6 +1354,20 @@ impl Default for RecentAlertsSummary {
             window_hours: 24,
             total_events: 0,
             grouped_count: 0,
+            grouped_count_windows: vec![
+                RecentAlertsGroupedWindowCount {
+                    window_hours: 1,
+                    grouped_count: 0,
+                },
+                RecentAlertsGroupedWindowCount {
+                    window_hours: 24,
+                    grouped_count: 0,
+                },
+                RecentAlertsGroupedWindowCount {
+                    window_hours: 24 * 7,
+                    grouped_count: 0,
+                },
+            ],
             counts_by_type: default_alert_type_counts(),
             top_groups: Vec::new(),
             coverage: "ok".to_string(),

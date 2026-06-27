@@ -2178,7 +2178,34 @@ impl KeyStore {
         Self::push_alert_events_cte(&mut total_query, filters);
         total_query.push(" SELECT COUNT(*) FROM alerts");
         let total_events: i64 = total_query.build_query_scalar().fetch_one(&self.pool).await?;
-        let (top_groups, grouped_count) = self.fetch_alert_group_projection_page(filters, 1, 5).await?;
+        let (top_groups, grouped_count) = self.fetch_alert_group_projection_page(filters, 1, 10).await?;
+
+        let mut grouped_count_windows = Vec::with_capacity(3);
+        for grouped_window_hours in [1_i64, 24_i64, 24_i64 * 7] {
+            let grouped_since = self
+                .backend_time
+                .now_ts()
+                .saturating_sub(grouped_window_hours.saturating_mul(3600));
+            let grouped_filters = AlertEventFilters {
+                alert_type: None,
+                since: Some(grouped_since),
+                until: None,
+                user_id: None,
+                token_id: None,
+                key_id: None,
+                request_kinds: &[],
+            };
+            let mut grouped_count_query = QueryBuilder::new("");
+            Self::push_alert_groups_cte(&mut grouped_count_query, grouped_filters);
+            grouped_count_query.push(" SELECT COUNT(*) FROM grouped_alerts");
+            grouped_count_windows.push(RecentAlertsGroupedWindowCount {
+                window_hours: grouped_window_hours,
+                grouped_count: grouped_count_query
+                    .build_query_scalar()
+                    .fetch_one(&self.pool)
+                    .await?,
+            });
+        }
 
         let mut counts_query = QueryBuilder::new("");
         Self::push_alert_events_cte(&mut counts_query, filters);
@@ -2196,6 +2223,7 @@ impl KeyStore {
             window_hours: clamped_window_hours,
             total_events,
             grouped_count,
+            grouped_count_windows,
             counts_by_type,
             top_groups,
             coverage: "ok".to_string(),

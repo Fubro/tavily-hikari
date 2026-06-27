@@ -305,8 +305,13 @@ export const ZH: TranslationShape = {
         tokenCoverageError: '令牌风险数据加载失败，请进入“访问令牌”重试。',
         recentAlertsTitle: '近期告警',
         recentAlertsDescription: '默认汇总最近 24 小时，并可一键进入聚合告警的同口径时间切片。',
-        recentAlertsEvents: '事件数',
-        recentAlertsGroups: '分组数',
+        recentAlertsWindowLabels: {
+          hour1: '最近 1 小时',
+          hour24: '最近 24 小时',
+          day7: '最近 7 天',
+        },
+        recentAlertsHits: '聚合告警',
+        recentAlertsTimeRange: '告警区间',
         recentAlertsEmpty: '最近 24 小时暂无告警活动。',
         recentAlertsOpen: '查看告警',
         recentAlertsTypeLabels: {

@@ -625,8 +625,13 @@ describe('AlertsCenter loading behavior', () => {
 
     expect(container.querySelector('.segmented-tab')).not.toBeNull()
     expect(container.querySelector('.segmented-tabs-select-trigger')).toBeNull()
-    expect(container.textContent).toContain('事件记录')
     expect(container.textContent).toContain('聚合告警')
+    expect(container.textContent).toContain('事件记录')
+    const tabs = Array.from(container.querySelectorAll('.segmented-tab'))
+      .map((node) => node.textContent?.trim())
+      .filter(Boolean)
+    expect(tabs[0]).toContain('聚合告警')
+    expect(tabs[1]).toContain('事件记录')
 
     await act(async () => {
       root.unmount()

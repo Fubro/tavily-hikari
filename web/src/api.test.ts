@@ -417,6 +417,11 @@ describe('admin user tag api helpers', () => {
               windowHours: 24,
               totalEvents: 3,
               groupedCount: 2,
+              groupedCountWindows: [
+                { windowHours: 1, groupedCount: 1 },
+                { windowHours: 24, groupedCount: 2 },
+                { windowHours: 168, groupedCount: 4 },
+              ],
               countsByType: [
                 { type: 'upstream_rate_limited_429', count: 1 },
                 { type: 'upstream_usage_limit_432', count: 2 },
@@ -478,6 +483,7 @@ describe('admin user tag api helpers', () => {
     expect(overview.monthSeries.comparison[0]?.total).toBe(90)
     expect(overview.tokenCoverage).toBe('ok')
     expect(overview.recentAlerts.totalEvents).toBe(3)
+    expect(overview.recentAlerts.groupedCountWindows.map((item) => item.windowHours)).toEqual([1, 24, 168])
     expect(overview.recentAlerts.topGroups[0]?.latestEvent.request?.id).toBe(91)
   })
 

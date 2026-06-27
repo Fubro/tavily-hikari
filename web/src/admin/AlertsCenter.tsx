@@ -799,8 +799,8 @@ export default function AlertsCenter({
               value={view}
               onChange={(nextView) => onNavigate(alertsPath({ view: nextView, type, since, until, userId, tokenId, keyId, requestKinds }))}
               options={[
-                { value: 'events', label: copy.tabs.events },
                 { value: 'groups', label: copy.tabs.groups },
+                { value: 'events', label: copy.tabs.events },
               ]}
               ariaLabel={copy.title}
               collapseMode="never"

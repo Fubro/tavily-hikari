@@ -594,6 +594,24 @@ async fn alerts_endpoints_default_to_all_history_while_dashboard_recent_alerts_s
     );
     assert_eq!(
         overview_body
+            .pointer("/recentAlerts/groupedCountWindows/0/windowHours")
+            .and_then(|value| value.as_i64()),
+        Some(1)
+    );
+    assert_eq!(
+        overview_body
+            .pointer("/recentAlerts/groupedCountWindows/1/windowHours")
+            .and_then(|value| value.as_i64()),
+        Some(24)
+    );
+    assert_eq!(
+        overview_body
+            .pointer("/recentAlerts/groupedCountWindows/2/windowHours")
+            .and_then(|value| value.as_i64()),
+        Some(168)
+    );
+    assert_eq!(
+        overview_body
             .pointer("/recentAlerts/countsByType")
             .and_then(|value| value.as_array())
             .map(|values| values
