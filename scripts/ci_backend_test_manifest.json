@@ -467,7 +467,7 @@
         "server::tests::admin_logs_and_summary::summary_",
         "server::tests::system_settings_and_forward_proxy::active_",
         "server::tests::system_settings_and_forward_proxy::concurrent_",
-        "server::tests::system_settings_and_forward_proxy::health_",
+        "server::tests::system_settings_and_forward_proxy::serving_health_",
         "server::tests::system_settings_and_forward_proxy::standby_",
         "server::tests::log_catalog_and_dashboard_sse::key_",
         "server::tests::research_result_and_mcp_subpath::db_",
