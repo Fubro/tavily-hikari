@@ -16,7 +16,7 @@ export default function BrandLockup({
   return (
     <span className={cn('brand-lockup', compact && 'brand-lockup-compact', className)}>
       <img
-        src="/relay-mesh-lockup-light.png"
+        src="/assets/relay-mesh-lockup-light.png"
         alt={title}
         className={cn(
           'brand-lockup-image',
@@ -28,7 +28,7 @@ export default function BrandLockup({
         decoding="async"
       />
       <img
-        src="/relay-mesh-lockup-dark.png"
+        src="/assets/relay-mesh-lockup-dark.png"
         alt=""
         aria-hidden="true"
         className={cn(

@@ -1083,7 +1083,7 @@ function getAdminRankingsTabFromLocation(): RankingTabKey {
 
 function getUserTagIconSrc(icon: string | null | undefined): string | null {
   if (icon === 'linuxdo') {
-    return '/linuxdo-logo.svg'
+    return '/assets/linuxdo-logo.svg'
   }
   return null
 }

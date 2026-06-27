@@ -11,6 +11,7 @@
 - 通过生成脚本构造 public/admin 两套 asset graph、manifest、service worker 与图标，不引入单 manifest 注入式 PWA 插件。
 - 品牌资产采用“批准稿 lockup/icon + 位图导出”双轨：仓库保留经批准的 Relay Mesh lockup/icon PNG，并通过构建稳定导出 favicon、touch icon 与 public/admin PWA PNG。
 - 品牌导出链现在显式产出 lockup / mark / launcher icon 的 light、dark、mono 变体，并保留默认亮色别名文件给现有入口复用。
+- owner-facing 品牌静态资源统一改由 `/assets/*` 合同暴露；根路径只保留 `/favicon.svg`、manifest 与 PWA 入口，不再公开 Relay Mesh / LinuxDo 品牌文件。
 - 继续沿用服务端对 `/admin` 与 `/console` 的既有鉴权入口；PWA 不改变认证契约。
 - 页面离线失败语义优先复用现有 unavailable/error surface，不引入离线成功假象。
 - 为避免 public root service worker 抢占已安装 admin app 的离线入口，admin 入口在运行时归一到 `/admin/`，并让 admin manifest/scope 与 SW 都锁定 `/admin/`。
@@ -59,6 +60,7 @@
   - `web/scripts/generate_pwa_assets.py` 从 `relay-mesh-icon-light.png` / `relay-mesh-icon-dark.png` 导出 public/admin 两套全尺寸 PWA PNG、maskable 图标、touch icon 与 manifest 主题字段
   - `BrandLockup` 组件统一 public home、console header、admin shell、login、registration-paused 与 404 fallback 的显式品牌位，并按主题切换 lockup 亮/暗版
   - `docs-site/rspress.config.ts` 与 `docs-site/docs/public/*` 接入同一套文档站品牌入口，并补上主题感知 favicon
+  - 2026-06-27 follow-up 将 public/docs-site 品牌导出物迁到各自 `public/assets/` 目录，HTML shell、组件引用与 Rust 静态合同统一改为 `/assets/*`
 - Chromium 离线 proof 已覆盖：
   - 公共首页离线壳可打开，并显示 `Offline shell loaded`
   - 用户控制台离线壳可打开，并显示 `Console structure is available`
@@ -85,6 +87,7 @@
 - 2026-06-25: 品牌层切换到经批准的 Relay Mesh lockup/icon 资产，并复用既有 public/admin 双身份 PWA 产线导出所有安装资产。
 - 2026-06-25: 修正 `web/package.json` 中 `test:e2e:pwa-offline` 的仓库相对路径，恢复按命令名直接执行的离线 PWA E2E 验证链。
 - 2026-06-25: 品牌导出链追加 light/dark/mono 变体、主题感知 favicon 与 `64..1024 + maskable` 全尺寸 PWA icon 覆盖。
+- 2026-06-27: 品牌公开路径从根路径裸文件收敛到 `/assets/*`，并补齐 `/assets/* + /favicon.svg` 的服务合同测试。
 
 ## 已知未完成验证
 

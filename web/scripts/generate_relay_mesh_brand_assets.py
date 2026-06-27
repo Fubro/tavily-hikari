@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from collections import deque
+import shutil
 from pathlib import Path
 
 from PIL import Image, ImageDraw
@@ -12,6 +13,7 @@ REPO_ROOT = WEB_ROOT.parent
 REFERENCE_DIR = WEB_ROOT / "brand" / "relay-mesh" / "reference"
 WEB_PUBLIC_DIR = WEB_ROOT / "public"
 DOCS_PUBLIC_DIR = REPO_ROOT / "docs-site" / "docs" / "public"
+ASSETS_DIR_NAME = "assets"
 
 CLAY_BG = (244, 241, 250)
 CLAY_BG_ALT = (235, 232, 247)
@@ -217,6 +219,15 @@ def write_theme_svg(
     )
 
 
+def asset_path(file_name: str) -> str:
+    return f"{ASSETS_DIR_NAME}/{file_name}"
+
+
+def remove_if_exists(path: Path) -> None:
+    if path.exists():
+        path.unlink()
+
+
 def make_launcher_icon(
     mark: Image.Image,
     *,
@@ -260,6 +271,7 @@ def make_mono_square_icon(mark: Image.Image) -> Image.Image:
 
 
 def export_static_assets(public_dir: Path) -> None:
+    assets_dir = public_dir / ASSETS_DIR_NAME
     lockup_seed = load_rgba(REFERENCE_DIR / "approved-lockup-raster.png")
     mark_seed = load_rgba(REFERENCE_DIR / "approved-mark-raster.png")
 
@@ -285,72 +297,106 @@ def export_static_assets(public_dir: Path) -> None:
     launcher_mono_dark = make_mono_square_icon(mark_mono_dark)
     launcher_mono_light = make_mono_square_icon(mark_mono_light)
 
-    save_png(lockup_light, public_dir / "relay-mesh-lockup.png")
-    save_png(lockup_light, public_dir / "relay-mesh-lockup-light.png")
-    save_png(lockup_dark, public_dir / "relay-mesh-lockup-dark.png")
-    save_png(lockup_mono_dark, public_dir / "relay-mesh-lockup-mono-dark.png")
-    save_png(lockup_mono_light, public_dir / "relay-mesh-lockup-mono-light.png")
+    save_png(lockup_light, assets_dir / "relay-mesh-lockup.png")
+    save_png(lockup_light, assets_dir / "relay-mesh-lockup-light.png")
+    save_png(lockup_dark, assets_dir / "relay-mesh-lockup-dark.png")
+    save_png(lockup_mono_dark, assets_dir / "relay-mesh-lockup-mono-dark.png")
+    save_png(lockup_mono_light, assets_dir / "relay-mesh-lockup-mono-light.png")
+    save_png(lockup_light, assets_dir / "relay-mesh-mobile-logo-light.png")
+    save_png(lockup_dark, assets_dir / "relay-mesh-mobile-logo-dark.png")
 
-    save_png(mark_light, public_dir / "relay-mesh-mark.png")
-    save_png(mark_light, public_dir / "relay-mesh-mark-light.png")
-    save_png(mark_dark, public_dir / "relay-mesh-mark-dark.png")
-    save_png(mark_mono_dark, public_dir / "relay-mesh-mark-mono-dark.png")
-    save_png(mark_mono_light, public_dir / "relay-mesh-mark-mono-light.png")
+    save_png(mark_light, assets_dir / "relay-mesh-mark.png")
+    save_png(mark_light, assets_dir / "relay-mesh-mark-light.png")
+    save_png(mark_dark, assets_dir / "relay-mesh-mark-dark.png")
+    save_png(mark_mono_dark, assets_dir / "relay-mesh-mark-mono-dark.png")
+    save_png(mark_mono_light, assets_dir / "relay-mesh-mark-mono-light.png")
 
-    save_png(launcher_light, public_dir / "relay-mesh-icon.png")
-    save_png(launcher_light, public_dir / "relay-mesh-icon-light.png")
-    save_png(launcher_dark, public_dir / "relay-mesh-icon-dark.png")
-    save_png(launcher_mono_dark, public_dir / "relay-mesh-icon-mono-dark.png")
-    save_png(launcher_mono_light, public_dir / "relay-mesh-icon-mono-light.png")
+    save_png(launcher_light, assets_dir / "relay-mesh-icon.png")
+    save_png(launcher_light, assets_dir / "relay-mesh-icon-light.png")
+    save_png(launcher_dark, assets_dir / "relay-mesh-icon-dark.png")
+    save_png(launcher_mono_dark, assets_dir / "relay-mesh-icon-mono-dark.png")
+    save_png(launcher_mono_light, assets_dir / "relay-mesh-icon-mono-light.png")
 
-    save_resized(mark_light, 16, public_dir / "favicon-16x16.png")
-    save_resized(mark_light, 32, public_dir / "favicon-32x32.png")
-    save_resized(mark_light, 48, public_dir / "favicon-48x48.png")
-    save_resized(launcher_light, 180, public_dir / "apple-touch-icon.png")
+    save_resized(mark_light, 16, assets_dir / "favicon-16x16.png")
+    save_resized(mark_light, 32, assets_dir / "favicon-32x32.png")
+    save_resized(mark_light, 48, assets_dir / "favicon-48x48.png")
+    save_resized(launcher_light, 180, assets_dir / "apple-touch-icon.png")
 
     write_theme_svg(
-        "relay-mesh-mark-light.png",
-        "relay-mesh-mark-dark.png",
+        asset_path("relay-mesh-mark-light.png"),
+        asset_path("relay-mesh-mark-dark.png"),
         mark_light.width,
         mark_light.height,
         public_dir / "favicon.svg",
     )
     write_svg_wrapper(
-        "relay-mesh-mark-light.png",
+        asset_path("relay-mesh-mark-light.png"),
         mark_light.width,
         mark_light.height,
-        public_dir / "relay-mesh-mark-light.svg",
+        assets_dir / "relay-mesh-mark-light.svg",
     )
     write_svg_wrapper(
-        "relay-mesh-mark-dark.png",
+        asset_path("relay-mesh-mark-dark.png"),
         mark_dark.width,
         mark_dark.height,
-        public_dir / "relay-mesh-mark-dark.svg",
+        assets_dir / "relay-mesh-mark-dark.svg",
     )
     write_svg_wrapper(
-        "relay-mesh-mark-mono-dark.png",
+        asset_path("relay-mesh-mark-mono-dark.png"),
         mark_mono_dark.width,
         mark_mono_dark.height,
-        public_dir / "relay-mesh-mark-mono-dark.svg",
+        assets_dir / "relay-mesh-mark-mono-dark.svg",
     )
     write_svg_wrapper(
-        "relay-mesh-mark-mono-light.png",
+        asset_path("relay-mesh-mark-mono-light.png"),
         mark_mono_light.width,
         mark_mono_light.height,
-        public_dir / "relay-mesh-mark-mono-light.svg",
+        assets_dir / "relay-mesh-mark-mono-light.svg",
     )
     write_svg_wrapper(
-        "relay-mesh-icon-mono-dark.png",
+        asset_path("relay-mesh-icon-mono-dark.png"),
         launcher_mono_dark.width,
         launcher_mono_dark.height,
-        public_dir / "relay-mesh-icon-mono-dark.svg",
+        assets_dir / "relay-mesh-icon-mono-dark.svg",
     )
     write_svg_wrapper(
-        "relay-mesh-icon-mono-light.png",
+        asset_path("relay-mesh-icon-mono-light.png"),
         launcher_mono_light.width,
         launcher_mono_light.height,
-        public_dir / "relay-mesh-icon-mono-light.svg",
+        assets_dir / "relay-mesh-icon-mono-light.svg",
     )
+
+    legacy_root_files = (
+        "relay-mesh-lockup.png",
+        "relay-mesh-lockup-light.png",
+        "relay-mesh-lockup-dark.png",
+        "relay-mesh-lockup-mono-dark.png",
+        "relay-mesh-lockup-mono-light.png",
+        "relay-mesh-mark.png",
+        "relay-mesh-mark-light.png",
+        "relay-mesh-mark-dark.png",
+        "relay-mesh-mark-mono-dark.png",
+        "relay-mesh-mark-mono-light.png",
+        "relay-mesh-icon.png",
+        "relay-mesh-icon-light.png",
+        "relay-mesh-icon-dark.png",
+        "relay-mesh-icon-mono-dark.png",
+        "relay-mesh-icon-mono-light.png",
+        "relay-mesh-mobile-logo-light.png",
+        "relay-mesh-mobile-logo-dark.png",
+        "relay-mesh-mark-light.svg",
+        "relay-mesh-mark-dark.svg",
+        "relay-mesh-mark-mono-dark.svg",
+        "relay-mesh-mark-mono-light.svg",
+        "relay-mesh-icon-mono-dark.svg",
+        "relay-mesh-icon-mono-light.svg",
+        "favicon-16x16.png",
+        "favicon-32x32.png",
+        "favicon-48x48.png",
+        "apple-touch-icon.png",
+    )
+    for file_name in legacy_root_files:
+        remove_if_exists(public_dir / file_name)
 
 
 def main() -> None:

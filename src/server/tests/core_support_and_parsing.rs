@@ -498,6 +498,7 @@
     pub(super) fn temp_static_dir(prefix: &str) -> PathBuf {
         let dir = std::env::temp_dir().join(format!("{prefix}-static-{}", nanoid!(8)));
         std::fs::create_dir_all(&dir).expect("create temp static dir");
+        std::fs::create_dir_all(dir.join("assets")).expect("create temp assets dir");
         std::fs::write(
             dir.join("index.html"),
             "<!doctype html><title>index</title>",
@@ -523,6 +524,31 @@
             "<!doctype html><title>registration-paused</title>",
         )
         .expect("write registration paused");
+        std::fs::write(
+            dir.join("assets/relay-mesh-lockup-light.png"),
+            b"fake-light-lockup",
+        )
+        .expect("write light lockup asset");
+        std::fs::write(
+            dir.join("assets/relay-mesh-lockup-dark.png"),
+            b"fake-dark-lockup",
+        )
+        .expect("write dark lockup asset");
+        std::fs::write(
+            dir.join("assets/relay-mesh-mark-light.svg"),
+            "<svg xmlns=\"http://www.w3.org/2000/svg\"></svg>",
+        )
+        .expect("write mark svg asset");
+        std::fs::write(
+            dir.join("assets/linuxdo-logo.svg"),
+            "<svg xmlns=\"http://www.w3.org/2000/svg\"></svg>",
+        )
+        .expect("write linuxdo svg asset");
+        std::fs::write(
+            dir.join("favicon.svg"),
+            "<svg xmlns=\"http://www.w3.org/2000/svg\"><image href=\"assets/relay-mesh-mark-light.png\"/></svg>",
+        )
+        .expect("write favicon svg");
         dir
     }
 

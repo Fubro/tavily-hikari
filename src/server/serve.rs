@@ -432,7 +432,6 @@ pub async fn serve(
             get(serve_registration_paused_shell),
         )
         .route("/favicon.svg", get(serve_favicon))
-        .route("/linuxdo-logo.svg", get(serve_linuxdo_logo))
         .route("/version.json", get(serve_version_json))
         .route("/manifest.webmanifest", get(serve_public_manifest))
         .route("/manifest-admin.webmanifest", get(serve_admin_manifest))

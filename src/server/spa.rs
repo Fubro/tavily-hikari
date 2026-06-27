@@ -91,12 +91,6 @@ async fn serve_favicon(State(state): State<Arc<AppState>>) -> Result<Response<Bo
     load_spa_response(state.as_ref(), "favicon.svg").await
 }
 
-async fn serve_linuxdo_logo(
-    State(state): State<Arc<AppState>>,
-) -> Result<Response<Body>, StatusCode> {
-    load_spa_response(state.as_ref(), "linuxdo-logo.svg").await
-}
-
 async fn serve_version_json(State(state): State<Arc<AppState>>) -> Result<Response<Body>, StatusCode> {
     load_spa_response(state.as_ref(), "version.json").await
 }

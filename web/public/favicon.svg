@@ -6,6 +6,6 @@
       .theme-dark { display: inline; }
     }
   </style>
-  <image class="theme-light" href="relay-mesh-mark-light.png" width="230" height="280" preserveAspectRatio="xMidYMid meet" />
-  <image class="theme-dark" href="relay-mesh-mark-dark.png" width="230" height="280" preserveAspectRatio="xMidYMid meet" />
+  <image class="theme-light" href="assets/relay-mesh-mark-light.png" width="230" height="280" preserveAspectRatio="xMidYMid meet" />
+  <image class="theme-dark" href="assets/relay-mesh-mark-dark.png" width="230" height="280" preserveAspectRatio="xMidYMid meet" />
 </svg>

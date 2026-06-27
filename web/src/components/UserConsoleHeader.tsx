@@ -334,14 +334,14 @@ export default function UserConsoleHeader(props: UserConsoleHeaderProps): JSX.El
           <div className="user-console-header-brandline">
             <span className="user-console-header-brand-mobile">
               <img
-                src="/relay-mesh-mobile-logo-light.png"
+                src="/assets/relay-mesh-mobile-logo-light.png"
                 alt="Tavily Hikari"
                 className="user-console-header-brand-mobile-mark user-console-header-brand-mobile-mark-light"
                 loading="eager"
                 decoding="async"
               />
               <img
-                src="/relay-mesh-mobile-logo-dark.png"
+                src="/assets/relay-mesh-mobile-logo-dark.png"
                 alt=""
                 aria-hidden="true"
                 className="user-console-header-brand-mobile-mark user-console-header-brand-mobile-mark-dark"

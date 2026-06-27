@@ -898,7 +898,7 @@ async fn embedded_public_assets_are_served_without_static_dir() {
         "version.json should expose a version string"
     );
 
-    for path in ["/favicon.svg", "/linuxdo-logo.svg"] {
+    for path in ["/favicon.svg", "/assets/linuxdo-logo.svg"] {
         let response = client
             .get(format!("http://127.0.0.1:{port}{path}"))
             .send()

@@ -4,7 +4,7 @@
 
 - Status: 已完成（快车道）
 - Created: 2026-06-24
-- Last: 2026-06-25
+- Last: 2026-06-27
 
 ## 背景 / 问题陈述
 
@@ -38,9 +38,12 @@
 - `web/package.json`
 - `web/scripts/**`
 - `web/*.html`
-- `web/public/relay-mesh-lockup*.png`
-- `web/public/relay-mesh-icon*.png`
-- `web/public/relay-mesh-mark*.{png,svg}`
+- `web/public/assets/relay-mesh-lockup*.png`
+- `web/public/assets/relay-mesh-icon*.png`
+- `web/public/assets/relay-mesh-mark*.{png,svg}`
+- `web/public/assets/linuxdo-logo.svg`
+- `web/public/assets/favicon-*.png`
+- `web/public/assets/apple-touch-icon.png`
 - `web/src/*main.tsx`
 - `web/src/api/runtime.ts`
 - `web/src/components/**`
@@ -48,9 +51,11 @@
 - `web/src/user-console/runtime.tsx`
 - `web/src/admin/AdminDashboardRuntime.tsx`
 - `docs-site/rspress.config.ts`
-- `docs-site/docs/public/relay-mesh-lockup*.png`
-- `docs-site/docs/public/relay-mesh-icon*.png`
-- `docs-site/docs/public/relay-mesh-mark*.{png,svg}`
+- `docs-site/docs/public/assets/relay-mesh-lockup*.png`
+- `docs-site/docs/public/assets/relay-mesh-icon*.png`
+- `docs-site/docs/public/assets/relay-mesh-mark*.{png,svg}`
+- `docs-site/docs/public/assets/favicon-*.png`
+- `docs-site/docs/public/assets/apple-touch-icon.png`
 - `src/server/spa.rs`
 - `src/server/serve.rs`
 - `docs/specs/README.md`
@@ -113,12 +118,15 @@
 - `web/dist/pwa/admin-*.png`
 - `web/dist/pwa/public-touch-icon.png`
 - `web/dist/pwa/admin-touch-icon.png`
-- `web/public/relay-mesh-lockup*.png`
-- `web/public/relay-mesh-icon*.png`
-- `web/public/relay-mesh-mark*.{png,svg}`
-- `docs-site/docs/public/relay-mesh-lockup*.png`
-- `docs-site/docs/public/relay-mesh-icon*.png`
-- `docs-site/docs/public/relay-mesh-mark*.{png,svg}`
+- `web/public/assets/relay-mesh-lockup*.png`
+- `web/public/assets/relay-mesh-icon*.png`
+- `web/public/assets/relay-mesh-mark*.{png,svg}`
+- `web/public/assets/linuxdo-logo.svg`
+- `web/public/assets/favicon-*.png`
+- `docs-site/docs/public/assets/relay-mesh-lockup*.png`
+- `docs-site/docs/public/assets/relay-mesh-icon*.png`
+- `docs-site/docs/public/assets/relay-mesh-mark*.{png,svg}`
+- `docs-site/docs/public/assets/favicon-*.png`
 
 ### 构建输入
 
@@ -132,6 +140,7 @@
 - Rust 静态服务必须可直出 `.webmanifest`、`sw-public.js`、`sw-admin.js` 与 `pwa/*` 图标资产。
 - `.webmanifest` 返回 `application/manifest+json`。
 - service worker 脚本必须可在浏览器直接访问。
+- owner-facing 品牌位统一通过 `/assets/*` 暴露；`/favicon.svg` 只作为站点 favicon 入口保留根路径合同。
 
 ## 验收标准（Acceptance Criteria）
 
@@ -182,6 +191,7 @@
 - `95768005+` Relay Mesh registration-paused 品牌入口：`docs/specs/2br7z-web-pwa-split-identities-offline-shells/assets/relay-mesh-registration-paused.png`
 - `95768005+` Relay Mesh docs-site 品牌入口：`docs/specs/2br7z-web-pwa-split-identities-offline-shells/assets/relay-mesh-docs-site.png`
 - `95768005+` Relay Mesh PWA/icon 导出预览：`docs/specs/2br7z-web-pwa-split-identities-offline-shells/assets/relay-mesh-pwa-icons.png` PR: include
+- `2026-06-27` 品牌静态资源 `/assets` 路由校准后的 admin 壳验证：`docs/specs/2br7z-web-pwa-split-identities-offline-shells/assets/relay-mesh-admin-shell-assets-route-fixed.png` PR: include
 
 ## 实现里程碑（Milestones / Delivery checklist）
 
@@ -206,3 +216,4 @@
 - 2026-06-24: 将统一离线提示 banner 图标从 `mdi:earth-off` 调整为更贴近无网络语义的 `mdi:web-off`，并更新对应视觉证据。
 - 2026-06-25: 将 split public/admin PWA 图标、touch icon 与站点 favicon 切换到经批准的 Relay Mesh lockup/icon 导出链，并同步接入 public/console/admin/docs-site 品牌位而不改变 PWA identity 合同。
 - 2026-06-25: 补齐 Relay Mesh light/dark/mono 变体、主题感知 favicon 与全尺寸 PWA icon 覆盖，并更新品牌资产导出预览证据。
+- 2026-06-27: 品牌静态资源合同统一收口到 `/assets/*`；根路径 Relay Mesh 与 LinuxDo 品牌资源退出长期公开路由，仅保留 `/favicon.svg` 作为站点入口。

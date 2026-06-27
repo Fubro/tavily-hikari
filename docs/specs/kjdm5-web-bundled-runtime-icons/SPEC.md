@@ -43,7 +43,7 @@
 ### Out of scope
 
 - `src/**` 后端与服务端静态资源路由。
-- `web/public/linuxdo-logo.svg` 的内容与 URL。
+- `web/public/assets/linuxdo-logo.svg` 的内容与 `/assets/linuxdo-logo.svg` URL。
 - `/favicon.svg` 的静态路径语义之外的品牌视觉内容。
 - 任意新的远程图标供应商或运行时 CDN 回退策略。
 

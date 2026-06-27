@@ -263,8 +263,8 @@ def main() -> None:
     ensure_not_empty("public", public_files)
     ensure_not_empty("admin", admin_files)
 
-    public_source_icon = WEB_ROOT / "public" / "relay-mesh-icon-light.png"
-    admin_source_icon = WEB_ROOT / "public" / "relay-mesh-icon-dark.png"
+    public_source_icon = WEB_ROOT / "public" / "assets" / "relay-mesh-icon-light.png"
+    admin_source_icon = WEB_ROOT / "public" / "assets" / "relay-mesh-icon-dark.png"
     public_icons = draw_icon(prefix="public", source_file=public_source_icon)
     admin_icons = draw_icon(prefix="admin", source_file=admin_source_icon)
     public_icon_files = collect_icon_files(public_icons)

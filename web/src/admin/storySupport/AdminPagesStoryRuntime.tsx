@@ -2619,7 +2619,7 @@ function formatSignedQuotaDelta(value: number): string {
 }
 
 function getUserTagIconSrc(icon: string | null | undefined): string | null {
-  return icon === 'linuxdo' ? '/linuxdo-logo.svg' : null
+  return icon === 'linuxdo' ? '/assets/linuxdo-logo.svg' : null
 }
 
 function isSystemUserTag(tag: { systemKey?: string | null; source?: string | null }): boolean {

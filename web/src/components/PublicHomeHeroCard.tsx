@@ -64,7 +64,7 @@ function PublicHomeHeroCard({
   const authStatusIcon = showAuthStatusUnavailable ? 'mdi:alert-circle-outline' : 'mdi:loading'
   const linuxDoContent = (
     <>
-      <img src="/linuxdo-logo.svg" alt={publicStrings.linuxDoLogin.logoAlt} width={20} height={20} />
+      <img src="/assets/linuxdo-logo.svg" alt={publicStrings.linuxDoLogin.logoAlt} width={20} height={20} />
       <span>{publicStrings.linuxDoLogin.button}</span>
     </>
   )

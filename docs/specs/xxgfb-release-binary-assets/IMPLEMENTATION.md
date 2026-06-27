@@ -4,7 +4,7 @@
 
 - `build.rs` 在 `web/dist` 存在时复制静态资源到 `OUT_DIR`，生成 `embedded_web_assets.rs`，并通过 `include_bytes!` 内嵌每个资源。
 - `src/web_assets.rs` 暴露内嵌资源查询入口。
-- SPA 服务路径改为统一从外部静态目录优先读取，找不到时回落到内嵌资源；`/assets/*`、`/favicon.svg`、`/linuxdo-logo.svg`、`/version.json` 与 HTML 页面共享这套读取逻辑。
+- SPA 服务路径改为统一从外部静态目录优先读取，找不到时回落到内嵌资源；`/assets/*`、`/favicon.svg`、`/version.json` 与 HTML 页面共享这套读取逻辑。
 - 版本检测同样保持外部静态目录优先，避免 `--static-dir` 覆盖部署时版本信息与实际服务的前端不一致。
 - `Dockerfile` 在 builder 阶段复制 `build.rs`，保证新增 Cargo build script 后容器构建路径仍可用；容器运行时继续通过 `WEB_STATIC_DIR=/srv/app/web` 使用镜像内静态目录。
 - release workflow 先在单独的 `web-assets` job 内构建一次 `web/dist` 并上传 `release-web-dist` artifact，随后 `docker-native` 与 `binary-native` 都只下载该 artifact 复用，不再各自重复 Bun 安装与前端构建。
@@ -26,7 +26,7 @@
 - `cargo test --locked --all-features embedded_admin_page_is_served_when_dev_open_admin_is_enabled -- --test-threads=1`
 - `cargo test version_detection_tests::static_dir_version_overrides_embedded_version`
 - `cargo clippy -- -D warnings`
-- Packaged release binary smoke: unpacked binary served `/health`, `/`, `/admin`, `/console`, `/version.json`, `/favicon.svg`, and `/linuxdo-logo.svg` without external static dir.
+- Packaged release binary smoke: unpacked binary served `/health`, `/`, `/admin`, `/console`, `/version.json`, `/favicon.svg`, and representative `/assets/*` brand assets without external static dir.
 - Portable binary linkage gate: unpacked `*-portable` binary passes `ldd` / `file` style verification without `glibc` / `OpenSSL` / `libsqlite3` runtime dependencies.
 - PR #312 checks on `1fd029f`: `Release intent label gate`, `Lint & Checks`, `Frontend Checks`, `Backend Tests`, `Build (Release)`, `Compose Smoke (ForwardAuth + Caddy)`, Docs Pages checks.
 - Codex review-loop on `1fd029f` found no remaining behavior or release-flow defects.

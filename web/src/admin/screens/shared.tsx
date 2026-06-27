@@ -152,7 +152,7 @@ type UserTagLike = Pick<AdminUserTagBinding, 'displayName' | 'icon' | 'systemKey
 
 export function getUserTagIconSrc(icon: string | null | undefined): string | null {
   if (icon === 'linuxdo') {
-    return '/linuxdo-logo.svg'
+    return '/assets/linuxdo-logo.svg'
   }
   return null
 }

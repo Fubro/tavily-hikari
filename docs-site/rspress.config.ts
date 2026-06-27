@@ -18,20 +18,20 @@ const localStorybookDevOrigin = process.env.VITE_STORYBOOK_DEV_ORIGIN?.trim() ??
 export default defineConfig({
   root: 'docs',
   base: docsBase,
-  icon: '/favicon.svg',
+  icon: assetWithBase('/favicon.svg'),
   logo: {
-    light: assetWithBase('/relay-mesh-lockup-light.png'),
-    dark: assetWithBase('/relay-mesh-lockup-dark.png'),
+    light: assetWithBase('/assets/relay-mesh-lockup-light.png'),
+    dark: assetWithBase('/assets/relay-mesh-lockup-dark.png'),
   },
   logoText: 'Tavily Hikari Docs',
   lang: 'en',
   head: [
     ['meta', { name: 'theme-color', content: '#7c3aed' }],
-    ['link', { rel: 'icon', type: 'image/svg+xml', href: assetWithBase('/relay-mesh-mark-light.svg'), media: '(prefers-color-scheme: light)' }],
-    ['link', { rel: 'icon', type: 'image/svg+xml', href: assetWithBase('/relay-mesh-mark-dark.svg'), media: '(prefers-color-scheme: dark)' }],
-    ['link', { rel: 'icon', type: 'image/png', sizes: '32x32', href: assetWithBase('/favicon-32x32.png') }],
-    ['link', { rel: 'icon', type: 'image/png', sizes: '16x16', href: assetWithBase('/favicon-16x16.png') }],
-    ['link', { rel: 'apple-touch-icon', href: assetWithBase('/apple-touch-icon.png') }],
+    ['link', { rel: 'icon', type: 'image/svg+xml', href: assetWithBase('/assets/relay-mesh-mark-light.svg'), media: '(prefers-color-scheme: light)' }],
+    ['link', { rel: 'icon', type: 'image/svg+xml', href: assetWithBase('/assets/relay-mesh-mark-dark.svg'), media: '(prefers-color-scheme: dark)' }],
+    ['link', { rel: 'icon', type: 'image/png', sizes: '32x32', href: assetWithBase('/assets/favicon-32x32.png') }],
+    ['link', { rel: 'icon', type: 'image/png', sizes: '16x16', href: assetWithBase('/assets/favicon-16x16.png') }],
+    ['link', { rel: 'apple-touch-icon', href: assetWithBase('/assets/apple-touch-icon.png') }],
   ],
   locales: [
     {
