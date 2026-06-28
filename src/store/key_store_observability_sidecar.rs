@@ -728,7 +728,6 @@ impl KeyStore {
                 self.backend_time.now_ts(),
             )
             .await?;
-            self.rebuild_server_pressure_buckets().await?;
             self.rebuild_request_log_catalog_rollups().await?;
             Ok::<(), ProxyError>(())
         }

@@ -1,6 +1,6 @@
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum ServerPressureBucketsRebuildOutcome {
-    Completed,
+    Completed { upper_bound_request_log_id: i64 },
     Cancelled,
 }
 
@@ -50,16 +50,6 @@ impl KeyStore {
         Ok(())
     }
 
-    pub(crate) async fn rebuild_server_pressure_buckets(&self) -> Result<(), ProxyError> {
-        match self
-            .rebuild_server_pressure_buckets_with_cancel(|| true)
-            .await?
-        {
-            ServerPressureBucketsRebuildOutcome::Completed
-            | ServerPressureBucketsRebuildOutcome::Cancelled => Ok(()),
-        }
-    }
-
     pub(crate) async fn rebuild_server_pressure_buckets_with_cancel<F>(
         &self,
         should_continue: F,
@@ -69,15 +59,36 @@ impl KeyStore {
     {
         self.ensure_server_pressure_bucket_schema().await?;
         if self.uses_legacy_single_db_observability_compatibility() {
-            return Ok(ServerPressureBucketsRebuildOutcome::Completed);
+            return Ok(ServerPressureBucketsRebuildOutcome::Completed {
+                upper_bound_request_log_id: 0,
+            });
         }
         if !self.request_logs_support_server_pressure_rebuild().await? {
-            return Ok(ServerPressureBucketsRebuildOutcome::Completed);
+            return Ok(ServerPressureBucketsRebuildOutcome::Completed {
+                upper_bound_request_log_id: 0,
+            });
         }
 
         let updated_at = self.backend_time.now_ts();
         let five_minute_since = updated_at.saturating_sub(48 * SECS_PER_HOUR);
         let hour_since = updated_at.saturating_sub(8 * SECS_PER_DAY);
+        let upper_bound_request_log_id = sqlx::query_scalar::<_, i64>(
+            r#"
+            SELECT COALESCE(MAX(id), 0)
+            FROM observability.request_logs
+            WHERE visibility = ?
+              AND created_at >= ?
+              AND request_user_id IS NOT NULL
+              AND counts_business_quota = 1
+              AND upstream_operation IS NOT NULL
+              AND result_status != ?
+            "#,
+        )
+        .bind(REQUEST_LOG_VISIBILITY_VISIBLE)
+        .bind(five_minute_since)
+        .bind(OUTCOME_QUOTA_EXHAUSTED)
+        .fetch_one(&self.pool)
+        .await?;
         let insert_sql = r#"
             INSERT INTO observability.server_pressure_buckets (
                 bucket_kind,
@@ -115,6 +126,7 @@ impl KeyStore {
                   AND counts_business_quota = 1
                   AND upstream_operation IS NOT NULL
                   AND result_status != ?
+                  AND id <= ?
                 GROUP BY bucket_start
                 ORDER BY bucket_start
                 "#,
@@ -126,6 +138,7 @@ impl KeyStore {
             .bind(REQUEST_LOG_VISIBILITY_VISIBLE)
             .bind(five_minute_since)
             .bind(OUTCOME_QUOTA_EXHAUSTED)
+            .bind(upper_bound_request_log_id)
             .fetch_all(&mut *conn)
             .await?;
             let hour_rows = sqlx::query_as::<_, (i64, i64, i64)>(
@@ -147,6 +160,7 @@ impl KeyStore {
                   AND counts_business_quota = 1
                   AND upstream_operation IS NOT NULL
                   AND result_status != ?
+                  AND id <= ?
                 GROUP BY bucket_start
                 ORDER BY bucket_start
                 "#,
@@ -156,6 +170,7 @@ impl KeyStore {
             .bind(REQUEST_LOG_VISIBILITY_VISIBLE)
             .bind(hour_since)
             .bind(OUTCOME_QUOTA_EXHAUSTED)
+            .bind(upper_bound_request_log_id)
             .fetch_all(&mut *conn)
             .await?;
 
@@ -192,12 +207,18 @@ impl KeyStore {
                 return Ok(ServerPressureBucketsRebuildOutcome::Cancelled);
             }
             sqlx::query("COMMIT").execute(&mut *conn).await?;
-            Ok(ServerPressureBucketsRebuildOutcome::Completed)
+            Ok(ServerPressureBucketsRebuildOutcome::Completed {
+                upper_bound_request_log_id,
+            })
         }
         .await;
         match result {
-            Ok(ServerPressureBucketsRebuildOutcome::Completed) => {
-                Ok(ServerPressureBucketsRebuildOutcome::Completed)
+            Ok(ServerPressureBucketsRebuildOutcome::Completed {
+                upper_bound_request_log_id,
+            }) => {
+                Ok(ServerPressureBucketsRebuildOutcome::Completed {
+                    upper_bound_request_log_id,
+                })
             }
             Ok(ServerPressureBucketsRebuildOutcome::Cancelled) => {
                 let _ = sqlx::query("ROLLBACK").execute(&mut *conn).await;

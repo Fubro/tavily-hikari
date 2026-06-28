@@ -591,15 +591,17 @@ impl TavilyProxy {
             low_quota_depletion_threshold: options.low_quota_depletion_threshold,
             forward_proxy_runtime_started: Arc::new(AtomicBool::new(false)),
             forward_proxy_runtime_transition_lock: Arc::new(Mutex::new(())),
+            user_business_calls_backfill_started: Arc::new(AtomicBool::new(false)),
             server_pressure_rebuild_started: Arc::new(AtomicBool::new(false)),
             server_pressure_rebuild_generation: Arc::new(AtomicU64::new(0)),
+            server_pressure_rebuild_buffered_events: Arc::new(Mutex::new(Vec::new())),
             health_readiness_grace_until: backend_time
                 .deadline_after(options.health_readiness_grace_period),
             backend_time,
         };
+        proxy.user_business_calls_1h_window.backfill_recent().await?;
         proxy.spawn_ha_state_coalescer();
         proxy.spawn_request_stats_coalescer();
-        proxy.user_business_calls_1h_window.backfill_recent().await?;
         info!(
             component = "forward_proxy",
             event = "startup_runtime_graph_deferred",
@@ -718,7 +720,6 @@ impl TavilyProxy {
             );
             let manager = self.forward_proxy.lock().await;
             let manager_endpoint_count = manager.endpoints.len() as u64;
-            forward_proxy::sync_manager_runtime_to_store(&self.key_store, &manager).await?;
             let final_memory = capture_runtime_memory_snapshot();
             info!(
                 component = "forward_proxy",
@@ -907,7 +908,58 @@ impl TavilyProxy {
                     })
                     .await
                 {
-                    Ok(crate::store::ServerPressureBucketsRebuildOutcome::Completed) => {
+                    Ok(crate::store::ServerPressureBucketsRebuildOutcome::Completed {
+                        upper_bound_request_log_id,
+                    }) => {
+                        let buffered_events = {
+                            let mut buffered =
+                                proxy.server_pressure_rebuild_buffered_events.lock().await;
+                            let drained = std::mem::take(&mut *buffered);
+                            let (matching, retained): (Vec<_>, Vec<_>) = drained
+                                .into_iter()
+                                .partition(|event| event.generation == generation);
+                            *buffered = retained;
+                            matching
+                        };
+                        for event in buffered_events {
+                            if event
+                                .request_log_id
+                                .is_some_and(|request_log_id| {
+                                    request_log_id <= upper_bound_request_log_id
+                                })
+                            {
+                                continue;
+                            }
+                            if !proxy.server_pressure_buckets_rebuild_is_active(generation) {
+                                return;
+                            }
+                            if let Err(err) = proxy
+                                .key_store
+                                .upsert_server_pressure_event(
+                                    event.created_at,
+                                    &event.result_status,
+                                )
+                                .await
+                            {
+                                if proxy
+                                    .server_pressure_rebuild_generation
+                                    .load(Ordering::SeqCst)
+                                    == generation
+                                {
+                                    proxy
+                                        .server_pressure_rebuild_started
+                                        .store(false, Ordering::SeqCst);
+                                }
+                                tracing::warn!(
+                                    component = "analysis_pressure",
+                                    event = "server_pressure_buckets_rebuild_failed",
+                                    attempt = attempt + 1,
+                                    err = %err,
+                                    "server pressure buckets rebuild failed while replaying live buffered events"
+                                );
+                                return;
+                            }
+                        }
                         if proxy
                             .server_pressure_rebuild_generation
                             .load(Ordering::SeqCst)
@@ -975,6 +1027,46 @@ impl TavilyProxy {
                         return;
                     }
                 }
+            }
+        });
+        true
+    }
+
+    pub fn spawn_user_business_calls_1h_backfill_once(&self) -> bool {
+        if self
+            .user_business_calls_backfill_started
+            .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+            .is_err()
+        {
+            return false;
+        }
+
+        let proxy = self.clone();
+        tokio::spawn(async move {
+            let started = Instant::now();
+            tracing::info!(
+                component = "startup",
+                event = "user_business_calls_1h_backfill_started",
+                "backfilling recent user business-call windows after listener readiness"
+            );
+            let result = proxy.user_business_calls_1h_window.backfill_recent().await;
+            proxy
+                .user_business_calls_backfill_started
+                .store(false, Ordering::SeqCst);
+            match result {
+                Ok(()) => tracing::info!(
+                    component = "startup",
+                    event = "user_business_calls_1h_backfill_completed",
+                    elapsed_ms = started.elapsed().as_millis() as u64,
+                    "user business-call backfill completed"
+                ),
+                Err(err) => tracing::warn!(
+                    component = "startup",
+                    event = "user_business_calls_1h_backfill_failed",
+                    elapsed_ms = started.elapsed().as_millis() as u64,
+                    err = %err,
+                    "user business-call backfill failed"
+                ),
             }
         });
         true

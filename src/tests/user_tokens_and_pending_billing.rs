@@ -1031,6 +1031,8 @@ async fn startup_migration_preserves_legacy_mcp_session_retry_key_effects() {
     let _ = std::fs::remove_file(db_path);
 }
 
+include!("user_tokens_and_pending_billing_effect_bucket_cases.rs");
+
 #[tokio::test]
 async fn request_log_catalog_rollup_feeds_catalog_and_legacy_page() {
     let _guard = env_lock().lock_owned().await;

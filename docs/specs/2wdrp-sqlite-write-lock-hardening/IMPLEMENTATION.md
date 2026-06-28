@@ -59,6 +59,13 @@
   roles trigger one background rebuild after the listener is already ready, invalidate the cached
   analysis-pressure snapshot on success, and isolate rebuild failure to logs instead of business
   readiness.
+- `user_business_calls_1h` now rehydrates during proxy construction again so owner-facing dashboard
+  summaries are populated before strict serving readiness can turn green. The rehydrate path keeps
+  the cheap indexed startup snapshot, optional `request_log_id` dedupe, and upper-bound merge
+  logic so later background refreshes can still run safely on HA promotion without double-counting.
+- Request-log effect-bucket repair now short-circuits via a meta marker plus a cheap indexed
+  precheck, and the rewrite plus marker commit now share one transaction so partial restarts cannot
+  leave mixed migrated/unmarked state behind.
 - The same post-ready rebuild hook now runs on later HA promotions that restore a
   `provisional_master` / `full_master` serving role, including the shared admin/internal finalize
   path that persists HA status snapshots.
@@ -72,9 +79,12 @@
   5-8 URL subscription config no longer stretches strict readiness across multiple 60-second
   timeout batches before xray/runtime can finish initializing.
 - The container image `HEALTHCHECK` now polls the stricter `/health` contract with
-  `start-period=20s`, `interval=5s`, `timeout=5s`, and `retries=18`, while a builder-compatible
-  healthcheck gate keeps the first green transition near the intended 20-second floor without
-  relying on Docker 25-only `--start-interval`.
+  `start-period=20s`, `interval=5s`, `timeout=5s`, and `retries=18`, and the healthcheck command
+  itself now probes only `/health`. Container healthy therefore flips on the first successful
+  strict `/health` probe instead of waiting behind an extra fixed 20-second gate.
+- Forward-proxy startup also stopped doing one redundant runtime-store write on the happy path:
+  runtime/xray sync persists the snapshot once, and startup no longer immediately replays the same
+  snapshot back into SQLite a second time before readiness.
 - LinuxDo system tag binding backfill now uses a single indexed startup precheck and only repairs
   mismatched rows before readiness. A background scheduler periodically refreshes the bindings and
   quota snapshots after the service is already listening.

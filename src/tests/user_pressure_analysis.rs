@@ -360,6 +360,14 @@ async fn analysis_pressure_snapshot_background_rebuild_rehydrates_server_pressur
         !reopened.spawn_server_pressure_buckets_rebuild_once(),
         "background rebuild scheduling should be idempotent"
     );
+    assert!(
+        reopened.spawn_user_business_calls_1h_backfill_once(),
+        "reopened proxy should also schedule one business-call backfill"
+    );
+    assert!(
+        !reopened.spawn_user_business_calls_1h_backfill_once(),
+        "business-call backfill scheduling should be idempotent"
+    );
 
     tokio::time::timeout(Duration::from_secs(5), async {
         loop {
@@ -389,10 +397,22 @@ async fn analysis_pressure_snapshot_background_rebuild_rehydrates_server_pressur
         "expected rebuilt server pressure buckets, got {bucket_count}"
     );
 
-    let snapshot = reopened
-        .analysis_pressure_snapshot()
-        .await
-        .expect("analysis pressure snapshot after backfill");
+    let snapshot = tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            let snapshot = reopened
+                .analysis_pressure_snapshot()
+                .await
+                .expect("analysis pressure snapshot after backfill");
+            if snapshot.current_user_distribution.rows.len() == 1
+                && snapshot.current_user_distribution.rows[0].pressure == 2
+            {
+                return snapshot;
+            }
+            tokio::time::sleep(Duration::from_millis(25)).await;
+        }
+    })
+    .await
+    .expect("analysis pressure user distribution should recover after background tasks");
     let current_point = snapshot
         .server_24h
         .current

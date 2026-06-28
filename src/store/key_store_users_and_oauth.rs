@@ -1347,6 +1347,7 @@ impl KeyStore {
             .await;
         Ok(build_user_business_call_event_write(
             request_user_id,
+            request_log_id,
             counts_business_quota,
             upstream_operation_for_business,
             result_status,
@@ -1531,6 +1532,7 @@ impl KeyStore {
             log_id,
             build_user_business_call_event_write(
                 request_user_id,
+                request_log_id,
                 counts_business_quota,
                 upstream_operation_for_business,
                 result_status,
@@ -2585,6 +2587,7 @@ impl KeyStore {
 
 fn build_user_business_call_event_write(
     request_user_id: Option<String>,
+    request_log_id: Option<i64>,
     counts_business_quota: i64,
     upstream_operation: Option<String>,
     result_status: &str,
@@ -2594,12 +2597,15 @@ fn build_user_business_call_event_write(
     if counts_business_quota != 1 {
         return None;
     }
+    // Only request-log-backed upstream calls participate in business-call and
+    // server-pressure live windows; metadata-free token logs stay excluded.
     upstream_operation.as_ref()?;
     if result_status == OUTCOME_QUOTA_EXHAUSTED {
         return None;
     }
     Some(UserBusinessCallEventWrite {
         user_id,
+        request_log_id,
         created_at,
         result_status: result_status.to_string(),
     })

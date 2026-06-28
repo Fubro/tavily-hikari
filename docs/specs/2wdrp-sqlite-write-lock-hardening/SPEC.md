@@ -102,6 +102,11 @@ source when a usable persisted runtime already exists.
   first healthy image status. Once the process is already serving business traffic, it may run once
   as a best-effort background rebuild whose failure is isolated to logs/observability and does not
   turn serving `/health` red.
+- Non-core startup repairs must stay partitioned by contract. `user_business_calls_1h` history
+  backfill is an owner-facing readiness view and must be cheaply rehydrated before serving starts
+  reporting ready, while one-time request-log effect-bucket repair remains a startup maintenance
+  step that must stay cheap/no-op aware on steady-state restarts and must not decide serving
+  `/health`.
 - If a later HA transition promotes the process back into a business-serving role, the same
   best-effort `server_pressure_buckets` rebuild must be scheduled for that serving tenure too.
 - If HA demotes the process out of a business-serving role while that rebuild is still pending, the
@@ -109,8 +114,8 @@ source when a usable persisted runtime already exists.
   recovery process.
 - The default image `HEALTHCHECK` must align with the stricter serving contract by using
   `start-period=20s`, `interval=5s`, `timeout=5s`, and `retries=18`, while the healthcheck command
-  itself keeps the first green transition at or after the intended 20-second hold window without
-  depending on Docker 25-only flags.
+  itself probes only the strict `/health` contract. The first healthy transition must happen on the
+  first successful strict `/health` probe instead of waiting for an extra fixed startup hold window.
 - Scheduled job records must preserve the logical job type and record the trigger source separately
   as `scheduler`, `manual`, or `auto`. Manual runs must not be encoded by appending suffixes to
   `job_type`.
@@ -247,10 +252,10 @@ source when a usable persisted runtime already exists.
   startup.
 - If the node is demoted to `standby` / `recovery` before that rebuild finishes, the detached task
   exits without committing new `server_pressure_buckets` rows from the non-serving role.
-- Under mock/local upstream startup, the image `HEALTHCHECK` becomes healthy only after the stricter
-  serving `/health` is truly green and remains stable within the
-  builder-compatible 20-second minimum-gate plus `start-period=20s/interval=5s/timeout=5s/retries=18`
-  timing contract.
+- Under mock/local upstream startup, the image `HEALTHCHECK` becomes healthy on the first
+  successful probe after the stricter serving `/health` is truly green, with no extra fixed
+  20-second minimum gate layered on top of
+  `start-period=20s/interval=5s/timeout=5s/retries=18`.
 - With a large backlog of old request logs, one scheduler pass records bounded progress instead of
   running indefinitely; later catch-up passes eventually remove all rows older than the retention
   threshold.

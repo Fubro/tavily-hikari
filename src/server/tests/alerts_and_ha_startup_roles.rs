@@ -79,6 +79,19 @@ async fn persist_ha_status_snapshot_spawns_post_ready_pressure_rebuild_for_servi
     )
     .await
     .expect("proxy created");
+    let user = proxy
+        .upsert_oauth_account(&OAuthAccountProfile {
+            provider: "github".to_string(),
+            provider_user_id: "ha-post-ready-rebuild".to_string(),
+            username: Some("ha_post_ready_rebuild".to_string()),
+            name: Some("HA Post Ready Rebuild".to_string()),
+            avatar_template: None,
+            active: true,
+            trust_level: None,
+            raw_payload_json: None,
+        })
+        .await
+        .expect("upsert post-ready rebuild user");
     let pool = connect_sqlite_test_pool(&db_str).await;
     let now = proxy.backend_time().now_ts();
     sqlx::query(
@@ -100,7 +113,7 @@ async fn persist_ha_status_snapshot_spawns_post_ready_pressure_rebuild_for_servi
         "#,
     )
     .bind("success")
-    .bind("ha-rebuild-user")
+    .bind(&user.user_id)
     .bind("search")
     .bind(tavily_hikari::REQUEST_LOG_VISIBILITY_VISIBLE)
     .bind(now - 60)
@@ -177,6 +190,21 @@ async fn persist_ha_status_snapshot_spawns_post_ready_pressure_rebuild_for_servi
     })
     .await
     .expect("serving HA snapshot should trigger background pressure rebuild");
+
+    tokio::time::timeout(Duration::from_secs(8), async {
+        loop {
+            let summary = proxy
+                .user_dashboard_summary(&user.user_id, None)
+                .await
+                .expect("load user dashboard summary after post-ready backfill");
+            if summary.business_calls_1h.total_count == 1 {
+                return summary;
+            }
+            tokio::time::sleep(Duration::from_millis(25)).await;
+        }
+    })
+    .await
+    .expect("serving HA snapshot should trigger background business-call backfill");
 
     pool.close().await;
     let _ = std::fs::remove_file(&db_path);

@@ -19,8 +19,9 @@ else
 fi
 
 SCENARIO="${SCENARIO:-positive}"
-POSITIVE_MIN_HEALTHY_SECS="${POSITIVE_MIN_HEALTHY_SECS:-20}"
+POSITIVE_MIN_HEALTHY_SECS="${POSITIVE_MIN_HEALTHY_SECS:-0}"
 POSITIVE_MAX_HEALTHY_SECS="${POSITIVE_MAX_HEALTHY_SECS:-35}"
+POSITIVE_MAX_HEALTHY_LAG_SECS="${POSITIVE_MAX_HEALTHY_LAG_SECS:-10}"
 NEGATIVE_OBSERVE_SECS="${NEGATIVE_OBSERVE_SECS:-35}"
 
 TEMP_ROOT="${RUNNER_TEMP:-$(mktemp -d)}"
@@ -68,6 +69,7 @@ POSITIVE_CONTAINER_NAME="${SMOKE_CONTAINER_NAME_PREFIX:-tavily-hikari-health}-po
 NEGATIVE_SEED_CONTAINER_NAME="${SMOKE_CONTAINER_NAME_PREFIX:-tavily-hikari-health}-negative-seed-${MOCK_PORT}-${PROXY_PORT}"
 NEGATIVE_CONTAINER_NAME="${SMOKE_CONTAINER_NAME_PREFIX:-tavily-hikari-health}-negative-${MOCK_PORT}-${PROXY_PORT}"
 NEGATIVE_SHARE_LINK="${NEGATIVE_SHARE_LINK:-vless://0688fa59-e971-4278-8c03-4b35821a71dc@health-smoke.example.com:443?encryption=none#HealthSmoke}"
+SMOKE_DOCKER_RUN_ARGS="${SMOKE_DOCKER_RUN_ARGS:-}"
 MOCK_PID=""
 
 print_section() {
@@ -240,6 +242,11 @@ run_proxy_container() {
   local data_dir="$2"
   shift 2
   mkdir -p "${data_dir}"
+  local extra_run_args=()
+  if [[ -n "${SMOKE_DOCKER_RUN_ARGS}" ]]; then
+    # shellcheck disable=SC2206
+    extra_run_args=(${SMOKE_DOCKER_RUN_ARGS})
+  fi
   docker run -d --rm \
     --name "${name}" \
     --user "$(id -u):$(id -g)" \
@@ -251,6 +258,7 @@ run_proxy_container() {
     -e TAVILY_USAGE_BASE="http://host.docker.internal:${MOCK_PORT}" \
     -e DEV_OPEN_ADMIN=true \
     -e PROXY_DB_PATH=/srv/app/data/tavily_proxy.db \
+    "${extra_run_args[@]}" \
     "$@" \
     "${LOCAL_SMOKE_IMAGE}" \
     >/dev/null
@@ -346,6 +354,10 @@ run_positive_scenario() {
   fi
   if (( healthy_at < ready_at )); then
     echo "container health became healthy before /health was ready: ready_at=${ready_at}s healthy_at=${healthy_at}s" >&2
+    return 1
+  fi
+  if (( healthy_at - ready_at > POSITIVE_MAX_HEALTHY_LAG_SECS )); then
+    echo "container health lagged strict /health too long: ready_at=${ready_at}s healthy_at=${healthy_at}s lag=$((healthy_at - ready_at))s" >&2
     return 1
   fi
   if [[ "$(cat "${body_file}")" != "ok" ]]; then

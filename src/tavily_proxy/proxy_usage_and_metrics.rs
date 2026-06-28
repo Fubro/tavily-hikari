@@ -402,11 +402,24 @@ impl TavilyProxy {
                 UserBusinessCallOutcome::Failure
             };
             self.user_business_calls_1h_window
-                .record_event(&event.user_id, event.created_at, outcome)
+                .record_event(&event.user_id, event.request_log_id, event.created_at, outcome)
                 .await;
-            self.key_store
-                .upsert_server_pressure_event(event.created_at, &event.result_status)
-                .await?;
+            if self.server_pressure_rebuild_started.load(Ordering::SeqCst) {
+                let generation = self
+                    .server_pressure_rebuild_generation
+                    .load(Ordering::SeqCst);
+                let mut buffered = self.server_pressure_rebuild_buffered_events.lock().await;
+                buffered.push(ServerPressureBufferedEvent {
+                    generation,
+                    request_log_id: event.request_log_id,
+                    created_at: event.created_at,
+                    result_status: event.result_status.clone(),
+                });
+            } else {
+                self.key_store
+                    .upsert_server_pressure_event(event.created_at, &event.result_status)
+                    .await?;
+            }
         }
         Ok(())
     }
@@ -904,11 +917,24 @@ impl TavilyProxy {
                 UserBusinessCallOutcome::Failure
             };
             self.user_business_calls_1h_window
-                .record_event(&event.user_id, event.created_at, outcome)
+                .record_event(&event.user_id, event.request_log_id, event.created_at, outcome)
                 .await;
-            self.key_store
-                .upsert_server_pressure_event(event.created_at, &event.result_status)
-                .await?;
+            if self.server_pressure_rebuild_started.load(Ordering::SeqCst) {
+                let generation = self
+                    .server_pressure_rebuild_generation
+                    .load(Ordering::SeqCst);
+                let mut buffered = self.server_pressure_rebuild_buffered_events.lock().await;
+                buffered.push(ServerPressureBufferedEvent {
+                    generation,
+                    request_log_id: event.request_log_id,
+                    created_at: event.created_at,
+                    result_status: event.result_status.clone(),
+                });
+            } else {
+                self.key_store
+                    .upsert_server_pressure_event(event.created_at, &event.result_status)
+                    .await?;
+            }
         }
         Ok(log_id)
     }

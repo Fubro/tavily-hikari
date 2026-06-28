@@ -247,8 +247,37 @@ impl KeyStore {
         Ok(())
     }
 
+    async fn log_effect_bucket_migration_needed_for_table(
+        &self,
+        table: &str,
+        target_column: &str,
+        legacy_effect_codes: &[&str],
+    ) -> Result<bool, ProxyError> {
+        let placeholders = std::iter::repeat_n("?", legacy_effect_codes.len())
+            .collect::<Vec<_>>()
+            .join(", ");
+        let sql = format!(
+            "SELECT 1 FROM {table}
+             WHERE key_effect_code IN ({placeholders})
+               AND ({target_column} IS NULL OR TRIM({target_column}) = '' OR {target_column} = 'none')
+             LIMIT 1"
+        );
+        let mut query = sqlx::query_scalar::<_, i64>(&sql);
+        for code in legacy_effect_codes {
+            query = query.bind(*code);
+        }
+        Ok(query.fetch_optional(&self.pool).await?.is_some())
+    }
 
     async fn migrate_log_effect_buckets(&self) -> Result<(), ProxyError> {
+        if self
+            .get_meta_i64(META_KEY_REQUEST_LOG_EFFECT_BUCKET_MIGRATION_V1_DONE)
+            .await?
+            == Some(1)
+        {
+            return Ok(());
+        }
+        let request_logs_table = "observability.request_logs";
         let binding_codes = [
             KEY_EFFECT_HTTP_PROJECT_AFFINITY_BOUND,
             KEY_EFFECT_HTTP_PROJECT_AFFINITY_REUSED,
@@ -292,8 +321,42 @@ impl KeyStore {
             .iter()
             .all(|code| is_key_effect_code(code))
         );
+        let needs_migration = self
+            .log_effect_bucket_migration_needed_for_table(
+                request_logs_table,
+                "binding_effect_code",
+                &binding_codes,
+            )
+            .await?
+            || self
+                .log_effect_bucket_migration_needed_for_table(
+                    request_logs_table,
+                    "selection_effect_code",
+                    &selection_codes,
+                )
+                .await?
+            || self
+                .log_effect_bucket_migration_needed_for_table(
+                    "auth_token_logs",
+                    "binding_effect_code",
+                    &binding_codes,
+                )
+                .await?
+            || self
+                .log_effect_bucket_migration_needed_for_table(
+                    "auth_token_logs",
+                    "selection_effect_code",
+                    &selection_codes,
+                )
+                .await?;
+        if !needs_migration {
+            self.set_meta_i64(META_KEY_REQUEST_LOG_EFFECT_BUCKET_MIGRATION_V1_DONE, 1)
+                .await?;
+            return Ok(());
+        }
 
-        for table in ["request_logs", "auth_token_logs"] {
+        let mut tx = self.pool.begin().await?;
+        for table in [request_logs_table, "auth_token_logs"] {
             let binding_sql = format!(
                 "UPDATE {table}
                  SET binding_effect_code = key_effect_code,
@@ -301,8 +364,7 @@ impl KeyStore {
                      key_effect_code = 'none',
                      key_effect_summary = NULL
                  WHERE key_effect_code IN (?, ?, ?, ?, ?, ?)
-                   AND (binding_effect_code IS NULL OR TRIM(binding_effect_code) = '' OR binding_effect_code = 'none')
-                   AND (selection_effect_code IS NULL OR TRIM(selection_effect_code) = '' OR selection_effect_code = 'none')"
+                   AND (binding_effect_code IS NULL OR TRIM(binding_effect_code) = '' OR binding_effect_code = 'none')"
             );
             sqlx::query(&binding_sql)
                 .bind(binding_codes[0])
@@ -311,7 +373,7 @@ impl KeyStore {
                 .bind(binding_codes[3])
                 .bind(binding_codes[4])
                 .bind(binding_codes[5])
-                .execute(&self.pool)
+                .execute(&mut *tx)
                 .await?;
 
             let selection_sql = format!(
@@ -321,7 +383,6 @@ impl KeyStore {
                      key_effect_code = 'none',
                      key_effect_summary = NULL
                  WHERE key_effect_code IN (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                   AND (binding_effect_code IS NULL OR TRIM(binding_effect_code) = '' OR binding_effect_code = 'none')
                    AND (selection_effect_code IS NULL OR TRIM(selection_effect_code) = '' OR selection_effect_code = 'none')"
             );
             sqlx::query(&selection_sql)
@@ -334,11 +395,25 @@ impl KeyStore {
                 .bind(selection_codes[6])
                 .bind(selection_codes[7])
                 .bind(selection_codes[8])
-                .execute(&self.pool)
+                .execute(&mut *tx)
                 .await?;
         }
+        set_meta_i64_executor(
+            &mut *tx,
+            META_KEY_REQUEST_LOG_EFFECT_BUCKET_MIGRATION_V1_DONE,
+            1,
+        )
+        .await?;
+        tx.commit().await?;
 
         Ok(())
+    }
+
+    #[cfg(test)]
+    pub(crate) async fn rerun_log_effect_bucket_migration_for_test(
+        &self,
+    ) -> Result<(), ProxyError> {
+        self.migrate_log_effect_buckets().await
     }
 
     fn push_request_logs_scope<'a>(

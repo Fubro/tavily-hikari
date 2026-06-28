@@ -154,6 +154,7 @@
         "tests::usage_series_and_backfills::startup_",
         "tests::account_usage_rollup_request_days::startup_",
         "tests::user_tokens_and_pending_billing::startup_",
+        "tests::user_tokens_and_pending_billing::effect_",
         "tests::user_tokens_and_pending_billing::pending_",
         "tests::proxy_affinity_and_summary::proxy_",
         "tests::request_rollup::proxy_",
