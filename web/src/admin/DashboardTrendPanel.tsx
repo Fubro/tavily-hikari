@@ -246,11 +246,19 @@ export default function DashboardTrendPanel({
   const isDeltaMode = isDeltaChartMode(chartMode)
   const isAreaMode = isAreaChartMode(chartMode)
   const rollingRangeSlots = visibleWindow.slots
-  const naturalDayRangeSlots = useMemo(
+  const fixedNaturalDayRangeSlots = useMemo(
+    () => buildAggregatedHourlySlots(
+      hourlyRequestWindow,
+      summaryWindows.today_start,
+      summaryWindows.today_period_end ?? summaryWindows.today_end,
+    ).slots,
+    [hourlyRequestWindow, summaryWindows.today_end, summaryWindows.today_period_end, summaryWindows.today_start],
+  )
+  const elapsedNaturalDayRangeSlots = useMemo(
     () => buildAggregatedHourlySlots(hourlyRequestWindow, summaryWindows.today_start, summaryWindows.today_end).slots,
     [hourlyRequestWindow, summaryWindows.today_end, summaryWindows.today_start],
   )
-  const rangeSlots = isDeltaMode ? naturalDayRangeSlots : isAreaMode ? rollingRangeSlots : naturalDayRangeSlots
+  const rangeSlots = isDeltaMode ? elapsedNaturalDayRangeSlots : isAreaMode ? rollingRangeSlots : fixedNaturalDayRangeSlots
   const comparisonRangeSlots = useMemo(
     () => buildAggregatedHourlySlots(hourlyRequestWindow, comparisonRangeStart, comparisonRangeEnd).slots,
     [comparisonRangeEnd, comparisonRangeStart, hourlyRequestWindow],
