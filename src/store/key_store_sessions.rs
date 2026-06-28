@@ -790,10 +790,9 @@ impl KeyStore {
     pub(crate) async fn update_account_quota_limits(
         &self,
         user_id: &str,
-        hourly_any_limit: i64,
-        hourly_limit: i64,
-        daily_limit: i64,
-        monthly_limit: i64,
+        business_calls_1h_limit: i64,
+        daily_credits_limit: i64,
+        monthly_credits_limit: i64,
     ) -> Result<bool, ProxyError> {
         let exists = sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM users WHERE id = ?")
             .bind(user_id)
@@ -806,10 +805,9 @@ impl KeyStore {
         let defaults = AccountQuotaLimits::legacy_defaults();
         let current = self.ensure_account_quota_limits(user_id).await?;
         let requested = AccountQuotaLimits {
-            hourly_any_limit,
-            hourly_limit,
-            daily_limit,
-            monthly_limit,
+            business_calls_1h_limit,
+            daily_credits_limit,
+            monthly_credits_limit,
             inherits_defaults: false,
         };
         let inherits_defaults = if current.inherits_defaults && requested.same_limits_as(&defaults)
@@ -823,28 +821,25 @@ impl KeyStore {
         sqlx::query(
             r#"INSERT INTO account_quota_limits (
                     user_id,
-                    hourly_any_limit,
-                    hourly_limit,
-                    daily_limit,
-                    monthly_limit,
+                    business_calls_1h_limit,
+                    daily_credits_limit,
+                    monthly_credits_limit,
                     inherits_defaults,
                     created_at,
                     updated_at
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(user_id) DO UPDATE SET
-                    hourly_any_limit = excluded.hourly_any_limit,
-                    hourly_limit = excluded.hourly_limit,
-                    daily_limit = excluded.daily_limit,
-                    monthly_limit = excluded.monthly_limit,
+                    business_calls_1h_limit = excluded.business_calls_1h_limit,
+                    daily_credits_limit = excluded.daily_credits_limit,
+                    monthly_credits_limit = excluded.monthly_credits_limit,
                     inherits_defaults = excluded.inherits_defaults,
                     updated_at = excluded.updated_at"#,
         )
         .bind(user_id)
-        .bind(hourly_any_limit)
-        .bind(hourly_limit)
-        .bind(daily_limit)
-        .bind(monthly_limit)
+        .bind(business_calls_1h_limit)
+        .bind(daily_credits_limit)
+        .bind(monthly_credits_limit)
         .bind(inherits_defaults)
         .bind(now)
         .bind(now)
@@ -859,17 +854,15 @@ impl KeyStore {
     pub(crate) async fn update_account_business_quota_limits(
         &self,
         user_id: &str,
-        hourly_limit: i64,
-        daily_limit: i64,
-        monthly_limit: i64,
+        business_calls_1h_limit: i64,
+        daily_credits_limit: i64,
+        monthly_credits_limit: i64,
     ) -> Result<bool, ProxyError> {
-        let current = self.ensure_account_quota_limits(user_id).await?;
         self.update_account_quota_limits(
             user_id,
-            current.hourly_any_limit,
-            hourly_limit,
-            daily_limit,
-            monthly_limit,
+            business_calls_1h_limit,
+            daily_credits_limit,
+            monthly_credits_limit,
         )
         .await
     }
@@ -885,18 +878,16 @@ impl KeyStore {
         sqlx::query(
             r#"UPDATE account_quota_limits
                SET inherits_defaults = CASE
-                   WHEN hourly_any_limit = ?
-                    AND hourly_limit = ?
-                    AND daily_limit = ?
-                    AND monthly_limit = ?
+                   WHEN business_calls_1h_limit = ?
+                    AND daily_credits_limit = ?
+                    AND monthly_credits_limit = ?
                    THEN 1
                    ELSE 0
                END"#,
         )
-        .bind(defaults.hourly_any_limit)
-        .bind(defaults.hourly_limit)
-        .bind(defaults.daily_limit)
-        .bind(defaults.monthly_limit)
+        .bind(defaults.business_calls_1h_limit)
+        .bind(defaults.daily_credits_limit)
+        .bind(defaults.monthly_credits_limit)
         .execute(&self.pool)
         .await?;
         Ok(())
@@ -914,17 +905,15 @@ impl KeyStore {
         .await?;
         let updated = sqlx::query(
             r#"UPDATE account_quota_limits
-               SET hourly_any_limit = ?,
-                   hourly_limit = ?,
-                   daily_limit = ?,
-                   monthly_limit = ?,
+               SET business_calls_1h_limit = ?,
+                   daily_credits_limit = ?,
+                   monthly_credits_limit = ?,
                    updated_at = ?
                WHERE inherits_defaults = 1"#,
         )
-        .bind(defaults.hourly_any_limit)
-        .bind(defaults.hourly_limit)
-        .bind(defaults.daily_limit)
-        .bind(defaults.monthly_limit)
+        .bind(defaults.business_calls_1h_limit)
+        .bind(defaults.daily_credits_limit)
+        .bind(defaults.monthly_credits_limit)
         .bind(now)
         .execute(&self.pool)
         .await?;
@@ -1006,22 +995,20 @@ impl KeyStore {
         sqlx::query(
             r#"INSERT INTO account_quota_limits (
                     user_id,
-                    hourly_any_limit,
-                    hourly_limit,
-                    daily_limit,
-                    monthly_limit,
+                    business_calls_1h_limit,
+                    daily_credits_limit,
+                    monthly_credits_limit,
                     inherits_defaults,
                     created_at,
                     updated_at
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(user_id) DO NOTHING"#,
         )
         .bind(user_id)
-        .bind(defaults.hourly_any_limit)
-        .bind(defaults.hourly_limit)
-        .bind(defaults.daily_limit)
-        .bind(defaults.monthly_limit)
+        .bind(defaults.business_calls_1h_limit)
+        .bind(defaults.daily_credits_limit)
+        .bind(defaults.monthly_credits_limit)
         .bind(if defaults.inherits_defaults { 1 } else { 0 })
         .bind(now)
         .bind(now)
@@ -1061,7 +1048,7 @@ impl KeyStore {
             .await?;
 
         let mut builder = QueryBuilder::new(
-            "INSERT INTO account_quota_limits (user_id, hourly_any_limit, hourly_limit, daily_limit, monthly_limit, inherits_defaults, created_at, updated_at) ",
+            "INSERT INTO account_quota_limits (user_id, business_calls_1h_limit, daily_credits_limit, monthly_credits_limit, inherits_defaults, created_at, updated_at) ",
         );
         builder.push_values(&missing_user_ids, |mut b, user_id| {
             let defaults = defaults_by_user
@@ -1069,10 +1056,9 @@ impl KeyStore {
                 .cloned()
                 .unwrap_or_else(AccountQuotaLimits::zero_base);
             b.push_bind(user_id)
-                .push_bind(defaults.hourly_any_limit)
-                .push_bind(defaults.hourly_limit)
-                .push_bind(defaults.daily_limit)
-                .push_bind(defaults.monthly_limit)
+                .push_bind(defaults.business_calls_1h_limit)
+                .push_bind(defaults.daily_credits_limit)
+                .push_bind(defaults.monthly_credits_limit)
                 .push_bind(if defaults.inherits_defaults { 1 } else { 0 })
                 .push_bind(now)
                 .push_bind(now);
@@ -1086,8 +1072,8 @@ impl KeyStore {
         &self,
         user_id: &str,
     ) -> Result<Option<AccountQuotaLimits>, ProxyError> {
-        let row = sqlx::query_as::<_, (i64, i64, i64, i64, i64)>(
-            r#"SELECT hourly_any_limit, hourly_limit, daily_limit, monthly_limit,
+        let row = sqlx::query_as::<_, (i64, i64, i64, i64)>(
+            r#"SELECT business_calls_1h_limit, daily_credits_limit, monthly_credits_limit,
                       COALESCE(inherits_defaults, 1)
                FROM account_quota_limits
                WHERE user_id = ?
@@ -1097,12 +1083,16 @@ impl KeyStore {
         .fetch_optional(&self.pool)
         .await?;
         Ok(row.map(
-            |(hourly_any_limit, hourly_limit, daily_limit, monthly_limit, inherits_defaults)| {
+            |(
+                business_calls_1h_limit,
+                daily_credits_limit,
+                monthly_credits_limit,
+                inherits_defaults,
+            )| {
                 account_quota_limits_from_row(
-                    hourly_any_limit,
-                    hourly_limit,
-                    daily_limit,
-                    monthly_limit,
+                    business_calls_1h_limit,
+                    daily_credits_limit,
+                    monthly_credits_limit,
                     inherits_defaults,
                 )
             },
@@ -1117,7 +1107,7 @@ impl KeyStore {
             return Ok(HashMap::new());
         }
         let mut builder = QueryBuilder::new(
-            "SELECT user_id, hourly_any_limit, hourly_limit, daily_limit, monthly_limit, COALESCE(inherits_defaults, 1) FROM account_quota_limits WHERE user_id IN (",
+            "SELECT user_id, business_calls_1h_limit, daily_credits_limit, monthly_credits_limit, COALESCE(inherits_defaults, 1) FROM account_quota_limits WHERE user_id IN (",
         );
         {
             let mut separated = builder.separated(", ");
@@ -1128,26 +1118,24 @@ impl KeyStore {
         builder.push(")");
 
         let rows = builder
-            .build_query_as::<(String, i64, i64, i64, i64, i64)>()
+            .build_query_as::<(String, i64, i64, i64, i64)>()
             .fetch_all(&self.pool)
             .await?;
         let mut map = HashMap::new();
         for (
             user_id,
-            hourly_any_limit,
-            hourly_limit,
-            daily_limit,
-            monthly_limit,
+            business_calls_1h_limit,
+            daily_credits_limit,
+            monthly_credits_limit,
             inherits_defaults,
         ) in rows
         {
             map.insert(
                 user_id,
                 account_quota_limits_from_row(
-                    hourly_any_limit,
-                    hourly_limit,
-                    daily_limit,
-                    monthly_limit,
+                    business_calls_1h_limit,
+                    daily_credits_limit,
+                    monthly_credits_limit,
                     inherits_defaults,
                 ),
             );
@@ -1736,7 +1724,7 @@ impl KeyStore {
 
     pub(crate) async fn seed_linuxdo_system_tags(&self) -> Result<(), ProxyError> {
         let now = self.backend_time.now_ts();
-        let (hourly_any_delta, hourly_delta, daily_delta, monthly_delta) =
+        let (business_calls_1h_delta, daily_credits_delta, monthly_credits_delta) =
             linuxdo_system_tag_default_deltas();
         for level in 0..=4 {
             let system_key = linuxdo_system_key_for_level(level);
@@ -1749,14 +1737,13 @@ impl KeyStore {
                         icon,
                         system_key,
                         effect_kind,
-                        hourly_any_delta,
-                        hourly_delta,
-                        daily_delta,
-                        monthly_delta,
+                        business_calls_1h_delta,
+                        daily_credits_delta,
+                        monthly_credits_delta,
                         created_at,
                         updated_at
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT(system_key) DO UPDATE SET
                         name = excluded.name,
                         display_name = excluded.display_name,
@@ -1769,10 +1756,9 @@ impl KeyStore {
             .bind(USER_TAG_ICON_LINUXDO)
             .bind(&system_key)
             .bind(USER_TAG_EFFECT_QUOTA_DELTA)
-            .bind(hourly_any_delta)
-            .bind(hourly_delta)
-            .bind(daily_delta)
-            .bind(monthly_delta)
+            .bind(business_calls_1h_delta)
+            .bind(daily_credits_delta)
+            .bind(monthly_credits_delta)
             .bind(now)
             .bind(now)
             .execute(&self.pool)
@@ -1783,9 +1769,9 @@ impl KeyStore {
 
     pub(crate) async fn infer_linuxdo_system_tag_default_deltas_from_rows(
         &self,
-    ) -> Result<Option<(i64, i64, i64, i64)>, ProxyError> {
-        let rows = sqlx::query_as::<_, (String, i64, i64, i64, i64)>(
-            r#"SELECT effect_kind, hourly_any_delta, hourly_delta, daily_delta, monthly_delta
+    ) -> Result<Option<(i64, i64, i64)>, ProxyError> {
+        let rows = sqlx::query_as::<_, (String, i64, i64, i64)>(
+            r#"SELECT effect_kind, business_calls_1h_delta, daily_credits_delta, monthly_credits_delta
                FROM user_tags
                WHERE system_key LIKE 'linuxdo_l%'
                ORDER BY system_key"#,
@@ -1795,12 +1781,18 @@ impl KeyStore {
         if rows.len() != 5 {
             return Ok(None);
         }
-        let mut expected: Option<(i64, i64, i64, i64)> = None;
-        for (effect_kind, hourly_any_delta, hourly_delta, daily_delta, monthly_delta) in rows {
+        let mut expected: Option<(i64, i64, i64)> = None;
+        for (effect_kind, business_calls_1h_delta, daily_credits_delta, monthly_credits_delta) in
+            rows
+        {
             if effect_kind != USER_TAG_EFFECT_QUOTA_DELTA {
                 return Ok(None);
             }
-            let current = (hourly_any_delta, hourly_delta, daily_delta, monthly_delta);
+            let current = (
+                business_calls_1h_delta,
+                daily_credits_delta,
+                monthly_credits_delta,
+            );
             match expected {
                 Some(previous) if previous != current => return Ok(None),
                 Some(_) => {}
@@ -1824,7 +1816,7 @@ impl KeyStore {
 
     pub(crate) async fn get_linuxdo_system_tag_default_deltas_meta(
         &self,
-    ) -> Result<Option<(i64, i64, i64, i64)>, ProxyError> {
+    ) -> Result<Option<(i64, i64, i64)>, ProxyError> {
         let Some(raw) = self
             .get_meta_string(META_KEY_LINUXDO_SYSTEM_TAG_DEFAULTS_TUPLE_V1)
             .await?
@@ -1836,7 +1828,7 @@ impl KeyStore {
 
     pub(crate) async fn set_linuxdo_system_tag_default_deltas_meta(
         &self,
-        value: (i64, i64, i64, i64),
+        value: (i64, i64, i64),
     ) -> Result<(), ProxyError> {
         self.set_meta_string(
             META_KEY_LINUXDO_SYSTEM_TAG_DEFAULTS_TUPLE_V1,
@@ -1875,28 +1867,24 @@ impl KeyStore {
         let affected_user_ids = self.list_user_ids_for_linuxdo_system_tags().await?;
         let updated = sqlx::query(
             r#"UPDATE user_tags
-               SET hourly_any_delta = ?,
-                   hourly_delta = ?,
-                   daily_delta = ?,
-                   monthly_delta = ?,
+               SET business_calls_1h_delta = ?,
+                   daily_credits_delta = ?,
+                   monthly_credits_delta = ?,
                    updated_at = ?
                WHERE system_key LIKE 'linuxdo_l%'
                  AND effect_kind = ?
-                 AND hourly_any_delta = ?
-                 AND hourly_delta = ?
-                 AND daily_delta = ?
-                 AND monthly_delta = ?"#,
+                 AND business_calls_1h_delta = ?
+                 AND daily_credits_delta = ?
+                 AND monthly_credits_delta = ?"#,
         )
         .bind(current.0)
         .bind(current.1)
         .bind(current.2)
-        .bind(current.3)
         .bind(now)
         .bind(USER_TAG_EFFECT_QUOTA_DELTA)
         .bind(previous.0)
         .bind(previous.1)
         .bind(previous.2)
-        .bind(previous.3)
         .execute(&self.pool)
         .await?;
         if updated.rows_affected() > 0 {
@@ -1913,27 +1901,24 @@ impl KeyStore {
         &self,
     ) -> Result<(), ProxyError> {
         let now = self.backend_time.now_ts();
-        let (hourly_any_delta, hourly_delta, daily_delta, monthly_delta) =
+        let (business_calls_1h_delta, daily_credits_delta, monthly_credits_delta) =
             linuxdo_system_tag_default_deltas();
         let affected_user_ids = self.list_user_ids_for_linuxdo_system_tags().await?;
         let updated = sqlx::query(
             r#"UPDATE user_tags
-               SET hourly_any_delta = ?,
-                   hourly_delta = ?,
-                   daily_delta = ?,
-                   monthly_delta = ?,
+               SET business_calls_1h_delta = ?,
+                   daily_credits_delta = ?,
+                   monthly_credits_delta = ?,
                    updated_at = ?
                WHERE system_key LIKE 'linuxdo_l%'
                  AND effect_kind = ?
-                 AND hourly_any_delta = 0
-                 AND hourly_delta = 0
-                 AND daily_delta = 0
-                 AND monthly_delta = 0"#,
+                 AND business_calls_1h_delta = 0
+                 AND daily_credits_delta = 0
+                 AND monthly_credits_delta = 0"#,
         )
-        .bind(hourly_any_delta)
-        .bind(hourly_delta)
-        .bind(daily_delta)
-        .bind(monthly_delta)
+        .bind(business_calls_1h_delta)
+        .bind(daily_credits_delta)
+        .bind(monthly_credits_delta)
         .bind(now)
         .bind(USER_TAG_EFFECT_QUOTA_DELTA)
         .execute(&self.pool)
@@ -2177,7 +2162,6 @@ impl KeyStore {
                 i64,
                 i64,
                 i64,
-                i64,
             ),
         >(
             r#"SELECT
@@ -2187,17 +2171,16 @@ impl KeyStore {
                  t.icon,
                  t.system_key,
                  t.effect_kind,
-                 t.hourly_any_delta,
-                 t.hourly_delta,
-                 t.daily_delta,
-                 t.monthly_delta,
+                 t.business_calls_1h_delta,
+                 t.daily_credits_delta,
+                 t.monthly_credits_delta,
                  COALESCE(COUNT(b.user_id), 0) AS user_count
                FROM user_tags t
                LEFT JOIN user_tag_bindings b ON b.tag_id = t.id
                WHERE t.id = ?
                GROUP BY t.id, t.name, t.display_name, t.icon, t.system_key,
-                        t.effect_kind, t.hourly_any_delta, t.hourly_delta,
-                        t.daily_delta, t.monthly_delta
+                        t.effect_kind, t.business_calls_1h_delta,
+                        t.daily_credits_delta, t.monthly_credits_delta
                LIMIT 1"#,
         )
         .bind(tag_id)
@@ -2211,10 +2194,9 @@ impl KeyStore {
                 icon,
                 system_key,
                 effect_kind,
-                hourly_any_delta,
-                hourly_delta,
-                daily_delta,
-                monthly_delta,
+                business_calls_1h_delta,
+                daily_credits_delta,
+                monthly_credits_delta,
                 user_count,
             )| UserTagRecord {
                 id,
@@ -2223,17 +2205,16 @@ impl KeyStore {
                 icon,
                 system_key,
                 effect_kind,
-                hourly_any_delta,
-                hourly_delta,
-                daily_delta,
-                monthly_delta,
+                business_calls_1h_delta,
+                daily_credits_delta,
+                monthly_credits_delta,
                 user_count,
             },
         ))
     }
 
     pub(crate) async fn list_user_tags(&self) -> Result<Vec<UserTagRecord>, ProxyError> {
-        let rows = sqlx::query_as::<_, (String, String, String, Option<String>, Option<String>, String, i64, i64, i64, i64, i64)>(
+        let rows = sqlx::query_as::<_, (String, String, String, Option<String>, Option<String>, String, i64, i64, i64, i64)>(
             r#"SELECT
                  t.id,
                  t.name,
@@ -2241,16 +2222,15 @@ impl KeyStore {
                  t.icon,
                  t.system_key,
                  t.effect_kind,
-                 t.hourly_any_delta,
-                 t.hourly_delta,
-                 t.daily_delta,
-                 t.monthly_delta,
+                 t.business_calls_1h_delta,
+                 t.daily_credits_delta,
+                 t.monthly_credits_delta,
                  COALESCE(COUNT(b.user_id), 0) AS user_count
                FROM user_tags t
                LEFT JOIN user_tag_bindings b ON b.tag_id = t.id
                GROUP BY t.id, t.name, t.display_name, t.icon, t.system_key,
-                        t.effect_kind, t.hourly_any_delta, t.hourly_delta,
-                        t.daily_delta, t.monthly_delta
+                        t.effect_kind, t.business_calls_1h_delta,
+                        t.daily_credits_delta, t.monthly_credits_delta
                ORDER BY (t.system_key IS NULL) ASC, COALESCE(t.system_key, t.name) ASC, t.display_name ASC"#,
         )
         .fetch_all(&self.pool)
@@ -2265,10 +2245,9 @@ impl KeyStore {
                     icon,
                     system_key,
                     effect_kind,
-                    hourly_any_delta,
-                    hourly_delta,
-                    daily_delta,
-                    monthly_delta,
+                    business_calls_1h_delta,
+                    daily_credits_delta,
+                    monthly_credits_delta,
                     user_count,
                 )| UserTagRecord {
                     id,
@@ -2277,10 +2256,9 @@ impl KeyStore {
                     icon,
                     system_key,
                     effect_kind,
-                    hourly_any_delta,
-                    hourly_delta,
-                    daily_delta,
-                    monthly_delta,
+                    business_calls_1h_delta,
+                    daily_credits_delta,
+                    monthly_credits_delta,
                     user_count,
                 },
             )
@@ -2294,10 +2272,9 @@ impl KeyStore {
         display_name: &str,
         icon: Option<&str>,
         effect_kind: &str,
-        hourly_any_delta: i64,
-        hourly_delta: i64,
-        daily_delta: i64,
-        monthly_delta: i64,
+        business_calls_1h_delta: i64,
+        daily_credits_delta: i64,
+        monthly_credits_delta: i64,
     ) -> Result<UserTagRecord, ProxyError> {
         if effect_kind != USER_TAG_EFFECT_QUOTA_DELTA && effect_kind != USER_TAG_EFFECT_BLOCK_ALL {
             return Err(ProxyError::Other(
@@ -2316,24 +2293,22 @@ impl KeyStore {
                         icon,
                         system_key,
                         effect_kind,
-                        hourly_any_delta,
-                        hourly_delta,
-                        daily_delta,
-                        monthly_delta,
+                        business_calls_1h_delta,
+                        daily_credits_delta,
+                        monthly_credits_delta,
                         created_at,
                         updated_at
                     )
-                    VALUES (?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?)"#,
+                    VALUES (?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?)"#,
             )
             .bind(&id)
             .bind(name)
             .bind(display_name)
             .bind(icon)
             .bind(effect_kind)
-            .bind(hourly_any_delta)
-            .bind(hourly_delta)
-            .bind(daily_delta)
-            .bind(monthly_delta)
+            .bind(business_calls_1h_delta)
+            .bind(daily_credits_delta)
+            .bind(monthly_credits_delta)
             .bind(now)
             .bind(now)
             .execute(&self.pool)
@@ -2370,10 +2345,9 @@ impl KeyStore {
         display_name: &str,
         icon: Option<&str>,
         effect_kind: &str,
-        hourly_any_delta: i64,
-        hourly_delta: i64,
-        daily_delta: i64,
-        monthly_delta: i64,
+        business_calls_1h_delta: i64,
+        daily_credits_delta: i64,
+        monthly_credits_delta: i64,
     ) -> Result<Option<UserTagRecord>, ProxyError> {
         if effect_kind != USER_TAG_EFFECT_QUOTA_DELTA && effect_kind != USER_TAG_EFFECT_BLOCK_ALL {
             return Err(ProxyError::Other(
@@ -2397,18 +2371,16 @@ impl KeyStore {
             sqlx::query(
                 r#"UPDATE user_tags
                    SET effect_kind = ?,
-                       hourly_any_delta = ?,
-                       hourly_delta = ?,
-                       daily_delta = ?,
-                       monthly_delta = ?,
+                       business_calls_1h_delta = ?,
+                       daily_credits_delta = ?,
+                       monthly_credits_delta = ?,
                        updated_at = ?
                    WHERE id = ?"#,
             )
             .bind(effect_kind)
-            .bind(hourly_any_delta)
-            .bind(hourly_delta)
-            .bind(daily_delta)
-            .bind(monthly_delta)
+            .bind(business_calls_1h_delta)
+            .bind(daily_credits_delta)
+            .bind(monthly_credits_delta)
             .bind(now)
             .bind(tag_id)
             .execute(&self.pool)
@@ -2420,10 +2392,9 @@ impl KeyStore {
                        display_name = ?,
                        icon = ?,
                        effect_kind = ?,
-                       hourly_any_delta = ?,
-                       hourly_delta = ?,
-                       daily_delta = ?,
-                       monthly_delta = ?,
+                       business_calls_1h_delta = ?,
+                       daily_credits_delta = ?,
+                       monthly_credits_delta = ?,
                        updated_at = ?
                    WHERE id = ?"#,
             )
@@ -2431,10 +2402,9 @@ impl KeyStore {
             .bind(display_name)
             .bind(icon)
             .bind(effect_kind)
-            .bind(hourly_any_delta)
-            .bind(hourly_delta)
-            .bind(daily_delta)
-            .bind(monthly_delta)
+            .bind(business_calls_1h_delta)
+            .bind(daily_credits_delta)
+            .bind(monthly_credits_delta)
             .bind(now)
             .bind(tag_id)
             .execute(&self.pool)
@@ -2579,10 +2549,9 @@ impl KeyStore {
                  t.icon,
                  t.system_key,
                  t.effect_kind,
-                 t.hourly_any_delta,
-                 t.hourly_delta,
-                 t.daily_delta,
-                 t.monthly_delta
+                 t.business_calls_1h_delta,
+                 t.daily_credits_delta,
+                 t.monthly_credits_delta
                FROM user_tag_bindings b
                JOIN user_tags t ON t.id = b.tag_id
                WHERE b.user_id IN ("#,
@@ -2608,7 +2577,6 @@ impl KeyStore {
                 i64,
                 i64,
                 i64,
-                i64,
             )>()
             .fetch_all(&self.pool)
             .await?;
@@ -2622,10 +2590,9 @@ impl KeyStore {
             icon,
             system_key,
             effect_kind,
-            hourly_any_delta,
-            hourly_delta,
-            daily_delta,
-            monthly_delta,
+            business_calls_1h_delta,
+            daily_credits_delta,
+            monthly_credits_delta,
         ) in rows
         {
             map.entry(user_id.clone())
@@ -2639,10 +2606,9 @@ impl KeyStore {
                         icon,
                         system_key,
                         effect_kind,
-                        hourly_any_delta,
-                        hourly_delta,
-                        daily_delta,
-                        monthly_delta,
+                        business_calls_1h_delta,
+                        daily_credits_delta,
+                        monthly_credits_delta,
                         user_count: 0,
                     },
                 });

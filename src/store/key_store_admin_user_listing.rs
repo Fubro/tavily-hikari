@@ -9,7 +9,7 @@ impl KeyStore {
         activity_scope: AdminUserActivityScope,
         sort: AdminUserListSortField,
         direction: AdminListSortDirection,
-        hour_window_start: i64,
+        _hour_window_start: i64,
         day_window_start: i64,
         day_window_end: i64,
         month_start: i64,
@@ -46,19 +46,7 @@ impl KeyStore {
             "), metric(user_id, sort_value, sort_limit, sort_total, sort_failure) AS (",
         );
         match sort {
-            AdminUserListSortField::QuotaHourlyUsed => {
-                builder.push(
-                    "SELECT aub.user_id, COALESCE(SUM(aub.count), 0), 0, 0, 0 \
-                     FROM account_usage_buckets aub \
-                     JOIN filtered_users fu ON fu.id = aub.user_id \
-                     WHERE aub.granularity = ",
-                );
-                builder.push_bind(GRANULARITY_MINUTE);
-                builder.push(" AND aub.bucket_start >= ");
-                builder.push_bind(hour_window_start);
-                builder.push(" GROUP BY aub.user_id");
-            }
-            AdminUserListSortField::QuotaDailyUsed => {
+            AdminUserListSortField::DailyCreditsUsed => {
                 builder.push(
                     "SELECT user_id, COALESCE(SUM(total), 0), 0, 0, 0 FROM (\
                      SELECT aub.user_id, SUM(aub.count) AS total \
@@ -77,7 +65,7 @@ impl KeyStore {
                 builder.push_bind(day_window_end);
                 builder.push(" GROUP BY aub.user_id) GROUP BY user_id");
             }
-            AdminUserListSortField::QuotaMonthlyUsed => {
+            AdminUserListSortField::MonthlyCreditsUsed => {
                 builder.push("SELECT amq.user_id, CASE WHEN amq.month_start >= ");
                 builder.push_bind(month_start);
                 builder.push(
@@ -189,9 +177,9 @@ impl KeyStore {
         builder.push(
             "), quota_limits AS (\
              SELECT fu.id AS user_id, \
-             COALESCE((SELECT s.hourly_limit FROM account_quota_limit_snapshots s WHERE s.user_id = fu.id ORDER BY s.changed_at DESC, s.id DESC LIMIT 1), 0) AS hourly_limit, \
-             COALESCE((SELECT s.daily_limit FROM account_quota_limit_snapshots s WHERE s.user_id = fu.id ORDER BY s.changed_at DESC, s.id DESC LIMIT 1), 0) AS daily_limit, \
-             COALESCE((SELECT s.monthly_limit FROM account_quota_limit_snapshots s WHERE s.user_id = fu.id ORDER BY s.changed_at DESC, s.id DESC LIMIT 1), 0) AS monthly_limit \
+             COALESCE((SELECT s.business_calls_1h_limit FROM account_quota_limit_snapshots s WHERE s.user_id = fu.id ORDER BY s.changed_at DESC, s.id DESC LIMIT 1), 0) AS hourly_limit, \
+             COALESCE((SELECT s.daily_credits_limit FROM account_quota_limit_snapshots s WHERE s.user_id = fu.id ORDER BY s.changed_at DESC, s.id DESC LIMIT 1), 0) AS daily_limit, \
+             COALESCE((SELECT s.monthly_credits_limit FROM account_quota_limit_snapshots s WHERE s.user_id = fu.id ORDER BY s.changed_at DESC, s.id DESC LIMIT 1), 0) AS monthly_limit \
              FROM filtered_users fu\
              ), broken_limits AS (\
              SELECT fu.id AS user_id, MAX(0, ",
@@ -240,21 +228,14 @@ impl KeyStore {
                 builder.push(direction_sql);
                 builder.push(", u.id ASC");
             }
-            AdminUserListSortField::QuotaHourlyUsed => {
-                builder.push(" ORDER BY COALESCE(m.sort_value, 0) ");
-                builder.push(direction_sql);
-                builder.push(", COALESCE(ql.hourly_limit, 0) ");
-                builder.push(direction_sql);
-                builder.push(", u.id ASC");
-            }
-            AdminUserListSortField::QuotaDailyUsed => {
+            AdminUserListSortField::DailyCreditsUsed => {
                 builder.push(" ORDER BY COALESCE(m.sort_value, 0) ");
                 builder.push(direction_sql);
                 builder.push(", COALESCE(ql.daily_limit, 0) ");
                 builder.push(direction_sql);
                 builder.push(", u.id ASC");
             }
-            AdminUserListSortField::QuotaMonthlyUsed => {
+            AdminUserListSortField::MonthlyCreditsUsed => {
                 builder.push(" ORDER BY COALESCE(m.sort_value, 0) ");
                 builder.push(direction_sql);
                 builder.push(", COALESCE(ql.monthly_limit, 0) ");

@@ -27,9 +27,7 @@ use sqlx::{
     Row,
     sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions},
 };
-use tavily_hikari::{
-    TOKEN_DAILY_LIMIT, TOKEN_HOURLY_LIMIT, TOKEN_HOURLY_REQUEST_LIMIT, TOKEN_MONTHLY_LIMIT,
-};
+use tavily_hikari::{TOKEN_DAILY_LIMIT, TOKEN_HOURLY_LIMIT, TOKEN_MONTHLY_LIMIT};
 use tokio::net::TcpListener;
 
 #[path = "common/support_binaries.rs"]
@@ -736,20 +734,18 @@ async fn insert_default_account_quota_limits(pool: &sqlx::SqlitePool, user_id: &
         r#"
         INSERT INTO account_quota_limits (
             user_id,
-            hourly_any_limit,
-            hourly_limit,
-            daily_limit,
-            monthly_limit,
+            business_calls_1h_limit,
+            daily_credits_limit,
+            monthly_credits_limit,
             monthly_broken_limit,
             inherits_defaults,
             created_at,
             updated_at
         )
-        VALUES (?, ?, ?, ?, ?, 5, 1, ?, ?)
+        VALUES (?, ?, ?, ?, 5, 1, ?, ?)
         "#,
     )
     .bind(user_id)
-    .bind(TOKEN_HOURLY_REQUEST_LIMIT)
     .bind(TOKEN_HOURLY_LIMIT)
     .bind(TOKEN_DAILY_LIMIT)
     .bind(TOKEN_MONTHLY_LIMIT)

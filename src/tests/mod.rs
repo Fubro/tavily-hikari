@@ -22,6 +22,7 @@ use std::time::Duration;
 use tokio::net::TcpListener;
 
 mod account_quota_and_billing;
+mod account_quota_schema_migration;
 mod account_usage_rollup_request_days;
 mod dashboard_month_series;
 mod ha_baseline_streaming_and_sessions;

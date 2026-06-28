@@ -5,10 +5,12 @@
 ### account_quota_limits
 
 - `user_id TEXT PRIMARY KEY`
-- `hourly_any_limit INTEGER NOT NULL`
-- `hourly_limit INTEGER NOT NULL`
-- `daily_limit INTEGER NOT NULL`
-- `monthly_limit INTEGER NOT NULL`
+- `business_calls_1h_limit INTEGER NOT NULL`
+- `daily_credits_limit INTEGER NOT NULL`
+- `monthly_credits_limit INTEGER NOT NULL`
+- `inherits_defaults INTEGER NOT NULL DEFAULT 1`
+- `created_at INTEGER NOT NULL`
+- `updated_at INTEGER NOT NULL`
 - `created_at INTEGER NOT NULL`
 - `updated_at INTEGER NOT NULL`
 
@@ -41,3 +43,4 @@
 2. 将 `token_usage_buckets` 聚合复制到 `account_usage_buckets`。
 3. 将 `auth_token_quota` 聚合复制到 `account_monthly_quota`。
 4. 使用 `account_quota_backfill_v1` 标记回填完成。
+5. 对旧库启动时，`account_quota_limits` 会自动从 `hourly_limit/daily_limit/monthly_limit` 迁到语义列，并物理删除 `hourly_any_limit`。

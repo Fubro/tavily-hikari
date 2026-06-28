@@ -81,10 +81,9 @@
 - 字段：
   - `user_id`
   - `changed_at`
-  - `hourly_any_limit`
-  - `hourly_limit`
-  - `daily_limit`
-  - `monthly_limit`
+  - `business_calls_1h_limit`
+  - `daily_credits_limit`
+  - `monthly_credits_limit`
 - 保存用户当时的**有效额度**快照（base quota + 当前绑定标签影响后的结果）。
 
 ### 写入路径
@@ -119,9 +118,8 @@
 - admin-only。
 - `series` 允许：
   - `rate5m`
-  - `quota1h`
-  - `quota24h`
-  - `quotaMonth`
+  - `dailyCredits`
+  - `monthlyCredits`
   - `businessCalls1h`
 - 响应：
   - quota-like series:
@@ -136,9 +134,8 @@
 ### 统计窗口
 
 - `rate5m`：最近 24 小时，5 分钟粒度，共 288 个 bucket；`limit` 为当前全局 `requestRate.limit`，`points[].limitValue` 使用 `changed_at < bucket_end` 的最新请求频率快照。
-- `quota1h`：最近 72 小时，按小时 bucket；`limit` 为当前账户 `effectiveQuota.hourlyLimit`，`points[].limitValue` 使用 `changed_at < bucket_end` 的最新小时额度快照。
-- `quota24h`：最近 7 天，按本地日 bucket；`limit` 为当前账户 `effectiveQuota.dailyLimit`，`points[].limitValue` 使用 `changed_at < bucket_end` 的最新日额度快照。
-- `quotaMonth`：最近 12 个月，按 UTC 月 bucket；`limit` 为当前账户 `effectiveQuota.monthlyLimit`，`points[].limitValue` 使用 `changed_at < bucket_end` 的最新月额度快照。
+- `dailyCredits`：最近 7 天，按本地日 bucket；`limit` 为当前账户 `effectiveQuota.dailyCreditsLimit`，`points[].limitValue` 使用 `changed_at < bucket_end` 的最新日额度快照。
+- `monthlyCredits`：最近 12 个月，按 UTC 月 bucket；`limit` 为当前账户 `effectiveQuota.monthlyCreditsLimit`，`points[].limitValue` 使用 `changed_at < bucket_end` 的最新月额度快照。
 - `businessCalls1h`：最近 24 小时、每 5 分钟采样，共 288 个点；`bars.success / bars.failure` 表示该 5 分钟自然桶内实际上游业务调用次数；`pressure` 表示该采样点向前 60 分钟窗口的总调用压力（`success + failure`）；`limitValue` 使用 `changed_at < point_end` 的最新小时额度快照回放，其中当前进行中的最后一个点按 `changed_at < now+1` 解析，避免提前泄露未来变更。
 - 若 bucket 无聚合值：
   - `bucketStart >= coverage_start` => 返回 `0`
@@ -192,7 +189,7 @@
 - 四张图都带明显的上限虚线；虚线必须按 bucket 对应的历史 `limitValue` 绘制，不能整图平铺当前 limit。
 - token 列表不再出现任何账户共享额度字段或易误导文案。
 - 用户详情 token 列表包含添加入口；多 token 时可删除指定 token，单 token 时删除按钮禁用且后端拒绝删除最后一个 token。
-- `quotaMonth` 对不可追溯月份返回 `null`，前端显示缺口/提示，而不是伪造 `0`。
+- `monthlyCredits` 对不可追溯月份返回 `null`，前端显示缺口/提示，而不是伪造 `0`。
 - `cargo test`、`cargo clippy -- -D warnings`、`cd web && bun test`、`cd web && bun run build`、`cd web && bun run build-storybook` 全部通过。
 - Storybook 与真实 `/admin/users/:id` 浏览器复核完成，并在本 spec 记录最终视觉证据。
 

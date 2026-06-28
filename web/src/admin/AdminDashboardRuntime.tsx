@@ -448,10 +448,10 @@ const DASHBOARD_TREND_WINDOW_SIZE = 8
 const ADMIN_USERS_DEFAULT_SORT_FIELD: AdminUsersSortField = 'lastLoginAt'
 const ADMIN_USERS_DEFAULT_SORT_ORDER: SortDirection = 'desc'
 const ADMIN_USERS_SORT_FIELDS: readonly AdminUsersSortField[] = [
-  'hourlyAnyUsed',
-  'quotaHourlyUsed',
-  'quotaDailyUsed',
-  'quotaMonthlyUsed',
+  'requestRateUsed',
+  'businessCalls1hUsed',
+  'dailyCreditsUsed',
+  'monthlyCreditsUsed',
   'dailySuccessRate',
   'monthlySuccessRate',
   'monthlyBrokenCount',
@@ -503,10 +503,9 @@ type UserTagFormState = {
   displayName: string
   icon: string
   effectKind: string
-  hourlyAnyDelta: string
-  hourlyDelta: string
-  dailyDelta: string
-  monthlyDelta: string
+  businessCalls1hDelta: string
+  dailyCreditsDelta: string
+  monthlyCreditsDelta: string
 }
 
 type UserTagLike = Pick<AdminUserTagBinding, 'displayName' | 'icon' | 'systemKey' | 'effectKind'> & {
@@ -521,10 +520,9 @@ const EMPTY_USER_TAG_FORM: UserTagFormState = {
   displayName: '',
   icon: '',
   effectKind: 'quota_delta',
-  hourlyAnyDelta: '0',
-  hourlyDelta: '0',
-  dailyDelta: '0',
-  monthlyDelta: '0',
+  businessCalls1hDelta: '0',
+  dailyCreditsDelta: '0',
+  monthlyCreditsDelta: '0',
 }
 
 function splitMultilineEntries(value: string): string[] {
@@ -541,10 +539,9 @@ function splitMultilineEntries(value: string): string[] {
 
 function buildUserQuotaSnapshot(detail: AdminUserDetail): UserQuotaSnapshot {
   return {
-    hourlyAnyLimit: createQuotaSliderSeed('hourlyAnyLimit', detail.hourlyAnyUsed, detail.quotaBase.hourlyAnyLimit),
-    hourlyLimit: createQuotaSliderSeed('hourlyLimit', detail.quotaHourlyUsed, detail.quotaBase.hourlyLimit),
-    dailyLimit: createQuotaSliderSeed('dailyLimit', detail.quotaDailyUsed, detail.quotaBase.dailyLimit),
-    monthlyLimit: createQuotaSliderSeed('monthlyLimit', detail.quotaMonthlyUsed, detail.quotaBase.monthlyLimit),
+    businessCalls1hLimit: createQuotaSliderSeed('businessCalls1hLimit', detail.businessCalls1h.totalCount, detail.quotaBase.businessCalls1hLimit),
+    dailyCreditsLimit: createQuotaSliderSeed('dailyCreditsLimit', detail.dailyCreditsUsed, detail.quotaBase.dailyCreditsLimit),
+    monthlyCreditsLimit: createQuotaSliderSeed('monthlyCreditsLimit', detail.monthlyCreditsUsed, detail.quotaBase.monthlyCreditsLimit),
   }
 }
 
@@ -1103,10 +1100,9 @@ function createUserTagFormState(tag?: AdminUserTag | null): UserTagFormState {
     displayName: tag.displayName,
     icon: tag.icon ?? '',
     effectKind: tag.effectKind,
-    hourlyAnyDelta: String(tag.hourlyAnyDelta),
-    hourlyDelta: String(tag.hourlyDelta),
-    dailyDelta: String(tag.dailyDelta),
-    monthlyDelta: String(tag.monthlyDelta),
+    businessCalls1hDelta: String(tag.businessCalls1hDelta),
+    dailyCreditsDelta: String(tag.dailyCreditsDelta),
+    monthlyCreditsDelta: String(tag.monthlyCreditsDelta),
   }
 }
 
@@ -4206,10 +4202,9 @@ function AdminDashboard(): JSX.Element {
         setUserDetailRevision((current) => current + 1)
         setUserQuotaSnapshot(buildUserQuotaSnapshot(detail))
         setUserQuotaDraft({
-          hourlyAnyLimit: String(detail.quotaBase.hourlyAnyLimit),
-          hourlyLimit: String(detail.quotaBase.hourlyLimit),
-          dailyLimit: String(detail.quotaBase.dailyLimit),
-          monthlyLimit: String(detail.quotaBase.monthlyLimit),
+          businessCalls1hLimit: String(detail.quotaBase.businessCalls1hLimit),
+          dailyCreditsLimit: String(detail.quotaBase.dailyCreditsLimit),
+          monthlyCreditsLimit: String(detail.quotaBase.monthlyCreditsLimit),
         })
         setSelectedBindableTagId('')
         setUserTagError(null)
@@ -6612,10 +6607,9 @@ function AdminDashboard(): JSX.Element {
     setUserDetailRevision((current) => current + 1)
     setUserQuotaSnapshot(buildUserQuotaSnapshot(detail))
     setUserQuotaDraft({
-      hourlyAnyLimit: String(detail.quotaBase.hourlyAnyLimit),
-      hourlyLimit: String(detail.quotaBase.hourlyLimit),
-      dailyLimit: String(detail.quotaBase.dailyLimit),
-      monthlyLimit: String(detail.quotaBase.monthlyLimit),
+      businessCalls1hLimit: String(detail.quotaBase.businessCalls1hLimit),
+      dailyCreditsLimit: String(detail.quotaBase.dailyCreditsLimit),
+      monthlyCreditsLimit: String(detail.quotaBase.monthlyCreditsLimit),
     })
     setSelectedBindableTagId('')
     return detail
@@ -6732,14 +6726,14 @@ function AdminDashboard(): JSX.Element {
   const saveUserQuota = async () => {
     if (route.name !== 'user' || !userQuotaDraft) return
     const payload = {
-      hourlyLimit: Number.parseInt(userQuotaDraft.hourlyLimit, 10),
-      dailyLimit: Number.parseInt(userQuotaDraft.dailyLimit, 10),
-      monthlyLimit: Number.parseInt(userQuotaDraft.monthlyLimit, 10),
+      businessCalls1hLimit: Number.parseInt(userQuotaDraft.businessCalls1hLimit, 10),
+      dailyCreditsLimit: Number.parseInt(userQuotaDraft.dailyCreditsLimit, 10),
+      monthlyCreditsLimit: Number.parseInt(userQuotaDraft.monthlyCreditsLimit, 10),
     }
     if (
-      !Number.isFinite(payload.hourlyLimit) || payload.hourlyLimit < 0
-      || !Number.isFinite(payload.dailyLimit) || payload.dailyLimit < 0
-      || !Number.isFinite(payload.monthlyLimit) || payload.monthlyLimit < 0
+      !Number.isFinite(payload.businessCalls1hLimit) || payload.businessCalls1hLimit < 0
+      || !Number.isFinite(payload.dailyCreditsLimit) || payload.dailyCreditsLimit < 0
+      || !Number.isFinite(payload.monthlyCreditsLimit) || payload.monthlyCreditsLimit < 0
     ) {
       setUserQuotaError(adminStrings.users.quota.invalid)
       return
@@ -6767,9 +6761,9 @@ function AdminDashboard(): JSX.Element {
       : null
     const isSystemEditing = editingTag?.systemKey != null
     const parsedDeltas = {
-      hourlyDelta: Number.parseInt(userTagCatalogDraft.hourlyDelta, 10),
-      dailyDelta: Number.parseInt(userTagCatalogDraft.dailyDelta, 10),
-      monthlyDelta: Number.parseInt(userTagCatalogDraft.monthlyDelta, 10),
+      businessCalls1hDelta: Number.parseInt(userTagCatalogDraft.businessCalls1hDelta, 10),
+      dailyCreditsDelta: Number.parseInt(userTagCatalogDraft.dailyCreditsDelta, 10),
+      monthlyCreditsDelta: Number.parseInt(userTagCatalogDraft.monthlyCreditsDelta, 10),
     }
     const effectKind = userTagCatalogDraft.effectKind === 'block_all' ? 'block_all' : 'quota_delta'
     const deltasAreValid = Object.values(parsedDeltas).every((value) => Number.isFinite(value))
@@ -6789,10 +6783,9 @@ function AdminDashboard(): JSX.Element {
         : userTagCatalogDraft.displayName.trim(),
       icon: isSystemEditing ? editingTag?.icon ?? null : (userTagCatalogDraft.icon.trim() || null),
       effectKind,
-      hourlyAnyDelta: 0,
-      hourlyDelta: effectKind === 'block_all' ? 0 : parsedDeltas.hourlyDelta,
-      dailyDelta: effectKind === 'block_all' ? 0 : parsedDeltas.dailyDelta,
-      monthlyDelta: effectKind === 'block_all' ? 0 : parsedDeltas.monthlyDelta,
+      businessCalls1hDelta: effectKind === 'block_all' ? 0 : parsedDeltas.businessCalls1hDelta,
+      dailyCreditsDelta: effectKind === 'block_all' ? 0 : parsedDeltas.dailyCreditsDelta,
+      monthlyCreditsDelta: effectKind === 'block_all' ? 0 : parsedDeltas.monthlyCreditsDelta,
     }
 
     setSavingUserTagCatalog(true)
@@ -7984,9 +7977,9 @@ function AdminDashboard(): JSX.Element {
           ) : (
             <dl className="user-tag-catalog-delta-grid">
               {([
-                ['hourlyDelta', tag?.hourlyDelta ?? 0, usersStrings.quota.hourly],
-                ['dailyDelta', tag?.dailyDelta ?? 0, usersStrings.quota.daily],
-                ['monthlyDelta', tag?.monthlyDelta ?? 0, usersStrings.quota.monthly],
+                ['businessCalls1hDelta', tag?.businessCalls1hDelta ?? 0, usersStrings.quota.hourly],
+                ['dailyCreditsDelta', tag?.dailyCreditsDelta ?? 0, usersStrings.quota.daily],
+                ['monthlyCreditsDelta', tag?.monthlyCreditsDelta ?? 0, usersStrings.quota.monthly],
               ] as const).map(([field, value, label]) => (
                 <div className="user-tag-catalog-delta-item" key={field}>
                   <dt>{label}</dt>
@@ -9220,15 +9213,15 @@ function AdminDashboard(): JSX.Element {
                         <div className="token-compact-pair">
                           <div className="token-compact-field">
                             <span className="token-compact-label">{usersStrings.quota.hourly}</span>
-                            <span className="token-compact-value">{formatSignedQuotaDelta(tag.hourlyDelta)}</span>
+                            <span className="token-compact-value">{formatSignedQuotaDelta(tag.businessCalls1hDelta)}</span>
                           </div>
                           <div className="token-compact-field">
                             <span className="token-compact-label">{usersStrings.quota.daily}</span>
-                            <span className="token-compact-value">{formatSignedQuotaDelta(tag.dailyDelta)}</span>
+                            <span className="token-compact-value">{formatSignedQuotaDelta(tag.dailyCreditsDelta)}</span>
                           </div>
                           <div className="token-compact-field">
                             <span className="token-compact-label">{usersStrings.quota.monthly}</span>
-                            <span className="token-compact-value">{formatSignedQuotaDelta(tag.monthlyDelta)}</span>
+                            <span className="token-compact-value">{formatSignedQuotaDelta(tag.monthlyCreditsDelta)}</span>
                           </div>
                         </div>
                       </article>
@@ -11905,14 +11898,14 @@ function AdminDashboard(): JSX.Element {
                       <th>{usersStrings.table.tags}</th>
                       <AdminUsersSortableHeader
                         label={usersStrings.table.daily}
-                        field="quotaDailyUsed"
+                        field="dailyCreditsUsed"
                         activeField={effectiveUsersSort}
                         activeOrder={effectiveUsersSortOrder}
                         onToggle={toggleUsersSort}
                       />
                       <AdminUsersSortableHeader
                         label={usersStrings.table.monthly}
-                        field="quotaMonthlyUsed"
+                        field="monthlyCreditsUsed"
                         activeField={effectiveUsersSort}
                         activeOrder={effectiveUsersSortOrder}
                         onToggle={toggleUsersSort}
@@ -11971,10 +11964,10 @@ function AdminDashboard(): JSX.Element {
                           />
                         </td>
                         <td className="admin-users-compact-cell">
-                          <AdminTableValueStack {...formatQuotaStackValue(item.quotaDailyUsed, item.quotaDailyLimit)} />
+                          <AdminTableValueStack {...formatQuotaStackValue(item.dailyCreditsUsed, item.dailyCreditsLimit)} />
                         </td>
                         <td className="admin-users-compact-cell">
-                          <AdminTableValueStack {...formatQuotaStackValue(item.quotaMonthlyUsed, item.quotaMonthlyLimit)} />
+                          <AdminTableValueStack {...formatQuotaStackValue(item.monthlyCreditsUsed, item.monthlyCreditsLimit)} />
                         </td>
                         <td className="admin-users-compact-cell">
                           <strong>{formatNumber(item.recentIpCount7d)}</strong>
@@ -12030,11 +12023,11 @@ function AdminDashboard(): JSX.Element {
                     </div>
                     <div className="admin-mobile-kv">
                       <span>{usersStrings.table.daily}</span>
-                      <strong>{formatQuotaUsagePair(item.quotaDailyUsed, item.quotaDailyLimit)}</strong>
+                      <strong>{formatQuotaUsagePair(item.dailyCreditsUsed, item.dailyCreditsLimit)}</strong>
                     </div>
                     <div className="admin-mobile-kv">
                       <span>{usersStrings.table.monthly}</span>
-                      <strong>{formatQuotaUsagePair(item.quotaMonthlyUsed, item.quotaMonthlyLimit)}</strong>
+                      <strong>{formatQuotaUsagePair(item.monthlyCreditsUsed, item.monthlyCreditsLimit)}</strong>
                     </div>
                     <div className="admin-mobile-kv">
                       <span>{usersStrings.table.ipCount}</span>

@@ -4,10 +4,9 @@ use super::*;
 
 #[derive(Debug, Clone)]
 pub struct AdminQuotaLimitSet {
-    pub hourly_any_limit: i64,
-    pub hourly_limit: i64,
-    pub daily_limit: i64,
-    pub monthly_limit: i64,
+    pub business_calls_1h_limit: i64,
+    pub daily_credits_limit: i64,
+    pub monthly_credits_limit: i64,
     pub inherits_defaults: bool,
 }
 
@@ -19,10 +18,9 @@ pub struct AdminUserTag {
     pub icon: Option<String>,
     pub system_key: Option<String>,
     pub effect_kind: String,
-    pub hourly_any_delta: i64,
-    pub hourly_delta: i64,
-    pub daily_delta: i64,
-    pub monthly_delta: i64,
+    pub business_calls_1h_delta: i64,
+    pub daily_credits_delta: i64,
+    pub monthly_credits_delta: i64,
     pub user_count: i64,
 }
 
@@ -34,10 +32,9 @@ pub struct AdminUserTagBinding {
     pub icon: Option<String>,
     pub system_key: Option<String>,
     pub effect_kind: String,
-    pub hourly_any_delta: i64,
-    pub hourly_delta: i64,
-    pub daily_delta: i64,
-    pub monthly_delta: i64,
+    pub business_calls_1h_delta: i64,
+    pub daily_credits_delta: i64,
+    pub monthly_credits_delta: i64,
     pub source: String,
 }
 
@@ -49,10 +46,9 @@ pub struct AdminUserQuotaBreakdownEntry {
     pub tag_name: Option<String>,
     pub source: Option<String>,
     pub effect_kind: String,
-    pub hourly_any_delta: i64,
-    pub hourly_delta: i64,
-    pub daily_delta: i64,
-    pub monthly_delta: i64,
+    pub business_calls_1h_delta: i64,
+    pub daily_credits_delta: i64,
+    pub monthly_credits_delta: i64,
 }
 
 #[derive(Debug, Clone)]
@@ -68,14 +64,10 @@ pub struct UserDashboardSummary {
     pub debug_info_shared: bool,
     pub request_rate: RequestRateView,
     pub business_calls_1h: BusinessCalls1hSummary,
-    pub hourly_any_used: i64,
-    pub hourly_any_limit: i64,
-    pub quota_hourly_used: i64,
-    pub quota_hourly_limit: i64,
-    pub quota_daily_used: i64,
-    pub quota_daily_limit: i64,
-    pub quota_monthly_used: i64,
-    pub quota_monthly_limit: i64,
+    pub daily_credits_used: i64,
+    pub daily_credits_limit: i64,
+    pub monthly_credits_used: i64,
+    pub monthly_credits_limit: i64,
     pub daily_success: i64,
     pub daily_failure: i64,
     pub monthly_success: i64,
@@ -132,20 +124,18 @@ pub struct TokenLogMetricsSummary {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AdminUserUsageSeriesKind {
     Rate5m,
-    Quota1h,
-    Quota24h,
-    QuotaMonth,
     BusinessCalls1h,
+    DailyCredits,
+    MonthlyCredits,
 }
 
 impl AdminUserUsageSeriesKind {
     pub fn parse(value: &str) -> Option<Self> {
         match value.trim() {
             "rate5m" => Some(Self::Rate5m),
-            "quota1h" => Some(Self::Quota1h),
-            "quota24h" => Some(Self::Quota24h),
-            "quotaMonth" => Some(Self::QuotaMonth),
             "businessCalls1h" => Some(Self::BusinessCalls1h),
+            "dailyCredits" => Some(Self::DailyCredits),
+            "monthlyCredits" => Some(Self::MonthlyCredits),
             _ => None,
         }
     }
@@ -204,9 +194,9 @@ pub struct UserDashboardProgressCard {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct UserDashboardOverviewProgress {
     pub request_rate: UserDashboardProgressCard,
-    pub quota_hourly: UserDashboardProgressCard,
-    pub quota_daily: UserDashboardProgressCard,
-    pub quota_monthly: UserDashboardProgressCard,
+    pub business_calls_1h: UserDashboardProgressCard,
+    pub daily_credits: UserDashboardProgressCard,
+    pub monthly_credits: UserDashboardProgressCard,
 }
 
 #[derive(Debug, Clone)]

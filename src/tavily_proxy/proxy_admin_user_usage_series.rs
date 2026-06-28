@@ -60,14 +60,13 @@ fn build_admin_user_usage_series_points(
                     }
                 });
             let display_bucket_start = match series {
-                AdminUserUsageSeriesKind::Quota24h => Local
+                AdminUserUsageSeriesKind::DailyCredits => Local
                     .timestamp_opt(bucket_start, 0)
                     .single()
                     .map(|local_dt| local_dt.naive_local().and_utc().timestamp())
                     .or(Some(bucket_start)),
-                AdminUserUsageSeriesKind::QuotaMonth => Some(bucket_start),
+                AdminUserUsageSeriesKind::MonthlyCredits => Some(bucket_start),
                 AdminUserUsageSeriesKind::Rate5m
-                | AdminUserUsageSeriesKind::Quota1h
                 | AdminUserUsageSeriesKind::BusinessCalls1h => None,
             };
             AdminUserUsageSeriesPoint {
@@ -86,6 +85,25 @@ impl TavilyProxy {
         user_id: &str,
         series: AdminUserUsageSeriesKind,
     ) -> Result<AdminUserUsageSeries, ProxyError> {
+        if matches!(series, AdminUserUsageSeriesKind::BusinessCalls1h) {
+            let business_calls = self.admin_user_business_calls_1h_series(user_id).await?;
+            return Ok(AdminUserUsageSeries {
+                limit: business_calls.limit,
+                points: business_calls
+                    .points
+                    .into_iter()
+                    .map(|point| AdminUserUsageSeriesPoint {
+                        bucket_start: point.bucket_start,
+                        display_bucket_start: point.display_bucket_start,
+                        value: match (point.bars.success, point.bars.failure) {
+                            (None, None) => None,
+                            (success, failure) => Some(success.unwrap_or(0) + failure.unwrap_or(0)),
+                        },
+                        limit_value: point.limit_value,
+                    })
+                    .collect(),
+            });
+        }
         self.key_store.flush_request_stats_writes().await?;
         let now = self.backend_time.now_utc();
         let (
@@ -114,30 +132,7 @@ impl TavilyProxy {
                     None,
                 )
             }
-            AdminUserUsageSeriesKind::Quota1h => {
-                let current_bucket_start =
-                    now.timestamp() - now.timestamp().rem_euclid(SECS_PER_HOUR);
-                let start = current_bucket_start - 71 * SECS_PER_HOUR;
-                let bucket_starts = (0..72)
-                    .map(|index| start + index * SECS_PER_HOUR)
-                    .collect();
-                let limit = self
-                    .key_store
-                    .resolve_account_quota_resolution(user_id)
-                    .await?
-                    .effective
-                    .hourly_limit;
-                (
-                    AccountUsageRollupMetricKind::BusinessCredits,
-                    AccountUsageRollupBucketKind::Hour,
-                    bucket_starts,
-                    current_bucket_start + SECS_PER_HOUR,
-                    META_KEY_ACCOUNT_USAGE_ROLLUP_QUOTA1H_COVERAGE_START,
-                    limit,
-                    Some(AccountQuotaLimitSnapshotField::Hourly),
-                )
-            }
-            AdminUserUsageSeriesKind::Quota24h => {
+            AdminUserUsageSeriesKind::DailyCredits => {
                 let current_bucket_start =
                     server_local_day_window_utc(now.with_timezone(&Local)).start;
                 let start = shift_local_day_start_utc_ts(current_bucket_start, -6);
@@ -152,7 +147,7 @@ impl TavilyProxy {
                     .resolve_account_quota_resolution(user_id)
                     .await?
                     .effective
-                    .daily_limit;
+                    .daily_credits_limit;
                 (
                     AccountUsageRollupMetricKind::BusinessCredits,
                     AccountUsageRollupBucketKind::Day,
@@ -163,7 +158,7 @@ impl TavilyProxy {
                     Some(AccountQuotaLimitSnapshotField::Daily),
                 )
             }
-            AdminUserUsageSeriesKind::QuotaMonth => {
+            AdminUserUsageSeriesKind::MonthlyCredits => {
                 let current_bucket_start = start_of_month(now).timestamp();
                 let start = shift_month_start_utc_ts(current_bucket_start, -11);
                 let mut bucket_starts = Vec::with_capacity(12);
@@ -177,7 +172,7 @@ impl TavilyProxy {
                     .resolve_account_quota_resolution(user_id)
                     .await?
                     .effective
-                    .monthly_limit;
+                    .monthly_credits_limit;
                 (
                     AccountUsageRollupMetricKind::BusinessCredits,
                     AccountUsageRollupBucketKind::Month,
@@ -261,7 +256,7 @@ impl TavilyProxy {
             .resolve_account_quota_resolution(user_id)
             .await?
             .effective
-            .hourly_limit
+            .business_calls_1h_limit
             .max(0);
         let mut points = self.user_business_calls_1h_window.usage_series(user_id).await;
         let bucket_starts: Vec<i64> = points.iter().map(|point| point.bucket_start).collect();

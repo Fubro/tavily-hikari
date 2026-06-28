@@ -1949,10 +1949,6 @@ export function updateAdminRegistrationSettings(
 }
 
 export interface AdminQuotaLimitSet {
-  hourlyAnyLimit: number
-  hourlyLimit: number
-  dailyLimit: number
-  monthlyLimit: number
   businessCalls1hLimit: number
   dailyCreditsLimit: number
   monthlyCreditsLimit: number
@@ -1975,10 +1971,6 @@ export interface AdminUserTag {
   icon: string | null
   systemKey: string | null
   effectKind: string
-  hourlyAnyDelta: number
-  hourlyDelta: number
-  dailyDelta: number
-  monthlyDelta: number
   businessCalls1hDelta: number
   dailyCreditsDelta: number
   monthlyCreditsDelta: number
@@ -1992,10 +1984,6 @@ export interface AdminUserTagBinding {
   icon: string | null
   systemKey: string | null
   effectKind: string
-  hourlyAnyDelta: number
-  hourlyDelta: number
-  dailyDelta: number
-  monthlyDelta: number
   businessCalls1hDelta: number
   dailyCreditsDelta: number
   monthlyCreditsDelta: number
@@ -2009,10 +1997,6 @@ export interface AdminUserQuotaBreakdownEntry {
   tagName: string | null
   source: string | null
   effectKind: string
-  hourlyAnyDelta: number
-  hourlyDelta: number
-  dailyDelta: number
-  monthlyDelta: number
   businessCalls1hDelta: number
   dailyCreditsDelta: number
   monthlyCreditsDelta: number
@@ -2029,14 +2013,6 @@ export interface AdminUserSummary {
   tags: AdminUserTagBinding[]
   requestRate: RequestRate
   businessCalls1h: BusinessCalls1hSummary
-  hourlyAnyUsed: number
-  hourlyAnyLimit: number
-  quotaHourlyUsed: number
-  quotaHourlyLimit: number
-  quotaDailyUsed: number
-  quotaDailyLimit: number
-  quotaMonthlyUsed: number
-  quotaMonthlyLimit: number
   dailyCreditsUsed: number
   dailyCreditsLimit: number
   monthlyCreditsUsed: number
@@ -2053,10 +2029,10 @@ export interface AdminUserSummary {
 }
 
 export type AdminUsersSortField =
-  | 'hourlyAnyUsed'
-  | 'quotaHourlyUsed'
-  | 'quotaDailyUsed'
-  | 'quotaMonthlyUsed'
+  | 'requestRateUsed'
+  | 'businessCalls1hUsed'
+  | 'dailyCreditsUsed'
+  | 'monthlyCreditsUsed'
   | 'dailySuccessRate'
   | 'monthlySuccessRate'
   | 'monthlyBrokenCount'
@@ -2164,7 +2140,7 @@ export interface AdminUserRechargeEntitlementAudit {
 
 export type AdminUserIpTimelineEntry = { ipAddress: string; firstSeenAt: number; lastSeenAt: number; requestCount: number }
 
-export type AdminUserUsageSeriesKey = 'rate5m' | 'quota1h' | 'quota24h' | 'quotaMonth' | 'businessCalls1h'
+export type AdminUserUsageSeriesKey = 'rate5m' | 'businessCalls1h' | 'dailyCredits' | 'monthlyCredits'
 
 export interface AdminUserUsageSeriesQuotaPoint {
   bucketStart: number
@@ -2204,10 +2180,9 @@ export interface AdminUserUsageSeriesLegacy {
 }
 
 export interface UpdateUserQuotaPayload {
-  hourlyAnyLimit?: number
-  hourlyLimit: number
-  dailyLimit: number
-  monthlyLimit: number
+  businessCalls1hLimit: number
+  dailyCreditsLimit: number
+  monthlyCreditsLimit: number
 }
 
 export interface UpdateUserBrokenKeyLimitPayload {
@@ -2239,10 +2214,9 @@ export interface UpsertAdminUserTagPayload {
   displayName: string
   icon: string | null
   effectKind: string
-  hourlyAnyDelta: number
-  hourlyDelta: number
-  dailyDelta: number
-  monthlyDelta: number
+  businessCalls1hDelta: number
+  dailyCreditsDelta: number
+  monthlyCreditsDelta: number
 }
 
 export interface UserTokenResponse {
@@ -2275,14 +2249,6 @@ export interface UserDashboard {
   debugInfoShared: boolean
   requestRate: RequestRate
   businessCalls1h: BusinessCalls1hSummary
-  hourlyAnyUsed: number
-  hourlyAnyLimit: number
-  quotaHourlyUsed: number
-  quotaHourlyLimit: number
-  quotaDailyUsed: number
-  quotaDailyLimit: number
-  quotaMonthlyUsed: number
-  quotaMonthlyLimit: number
   dailyCreditsUsed: number
   dailyCreditsLimit: number
   monthlyCreditsUsed: number
@@ -2313,9 +2279,6 @@ export interface UserDashboardProgressCard {
 
 export interface UserDashboardOverviewProgress {
   requestRate: UserDashboardProgressCard
-  quotaHourly: UserDashboardProgressCard
-  quotaDaily: UserDashboardProgressCard
-  quotaMonthly: UserDashboardProgressCard
   businessCalls1h: UserDashboardProgressCard
   dailyCredits: UserDashboardProgressCard
   monthlyCredits: UserDashboardProgressCard
@@ -2330,14 +2293,6 @@ export interface UserTokenSummary {
   tokenId: string; enabled: boolean; note: string | null; lastUsedAt: number | null
   requestRate: RequestRate
   businessCalls1h: BusinessCalls1hSummary
-  hourlyAnyUsed: number
-  hourlyAnyLimit: number
-  quotaHourlyUsed: number
-  quotaHourlyLimit: number
-  quotaDailyUsed: number
-  quotaDailyLimit: number
-  quotaMonthlyUsed: number
-  quotaMonthlyLimit: number
   dailyCreditsUsed: number
   dailyCreditsLimit: number
   monthlyCreditsUsed: number

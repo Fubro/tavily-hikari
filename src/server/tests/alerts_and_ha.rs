@@ -201,10 +201,10 @@ async fn ha_switching_back_to_single_disables_billing_and_runtime_triggers() {
     sqlx::query(
         r#"
         INSERT INTO account_quota_limits (
-            user_id, hourly_any_limit, hourly_limit, daily_limit, monthly_limit,
+            user_id, business_calls_1h_limit, daily_credits_limit, monthly_credits_limit,
             monthly_broken_limit, monthly_blocked_key_limit_delta, inherits_defaults,
             created_at, updated_at
-        ) VALUES ('user-ha-single-reopen', 1, 2, 3, 4, 5, 0, 1, 1, 1)
+        ) VALUES ('user-ha-single-reopen', 2, 3, 4, 5, 0, 1, 1, 1)
         ON CONFLICT(user_id) DO UPDATE SET updated_at = excluded.updated_at
         "#,
     )
@@ -369,10 +369,10 @@ async fn ha_billing_and_runtime_channels_do_not_route_into_control_outbox() {
     sqlx::query(
         r#"
         INSERT INTO account_quota_limits (
-            user_id, hourly_any_limit, hourly_limit, daily_limit, monthly_limit,
+            user_id, business_calls_1h_limit, daily_credits_limit, monthly_credits_limit,
             monthly_broken_limit, monthly_blocked_key_limit_delta, inherits_defaults,
             created_at, updated_at
-        ) VALUES ('user-runtime', 1, 2, 3, 4, 5, 0, 1, 1, 1)
+        ) VALUES ('user-runtime', 2, 3, 4, 5, 0, 1, 1, 1)
         ON CONFLICT(user_id) DO UPDATE SET updated_at = excluded.updated_at
         "#,
     )

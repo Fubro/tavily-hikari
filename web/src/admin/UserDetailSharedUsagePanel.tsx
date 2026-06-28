@@ -33,16 +33,15 @@ ChartJS.register(CategoryScale, LinearScale, BarElement, LineController, LineEle
 const USAGE_TAB_ORDER: readonly AdminUserUsagePanelTab[] = [
   'rate5m',
   'businessCalls1h',
-  'quota24h',
-  'quotaMonth',
+  'dailyCredits',
+  'monthlyCredits',
   'ip',
 ]
 const USAGE_SERIES_KEYS = new Set<AdminUserUsageSeriesKey>([
   'rate5m',
-  'quota1h',
   'businessCalls1h',
-  'quota24h',
-  'quotaMonth',
+  'dailyCredits',
+  'monthlyCredits',
 ])
 
 type LoadStatus = 'idle' | 'loading' | 'success' | 'error'
@@ -103,14 +102,14 @@ function formatBucketAxisLabel(
   point: AdminUserUsageSeriesQuotaPoint,
 ): string {
   const date = new Date((point.displayBucketStart ?? point.bucketStart) * 1000)
-  if (series === 'quotaMonth') {
+  if (series === 'monthlyCredits') {
     return new Intl.DateTimeFormat(locale, {
       year: '2-digit',
       month: '2-digit',
       timeZone: 'UTC',
     }).format(date)
   }
-  if (series === 'quota24h') {
+  if (series === 'dailyCredits') {
     return new Intl.DateTimeFormat(locale, {
       month: '2-digit',
       day: '2-digit',
@@ -135,11 +134,9 @@ function bucketDurationSeconds(series: AdminUserUsageSeriesKey, bucketStart: num
     case 'rate5m':
     case 'businessCalls1h':
       return 5 * 60
-    case 'quota1h':
-      return 60 * 60
-    case 'quota24h':
+    case 'dailyCredits':
       return 24 * 60 * 60
-    case 'quotaMonth': {
+    case 'monthlyCredits': {
       const start = new Date(bucketStart * 1000)
       return Math.max(1, Math.round((monthBucketEnd(start).getTime() - start.getTime()) / 1000))
     }
@@ -153,14 +150,14 @@ function formatBucketTooltipLabel(
 ): string {
   const displayStart = point.displayBucketStart ?? point.bucketStart
   const start = new Date(displayStart * 1000)
-  if (series === 'quotaMonth') {
+  if (series === 'monthlyCredits') {
     return new Intl.DateTimeFormat(locale, {
       year: 'numeric',
       month: 'long',
       timeZone: 'UTC',
     }).format(start)
   }
-  if (series === 'quota24h') {
+  if (series === 'dailyCredits') {
     return new Intl.DateTimeFormat(locale, {
       year: 'numeric',
       month: '2-digit',
@@ -213,11 +210,9 @@ function axisTickStride(series: AdminUserUsageSeriesKey): number {
     case 'rate5m':
     case 'businessCalls1h':
       return 24
-    case 'quota1h':
-      return 6
-    case 'quota24h':
+    case 'dailyCredits':
       return 1
-    case 'quotaMonth':
+    case 'monthlyCredits':
       return 1
   }
 }
@@ -310,9 +305,7 @@ export function UserDetailSharedUsagePanel({
   description,
 }: UserDetailSharedUsagePanelProps): JSX.Element {
   const { resolvedTheme } = useTheme()
-  const [activeSeries, setActiveSeries] = useState<AdminUserUsagePanelTab>(
-    initialSeries === 'quota1h' ? 'businessCalls1h' : initialSeries,
-  )
+  const [activeSeries, setActiveSeries] = useState<AdminUserUsagePanelTab>(initialSeries)
   const [seriesCache, setSeriesCache] = useState<Partial<Record<AdminUserUsageSeriesKey, AdminUserUsageSeries>>>({})
   const [statusBySeries, setStatusBySeries] = useState<Partial<Record<AdminUserUsageSeriesKey, LoadStatus>>>({})
   const [hoverTooltip, setHoverTooltip] = useState<SharedUsageTooltipState | null>(null)
@@ -504,8 +497,8 @@ export function UserDetailSharedUsagePanel({
           borderColor: chartPalette.barBorder,
           borderWidth: 1,
           borderRadius: 6,
-          barPercentage: activeSeries === 'quotaMonth' ? 0.62 : 0.72,
-          categoryPercentage: activeSeries === 'quotaMonth' ? 0.72 : 0.82,
+          barPercentage: activeSeries === 'monthlyCredits' ? 0.62 : 0.72,
+          categoryPercentage: activeSeries === 'monthlyCredits' ? 0.72 : 0.82,
         },
         {
           type: 'line',
@@ -795,8 +788,8 @@ export function UserDetailSharedUsagePanel({
             options={[
               { value: 'rate5m', label: usersStrings.detail.sharedUsageTabs.fiveMinute },
               { value: 'businessCalls1h', label: usersStrings.detail.sharedUsageTabs.businessOneHour },
-              { value: 'quota24h', label: usersStrings.detail.sharedUsageTabs.daily },
-              { value: 'quotaMonth', label: usersStrings.detail.sharedUsageTabs.monthly },
+              { value: 'dailyCredits', label: usersStrings.detail.sharedUsageTabs.daily },
+              { value: 'monthlyCredits', label: usersStrings.detail.sharedUsageTabs.monthly },
               { value: 'ip', label: usersStrings.detail.sharedUsageTabs.ip },
             ]}
             ariaLabel={usersStrings.detail.sharedUsageTitle}
@@ -811,8 +804,8 @@ export function UserDetailSharedUsagePanel({
             options={[
               { value: 'rate5m', label: usersStrings.detail.sharedUsageTabs.fiveMinute },
               { value: 'businessCalls1h', label: usersStrings.detail.sharedUsageTabs.businessOneHour },
-              { value: 'quota24h', label: usersStrings.detail.sharedUsageTabs.daily },
-              { value: 'quotaMonth', label: usersStrings.detail.sharedUsageTabs.monthly },
+              { value: 'dailyCredits', label: usersStrings.detail.sharedUsageTabs.daily },
+              { value: 'monthlyCredits', label: usersStrings.detail.sharedUsageTabs.monthly },
               { value: 'ip', label: usersStrings.detail.sharedUsageTabs.ip },
             ]}
             ariaLabel={usersStrings.detail.sharedUsageTitle}

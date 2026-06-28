@@ -14,25 +14,23 @@ pub(crate) struct RequestRateLimitSnapshotRecord {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct AccountQuotaLimitSnapshotRecord {
     pub(crate) changed_at: i64,
-    pub(crate) hourly_any_limit: i64,
-    pub(crate) hourly_limit: i64,
-    pub(crate) daily_limit: i64,
-    pub(crate) monthly_limit: i64,
+    pub(crate) business_calls_1h_limit: i64,
+    pub(crate) daily_credits_limit: i64,
+    pub(crate) monthly_credits_limit: i64,
 }
 
 impl AccountQuotaLimitSnapshotRecord {
     fn same_limits_as(&self, limits: &AccountQuotaLimits) -> bool {
-        self.hourly_any_limit == limits.hourly_any_limit
-            && self.hourly_limit == limits.hourly_limit
-            && self.daily_limit == limits.daily_limit
-            && self.monthly_limit == limits.monthly_limit
+        self.business_calls_1h_limit == limits.business_calls_1h_limit
+            && self.daily_credits_limit == limits.daily_credits_limit
+            && self.monthly_credits_limit == limits.monthly_credits_limit
     }
 
     pub(crate) fn select(&self, field: AccountQuotaLimitSnapshotField) -> i64 {
         match field {
-            AccountQuotaLimitSnapshotField::Hourly => self.hourly_limit,
-            AccountQuotaLimitSnapshotField::Daily => self.daily_limit,
-            AccountQuotaLimitSnapshotField::Monthly => self.monthly_limit,
+            AccountQuotaLimitSnapshotField::Hourly => self.business_calls_1h_limit,
+            AccountQuotaLimitSnapshotField::Daily => self.daily_credits_limit,
+            AccountQuotaLimitSnapshotField::Monthly => self.monthly_credits_limit,
         }
     }
 }
@@ -150,9 +148,9 @@ impl KeyStore {
         &self,
         user_id: &str,
     ) -> Result<Option<AccountQuotaLimitSnapshotRecord>, ProxyError> {
-        sqlx::query_as::<_, (i64, i64, i64, i64, i64)>(
+        sqlx::query_as::<_, (i64, i64, i64, i64)>(
             r#"
-            SELECT changed_at, hourly_any_limit, hourly_limit, daily_limit, monthly_limit
+            SELECT changed_at, business_calls_1h_limit, daily_credits_limit, monthly_credits_limit
             FROM account_quota_limit_snapshots
             WHERE user_id = ?
             ORDER BY changed_at DESC, id DESC
@@ -164,14 +162,16 @@ impl KeyStore {
         .await
         .map(|row| {
             row.map(
-                |(changed_at, hourly_any_limit, hourly_limit, daily_limit, monthly_limit)| {
-                    AccountQuotaLimitSnapshotRecord {
-                        changed_at,
-                        hourly_any_limit,
-                        hourly_limit,
-                        daily_limit,
-                        monthly_limit,
-                    }
+                |(
+                    changed_at,
+                    business_calls_1h_limit,
+                    daily_credits_limit,
+                    monthly_credits_limit,
+                )| AccountQuotaLimitSnapshotRecord {
+                    changed_at,
+                    business_calls_1h_limit,
+                    daily_credits_limit,
+                    monthly_credits_limit,
                 },
             )
         })
@@ -186,10 +186,14 @@ impl KeyStore {
     ) -> Result<Vec<AccountQuotaLimitSnapshotRecord>, ProxyError> {
         let mut snapshots = Vec::new();
 
-        if let Some((changed_at, hourly_any_limit, hourly_limit, daily_limit, monthly_limit)) =
-            sqlx::query_as::<_, (i64, i64, i64, i64, i64)>(
+        if let Some((
+            changed_at,
+            business_calls_1h_limit,
+            daily_credits_limit,
+            monthly_credits_limit,
+        )) = sqlx::query_as::<_, (i64, i64, i64, i64)>(
                 r#"
-                SELECT changed_at, hourly_any_limit, hourly_limit, daily_limit, monthly_limit
+                SELECT changed_at, business_calls_1h_limit, daily_credits_limit, monthly_credits_limit
                 FROM account_quota_limit_snapshots
                 WHERE user_id = ?
                   AND changed_at < ?
@@ -204,16 +208,15 @@ impl KeyStore {
         {
             snapshots.push(AccountQuotaLimitSnapshotRecord {
                 changed_at,
-                hourly_any_limit,
-                hourly_limit,
-                daily_limit,
-                monthly_limit,
+                business_calls_1h_limit,
+                daily_credits_limit,
+                monthly_credits_limit,
             });
         }
 
-        let window_rows = sqlx::query_as::<_, (i64, i64, i64, i64, i64)>(
+        let window_rows = sqlx::query_as::<_, (i64, i64, i64, i64)>(
             r#"
-            SELECT changed_at, hourly_any_limit, hourly_limit, daily_limit, monthly_limit
+            SELECT changed_at, business_calls_1h_limit, daily_credits_limit, monthly_credits_limit
             FROM account_quota_limit_snapshots
             WHERE user_id = ?
               AND changed_at >= ?
@@ -228,13 +231,17 @@ impl KeyStore {
         .await?;
 
         snapshots.extend(window_rows.into_iter().map(
-            |(changed_at, hourly_any_limit, hourly_limit, daily_limit, monthly_limit)| {
+            |(
+                changed_at,
+                business_calls_1h_limit,
+                daily_credits_limit,
+                monthly_credits_limit,
+            )| {
                 AccountQuotaLimitSnapshotRecord {
                     changed_at,
-                    hourly_any_limit,
-                    hourly_limit,
-                    daily_limit,
-                    monthly_limit,
+                    business_calls_1h_limit,
+                    daily_credits_limit,
+                    monthly_credits_limit,
                 }
             },
         ));
@@ -260,20 +267,18 @@ impl KeyStore {
             INSERT INTO account_quota_limit_snapshots (
                 user_id,
                 changed_at,
-                hourly_any_limit,
-                hourly_limit,
-                daily_limit,
-                monthly_limit
+                business_calls_1h_limit,
+                daily_credits_limit,
+                monthly_credits_limit
             )
-            VALUES (?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?)
             "#,
         )
         .bind(user_id)
         .bind(changed_at)
-        .bind(limits.hourly_any_limit)
-        .bind(limits.hourly_limit)
-        .bind(limits.daily_limit)
-        .bind(limits.monthly_limit)
+        .bind(limits.business_calls_1h_limit)
+        .bind(limits.daily_credits_limit)
+        .bind(limits.monthly_credits_limit)
         .execute(&self.pool)
         .await?;
         Ok(())
@@ -323,20 +328,18 @@ impl KeyStore {
 
         let mut known_since = None;
         let base_limits = if let Some((
-            hourly_any_limit,
-            hourly_limit,
-            daily_limit,
-            monthly_limit,
+            business_calls_1h_limit,
+            daily_credits_limit,
+            monthly_credits_limit,
             inherits_defaults,
             created_at,
             updated_at,
-        )) = sqlx::query_as::<_, (i64, i64, i64, i64, i64, i64, i64)>(
+        )) = sqlx::query_as::<_, (i64, i64, i64, i64, i64, i64)>(
             r#"
             SELECT
-                hourly_any_limit,
-                hourly_limit,
-                daily_limit,
-                monthly_limit,
+                business_calls_1h_limit,
+                daily_credits_limit,
+                monthly_credits_limit,
                 COALESCE(inherits_defaults, 1),
                 created_at,
                 updated_at
@@ -351,10 +354,9 @@ impl KeyStore {
         {
             known_since = Some(created_at.max(updated_at));
             account_quota_limits_from_row(
-                hourly_any_limit,
-                hourly_limit,
-                daily_limit,
-                monthly_limit,
+                business_calls_1h_limit,
+                daily_credits_limit,
+                monthly_credits_limit,
                 inherits_defaults,
             )
         } else {

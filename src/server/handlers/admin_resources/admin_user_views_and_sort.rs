@@ -17,10 +17,12 @@ impl AdminUsersSortDirection {
 impl AdminUsersSortField {
     fn to_paged_admin_user_sort_field(self) -> Option<tavily_hikari::AdminUserListSortField> {
         match self {
-            Self::HourlyAnyUsed => None,
-            Self::QuotaHourlyUsed => Some(tavily_hikari::AdminUserListSortField::QuotaHourlyUsed),
-            Self::QuotaDailyUsed => Some(tavily_hikari::AdminUserListSortField::QuotaDailyUsed),
-            Self::QuotaMonthlyUsed => Some(tavily_hikari::AdminUserListSortField::QuotaMonthlyUsed),
+            Self::RequestRateUsed => None,
+            Self::BusinessCalls1hUsed => None,
+            Self::DailyCreditsUsed => Some(tavily_hikari::AdminUserListSortField::DailyCreditsUsed),
+            Self::MonthlyCreditsUsed => {
+                Some(tavily_hikari::AdminUserListSortField::MonthlyCreditsUsed)
+            }
             Self::DailySuccessRate => Some(tavily_hikari::AdminUserListSortField::DailySuccessRate),
             Self::MonthlySuccessRate => {
                 Some(tavily_hikari::AdminUserListSortField::MonthlySuccessRate)
@@ -338,10 +340,9 @@ fn build_admin_user_recharge_entitlement_view(
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct UpdateUserQuotaRequest {
-    hourly_any_limit: Option<i64>,
-    hourly_limit: i64,
-    daily_limit: i64,
-    monthly_limit: i64,
+    business_calls_1h_limit: i64,
+    daily_credits_limit: i64,
+    monthly_credits_limit: i64,
 }
 
 #[derive(Debug, Deserialize)]
@@ -396,10 +397,9 @@ struct UserTagMutationRequest {
     display_name: String,
     icon: Option<String>,
     effect_kind: String,
-    hourly_any_delta: i64,
-    hourly_delta: i64,
-    daily_delta: i64,
-    monthly_delta: i64,
+    business_calls_1h_delta: i64,
+    daily_credits_delta: i64,
+    monthly_credits_delta: i64,
 }
 
 #[derive(Debug, Deserialize)]
@@ -468,9 +468,9 @@ struct ListUnboundTokenUsageResponse {
 
 fn build_admin_quota_view(quota: &tavily_hikari::AdminQuotaLimitSet) -> AdminQuotaView {
     AdminQuotaView {
-        business_calls_1h_limit: quota.hourly_limit,
-        daily_credits_limit: quota.daily_limit,
-        monthly_credits_limit: quota.monthly_limit,
+        business_calls_1h_limit: quota.business_calls_1h_limit,
+        daily_credits_limit: quota.daily_credits_limit,
+        monthly_credits_limit: quota.monthly_credits_limit,
         inherits_defaults: quota.inherits_defaults,
     }
 }
@@ -483,9 +483,9 @@ fn build_admin_user_tag_view(tag: &tavily_hikari::AdminUserTag) -> AdminUserTagV
         icon: tag.icon.clone(),
         system_key: tag.system_key.clone(),
         effect_kind: tag.effect_kind.clone(),
-        business_calls_1h_delta: tag.hourly_delta,
-        daily_credits_delta: tag.daily_delta,
-        monthly_credits_delta: tag.monthly_delta,
+        business_calls_1h_delta: tag.business_calls_1h_delta,
+        daily_credits_delta: tag.daily_credits_delta,
+        monthly_credits_delta: tag.monthly_credits_delta,
         user_count: tag.user_count,
     }
 }
@@ -500,9 +500,9 @@ fn build_admin_user_tag_binding_view(
         icon: binding.icon.clone(),
         system_key: binding.system_key.clone(),
         effect_kind: binding.effect_kind.clone(),
-        business_calls_1h_delta: binding.hourly_delta,
-        daily_credits_delta: binding.daily_delta,
-        monthly_credits_delta: binding.monthly_delta,
+        business_calls_1h_delta: binding.business_calls_1h_delta,
+        daily_credits_delta: binding.daily_credits_delta,
+        monthly_credits_delta: binding.monthly_credits_delta,
         source: binding.source.clone(),
     }
 }
@@ -517,9 +517,9 @@ fn build_admin_quota_breakdown_view(
         tag_name: entry.tag_name.clone(),
         source: entry.source.clone(),
         effect_kind: entry.effect_kind.clone(),
-        business_calls_1h_delta: entry.hourly_delta,
-        daily_credits_delta: entry.daily_delta,
-        monthly_credits_delta: entry.monthly_delta,
+        business_calls_1h_delta: entry.business_calls_1h_delta,
+        daily_credits_delta: entry.daily_credits_delta,
+        monthly_credits_delta: entry.monthly_credits_delta,
     }
 }
 
@@ -584,10 +584,10 @@ fn build_admin_user_summary_view(
             limit: summary.business_calls_1h.limit,
             window_minutes: summary.business_calls_1h.window_minutes,
         },
-        daily_credits_used: summary.quota_daily_used,
-        daily_credits_limit: summary.quota_daily_limit,
-        monthly_credits_used: summary.quota_monthly_used,
-        monthly_credits_limit: summary.quota_monthly_limit,
+        daily_credits_used: summary.daily_credits_used,
+        daily_credits_limit: summary.daily_credits_limit,
+        monthly_credits_used: summary.monthly_credits_used,
+        monthly_credits_limit: summary.monthly_credits_limit,
         daily_success: summary.daily_success,
         daily_failure: summary.daily_failure,
         monthly_success: summary.monthly_success,
@@ -659,14 +659,10 @@ fn empty_user_dashboard_summary() -> tavily_hikari::UserDashboardSummary {
             window_minutes: 60,
             ..tavily_hikari::BusinessCalls1hSummary::default()
         },
-        hourly_any_used: 0,
-        hourly_any_limit: 0,
-        quota_hourly_used: 0,
-        quota_hourly_limit: 0,
-        quota_daily_used: 0,
-        quota_daily_limit: 0,
-        quota_monthly_used: 0,
-        quota_monthly_limit: 0,
+        daily_credits_used: 0,
+        daily_credits_limit: 0,
+        monthly_credits_used: 0,
+        monthly_credits_limit: 0,
         daily_success: 0,
         daily_failure: 0,
         monthly_success: 0,
@@ -786,32 +782,32 @@ fn compare_admin_user_rows(
     };
 
     let ordering = match sort_field {
-        AdminUsersSortField::HourlyAnyUsed => compare_quota_usage(
-            left.summary.hourly_any_used,
-            left.summary.hourly_any_limit,
-            right.summary.hourly_any_used,
-            right.summary.hourly_any_limit,
+        AdminUsersSortField::RequestRateUsed => compare_quota_usage(
+            left.summary.request_rate.used,
+            left.summary.request_rate.limit,
+            right.summary.request_rate.used,
+            right.summary.request_rate.limit,
             direction,
         ),
-        AdminUsersSortField::QuotaHourlyUsed => compare_quota_usage(
-            left.summary.quota_hourly_used,
-            left.summary.quota_hourly_limit,
-            right.summary.quota_hourly_used,
-            right.summary.quota_hourly_limit,
+        AdminUsersSortField::BusinessCalls1hUsed => compare_quota_usage(
+            left.summary.business_calls_1h.total_count,
+            left.summary.business_calls_1h.limit,
+            right.summary.business_calls_1h.total_count,
+            right.summary.business_calls_1h.limit,
             direction,
         ),
-        AdminUsersSortField::QuotaDailyUsed => compare_quota_usage(
-            left.summary.quota_daily_used,
-            left.summary.quota_daily_limit,
-            right.summary.quota_daily_used,
-            right.summary.quota_daily_limit,
+        AdminUsersSortField::DailyCreditsUsed => compare_quota_usage(
+            left.summary.daily_credits_used,
+            left.summary.daily_credits_limit,
+            right.summary.daily_credits_used,
+            right.summary.daily_credits_limit,
             direction,
         ),
-        AdminUsersSortField::QuotaMonthlyUsed => compare_quota_usage(
-            left.summary.quota_monthly_used,
-            left.summary.quota_monthly_limit,
-            right.summary.quota_monthly_used,
-            right.summary.quota_monthly_limit,
+        AdminUsersSortField::MonthlyCreditsUsed => compare_quota_usage(
+            left.summary.monthly_credits_used,
+            left.summary.monthly_credits_limit,
+            right.summary.monthly_credits_used,
+            right.summary.monthly_credits_limit,
             direction,
         ),
         AdminUsersSortField::DailySuccessRate => compare_success_rate(

@@ -367,7 +367,7 @@ export default function UserDashboardOverview({
               className="user-console-progress-card-label"
             />
           }
-          card={progress?.quotaHourly ?? null}
+          card={progress?.businessCalls1h ?? null}
           loading={loading}
           accent="hour"
           marker={markerText.hour}
@@ -382,7 +382,7 @@ export default function UserDashboardOverview({
               className="user-console-progress-card-label"
             />
           }
-          card={progress?.quotaDaily ?? null}
+          card={progress?.dailyCredits ?? null}
           loading={loading}
           accent="day"
           marker={markerText.day}
@@ -397,7 +397,7 @@ export default function UserDashboardOverview({
               className="user-console-progress-card-label"
             />
           }
-          card={progress?.quotaMonthly ?? null}
+          card={progress?.monthlyCredits ?? null}
           loading={loading}
           accent="month"
           marker={markerText.monthUtc}

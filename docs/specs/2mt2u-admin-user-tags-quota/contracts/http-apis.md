@@ -19,7 +19,7 @@
   - `monthlyCreditsDelta: number`
 - Notes
   - 仅允许创建 custom tag。
-  - 旧 `hourlyAnyDelta` 只保留服务端兼容入口，不再属于对外合同。
+  - 旧 `hourlyAnyDelta/hourlyDelta/dailyDelta/monthlyDelta` 已从对外合同移除。
 
 ## PATCH `/api/user-tags/:tagId`
 
@@ -80,10 +80,10 @@
 - Auth: admin only
 - Path unchanged.
 - Body shape:
-  - `hourlyLimit: number`
-  - `dailyLimit: number`
-  - `monthlyLimit: number`
+  - `businessCalls1hLimit: number`
+  - `dailyCreditsLimit: number`
+  - `monthlyCreditsLimit: number`
 - Semantics changed:
   - Writes user base quota only.
   - If payload equals current env defaults, server may set `inherits_defaults=1`; otherwise `inherits_defaults=0`.
-  - 旧 `hourlyAnyLimit` 若被 legacy caller 送入，服务端接受但忽略。
+  - 旧 `hourlyAnyLimit/hourlyLimit/dailyLimit/monthlyLimit` 不再属于对外合同。

@@ -18,14 +18,14 @@
 - 统一 subject 解析：绑定用户的 token 走 `user` 维度共享窗口；未绑定 token 走 `token` 维度独立窗口。
 - `/mcp` 与受鉴权的 `/api/tavily/*` 都命中新 limiter，并在 429 时返回可消费的 `Retry-After` 与统一 `requestRate` 视图。
 - 后端 DTO 与前端展示统一收敛到 `requestRate { used, limit, windowMinutes, scope }`；bound-user 侧旧 `hourlyAny*` 平铺 alias 已移除，只保留 `requestRate` 嵌套对象。
-- 管理端移除 raw-limit 编辑入口；legacy `hourlyAnyLimit` 写入继续兼容接收，但不再影响生效策略。
+- 管理端移除 raw-limit 编辑入口；bound-user 合同不再接收或输出 `hourlyAny*`。
 
 ## Non-goals
 
 - 不改业务配额（hour/day/month/credits）语义、账本真相源或 charge / settle 逻辑。
 - 不重构 `request_logs` / `auth_token_logs` 双日志持久化，也不顺带处理 `summary_windows`、catalog cache 等其他热点。
 - 不做多实例一致性、Redis 落地、生产部署或线上压测。
-- 不删除数据库中的 `hourly_any_limit` 列，也不清扫所有历史夹具字段。
+- 不改 `requestRate` 的 5 分钟能力边界，也不把它重新塞回账户额度表。
 
 ## Functional / Behavior Spec
 
@@ -57,11 +57,6 @@
   - `requestRate.limit`
   - `requestRate.windowMinutes`
   - `requestRate.scope` (`user` | `token`)
-- 非 bound-user 场景可继续保留 legacy alias 用于兼容过渡：
-  - `hourlyAnyUsed`
-  - `hourlyAnyLimit`
-  - 数据来源改为同一个内存 request-rate snapshot
-  - 不再表示真实“hourly configurable limiter”
 - 429 payload 统一返回：
   - `requestRate`
   - `Retry-After`
@@ -71,10 +66,8 @@
 
 ### 4. Legacy write compatibility
 
-- `PATCH /api/users/:id/quota` 若收到 `hourlyAnyLimit`：
-  - 继续接收，不返回 4xx
-  - 后端忽略该字段，不改变 raw limiter 生效值
-- 用户标签 / quota 相关 UI 不再暴露 raw-limit 可编辑入口；若 legacy payload 仍带 `hourlyAnyDelta`，前端本轮固定写 `0`。
+- 本轮不再为 bound-user quota/tag 写接口保留 `hourlyAny*` legacy payload 兼容。
+- `requestRate` 仍是唯一对外 request-limiter 合同。
 
 ## 范围（Scope）
 
@@ -108,14 +101,14 @@
 - `/mcp initialize`、`/mcp notifications/initialized`、`/mcp tools/list` 与受鉴权 `/api/tavily/*` 都命中新 limiter。
 - raw any-request limiter 不再读写 SQLite `request_minute` bucket，也不再依赖对应聚合查询。
 - admin / user 读接口稳定输出 `requestRate`，前端只展示新 request-rate 语义。
-- `hourlyAnyLimit` legacy 写入不会 4xx，但也不会再改变 raw limiter 行为。
+- bound-user 合同不存在 `hourlyAnyLimit` legacy 写入口。
 
 ## Validation Plan
 
 - Rust:
   - 单元测试滑动窗口边界、`Retry-After` 与 subject 共享/隔离
   - 集成测试覆盖 `/mcp` 与 `/api/tavily/*` raw limiter 命中
-  - admin quota PATCH 忽略 `hourlyAnyLimit`
+  - admin quota PATCH 仅接受 `businessCalls1hLimit/dailyCreditsLimit/monthlyCreditsLimit`
 - Web:
   - `bun run build`
   - Storybook 场景验证 admin / user request-rate 展示与 raw-limit 编辑入口移除

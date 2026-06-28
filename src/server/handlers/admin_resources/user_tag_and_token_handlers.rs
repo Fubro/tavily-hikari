@@ -40,10 +40,9 @@ async fn create_user_tag(
             display_name,
             icon.as_deref(),
             payload.effect_kind.trim(),
-            payload.hourly_any_delta,
-            payload.hourly_delta,
-            payload.daily_delta,
-            payload.monthly_delta,
+            payload.business_calls_1h_delta,
+            payload.daily_credits_delta,
+            payload.monthly_credits_delta,
         )
         .await
         .map_err(|err| admin_proxy_error_response("create user tag error", err))?;
@@ -76,10 +75,9 @@ async fn update_user_tag(
             display_name,
             icon.as_deref(),
             payload.effect_kind.trim(),
-            payload.hourly_any_delta,
-            payload.hourly_delta,
-            payload.daily_delta,
-            payload.monthly_delta,
+            payload.business_calls_1h_delta,
+            payload.daily_credits_delta,
+            payload.monthly_credits_delta,
         )
         .await
         .map_err(|err| admin_proxy_error_response("update user tag error", err))?
@@ -782,10 +780,10 @@ async fn get_user_detail(
             limit: summary.business_calls_1h.limit,
             window_minutes: summary.business_calls_1h.window_minutes,
         },
-        daily_credits_used: summary.quota_daily_used,
-        daily_credits_limit: summary.quota_daily_limit,
-        monthly_credits_used: summary.quota_monthly_used,
-        monthly_credits_limit: summary.quota_monthly_limit,
+        daily_credits_used: summary.daily_credits_used,
+        daily_credits_limit: summary.daily_credits_limit,
+        monthly_credits_used: summary.monthly_credits_used,
+        monthly_credits_limit: summary.monthly_credits_limit,
         daily_success: summary.daily_success,
         daily_failure: summary.daily_failure,
         monthly_success: summary.monthly_success,
@@ -990,10 +988,9 @@ async fn update_user_quota(
         return Err((StatusCode::FORBIDDEN, "forbidden".to_string()));
     }
     require_full_master_write(state.as_ref()).await?;
-    let _legacy_hourly_any_limit = payload.hourly_any_limit;
-    if payload.hourly_limit < 0
-        || payload.daily_limit < 0
-        || payload.monthly_limit < 0
+    if payload.business_calls_1h_limit < 0
+        || payload.daily_credits_limit < 0
+        || payload.monthly_credits_limit < 0
     {
         return Err((
             StatusCode::BAD_REQUEST,
@@ -1004,9 +1001,9 @@ async fn update_user_quota(
         .proxy
         .update_account_business_quota_limits(
             &id,
-            payload.hourly_limit,
-            payload.daily_limit,
-            payload.monthly_limit,
+            payload.business_calls_1h_limit,
+            payload.daily_credits_limit,
+            payload.monthly_credits_limit,
         )
         .await
         .map_err(|err| admin_proxy_error_response("update user quota error", err))?;

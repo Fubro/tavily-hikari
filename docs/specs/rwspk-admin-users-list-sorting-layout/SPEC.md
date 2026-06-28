@@ -65,14 +65,14 @@
 ## 接口契约（Interfaces & Contracts）
 
 - `GET /api/users`
-  - 新增 `sort`：`hourlyAnyUsed | quotaHourlyUsed | quotaDailyUsed | quotaMonthlyUsed | dailySuccessRate | monthlySuccessRate | lastActivity | lastLoginAt`
+  - 新增 `sort`：`requestRateUsed | businessCalls1hUsed | dailyCreditsUsed | monthlyCreditsUsed | dailySuccessRate | monthlySuccessRate | lastActivity | lastLoginAt`
   - 新增 `order`：`asc | desc`
   - 当 `sort` 缺失时，保持默认排序 `lastLoginAt DESC, userId ASC`。
 - 对外列标签语义同步为：
-  - `hourlyAnyUsed` => `5m 限流`
-  - `quotaHourlyUsed` => `业务请求 1h`
-  - `quotaDailyUsed` => `每日积分限额`
-  - `quotaMonthlyUsed` => `每月积分限额`
+  - `requestRateUsed` => `5m 限流`
+  - `businessCalls1hUsed` => `业务请求 1h`
+  - `dailyCreditsUsed` => `每日积分限额`
+  - `monthlyCreditsUsed` => `每月积分限额`
 - `/api/users` 响应
   - `AdminUserSummaryView` 与 `AdminUserDetailView` 新增 `monthlyFailure`。
 - 排序语义

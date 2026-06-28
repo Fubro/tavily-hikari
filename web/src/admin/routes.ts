@@ -67,8 +67,8 @@ const DEFAULT_TOKENS_PER_PAGE = 20
 const DEFAULT_RANKINGS_TAB: RankingTabKey = 'last24h'
 const TOKEN_PER_PAGE_OPTIONS = [20, 50, 100, 200] as const
 const ADMIN_USERS_OVERVIEW_SORT_FIELDS = new Set<AdminUsersSortField>([
-  'quotaDailyUsed',
-  'quotaMonthlyUsed',
+  'dailyCreditsUsed',
+  'monthlyCreditsUsed',
   'recentIpCount7d',
   'lastActivity',
   'lastLoginAt',

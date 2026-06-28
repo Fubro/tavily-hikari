@@ -34,10 +34,9 @@ function buildQuotaBreakdownEntry(
 ): AdminUserQuotaBreakdownEntry {
   return {
     ...entry,
-    hourlyAnyDelta: 0,
-    hourlyDelta: entry.businessCalls1hDelta,
-    dailyDelta: entry.dailyCreditsDelta,
-    monthlyDelta: entry.monthlyCreditsDelta,
+    businessCalls1hDelta: entry.businessCalls1hDelta,
+    dailyCreditsDelta: entry.dailyCreditsDelta,
+    monthlyCreditsDelta: entry.monthlyCreditsDelta,
   }
 }
 
@@ -78,7 +77,7 @@ export function AdminUserDetailQuotaWorkspace({
 }: AdminUserDetailQuotaWorkspaceProps): JSX.Element {
   const quotaFields = [
     {
-      field: 'hourlyLimit',
+      field: 'businessCalls1hLimit',
       label: (
         <UsageMetricLabel label={usersStrings.quota.hourly} kind="businessCalls1h" language={language} />
       ),
@@ -87,14 +86,14 @@ export function AdminUserDetailQuotaWorkspace({
       currentLimit: detail.quotaBase.businessCalls1hLimit,
     },
     {
-      field: 'dailyLimit',
+      field: 'dailyCreditsLimit',
       label: <UsageMetricLabel label={usersStrings.quota.daily} kind="dailyCredits" language={language} />,
       ariaLabel: usersStrings.quota.daily,
       used: detail.dailyCreditsUsed,
       currentLimit: detail.quotaBase.dailyCreditsLimit,
     },
     {
-      field: 'monthlyLimit',
+      field: 'monthlyCreditsLimit',
       label: <UsageMetricLabel label={usersStrings.quota.monthly} kind="monthlyCredits" language={language} />,
       ariaLabel: usersStrings.quota.monthly,
       used: detail.monthlyCreditsUsed,

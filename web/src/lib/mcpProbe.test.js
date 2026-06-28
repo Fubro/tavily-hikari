@@ -63,21 +63,19 @@ describe('mcpProbe helpers', () => {
 
   it('detects business quota exhaustion from token snapshots', () => {
     expect(getTokenBusinessQuotaWindow({
-      quotaHourlyUsed: 99,
-      quotaHourlyLimit: 100,
-      quotaDailyUsed: 500,
-      quotaDailyLimit: 500,
-      quotaMonthlyUsed: 4000,
-      quotaMonthlyLimit: 5000,
+      businessCalls1h: { totalCount: 99, limit: 100 },
+      dailyCreditsUsed: 500,
+      dailyCreditsLimit: 500,
+      monthlyCreditsUsed: 4000,
+      monthlyCreditsLimit: 5000,
     })).toBe('day')
 
     expect(getTokenBusinessQuotaWindow({
-      quotaHourlyUsed: 100,
-      quotaHourlyLimit: 100,
-      quotaDailyUsed: 10,
-      quotaDailyLimit: 500,
-      quotaMonthlyUsed: 10,
-      quotaMonthlyLimit: 5000,
+      businessCalls1h: { totalCount: 100, limit: 100 },
+      dailyCreditsUsed: 10,
+      dailyCreditsLimit: 500,
+      monthlyCreditsUsed: 10,
+      monthlyCreditsLimit: 5000,
     })).toBe('hour')
   })
 
@@ -91,20 +89,18 @@ describe('mcpProbe helpers', () => {
   it('revalidates blocked snapshots against a fresh quota read', async () => {
     let calls = 0
     const blocked = {
-      quotaHourlyUsed: 100,
-      quotaHourlyLimit: 100,
-      quotaDailyUsed: 100,
-      quotaDailyLimit: 500,
-      quotaMonthlyUsed: 100,
-      quotaMonthlyLimit: 5000,
+      businessCalls1h: { totalCount: 100, limit: 100 },
+      dailyCreditsUsed: 100,
+      dailyCreditsLimit: 500,
+      monthlyCreditsUsed: 100,
+      monthlyCreditsLimit: 5000,
     }
     const fresh = {
-      quotaHourlyUsed: 0,
-      quotaHourlyLimit: 100,
-      quotaDailyUsed: 100,
-      quotaDailyLimit: 500,
-      quotaMonthlyUsed: 100,
-      quotaMonthlyLimit: 5000,
+      businessCalls1h: { totalCount: 0, limit: 100 },
+      dailyCreditsUsed: 100,
+      dailyCreditsLimit: 500,
+      monthlyCreditsUsed: 100,
+      monthlyCreditsLimit: 5000,
     }
 
     const result = await revalidateBlockedQuotaWindow(blocked, async () => {
@@ -120,12 +116,11 @@ describe('mcpProbe helpers', () => {
   it('skips quota revalidation when the cached snapshot is already available', async () => {
     let calls = 0
     const available = {
-      quotaHourlyUsed: 0,
-      quotaHourlyLimit: 100,
-      quotaDailyUsed: 100,
-      quotaDailyLimit: 500,
-      quotaMonthlyUsed: 100,
-      quotaMonthlyLimit: 5000,
+      businessCalls1h: { totalCount: 0, limit: 100 },
+      dailyCreditsUsed: 100,
+      dailyCreditsLimit: 500,
+      monthlyCreditsUsed: 100,
+      monthlyCreditsLimit: 5000,
     }
 
     const result = await revalidateBlockedQuotaWindow(available, async () => {

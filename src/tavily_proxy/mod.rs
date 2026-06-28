@@ -997,7 +997,9 @@ impl TokenQuota {
                     .resolve_account_quota_resolution(&user_id)
                     .await?;
                 let limits = resolution.effective;
-                if limits.hourly_limit <= 0 || limits.daily_limit <= 0 || limits.monthly_limit <= 0
+                if limits.business_calls_1h_limit <= 0
+                    || limits.daily_credits_limit <= 0
+                    || limits.monthly_credits_limit <= 0
                 {
                     let hourly_used = self
                         .store
@@ -1012,11 +1014,11 @@ impl TokenQuota {
                         .await?;
                     TokenQuotaVerdict::new_without_hourly_enforcement(
                         hourly_used,
-                        limits.hourly_limit,
+                        limits.business_calls_1h_limit,
                         daily_used,
-                        limits.daily_limit,
+                        limits.daily_credits_limit,
                         monthly_used,
-                        limits.monthly_limit,
+                        limits.monthly_credits_limit,
                     )
                 } else {
                     self.store
@@ -1038,11 +1040,11 @@ impl TokenQuota {
                         .await?;
                     TokenQuotaVerdict::new_without_hourly_enforcement(
                         hourly_used,
-                        limits.hourly_limit,
+                        limits.business_calls_1h_limit,
                         daily_used,
-                        limits.daily_limit,
+                        limits.daily_credits_limit,
                         monthly_used,
-                        limits.monthly_limit,
+                        limits.monthly_credits_limit,
                     )
                 }
             }
@@ -1191,11 +1193,11 @@ impl TokenQuota {
                     .await?;
                 Ok(TokenQuotaVerdict::new_without_hourly_enforcement(
                     hourly_used,
-                    limits.hourly_limit,
+                    limits.business_calls_1h_limit,
                     daily_used,
-                    limits.daily_limit,
+                    limits.daily_credits_limit,
                     monthly_used,
-                    limits.monthly_limit,
+                    limits.monthly_credits_limit,
                 ))
             }
             QuotaSubject::Token(token_id) => {
@@ -1348,11 +1350,11 @@ impl TokenQuota {
                     token_id,
                     TokenQuotaVerdict::new_without_hourly_enforcement(
                         hourly_used,
-                        limits.hourly_limit,
+                        limits.business_calls_1h_limit,
                         daily_used,
-                        limits.daily_limit,
+                        limits.daily_credits_limit,
                         monthly_used,
-                        limits.monthly_limit,
+                        limits.monthly_credits_limit,
                     ),
                 );
             }
@@ -1868,7 +1870,7 @@ impl TavilyProxy {
             .resolve_account_quota_resolution(user_id)
             .await?
             .effective
-            .hourly_limit
+            .business_calls_1h_limit
             .max(0);
         Ok(Some(BusinessCalls1hLimitVerdict::new(summary)))
     }

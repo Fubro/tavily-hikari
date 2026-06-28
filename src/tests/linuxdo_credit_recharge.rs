@@ -3,10 +3,9 @@ use super::*;
 #[test]
 fn linuxdo_credit_recharge_adds_hourly_daily_and_monthly_quota() {
     let base = AccountQuotaLimits {
-        hourly_any_limit: 10,
-        hourly_limit: 20,
-        daily_limit: 30,
-        monthly_limit: 40,
+        business_calls_1h_limit: 20,
+        daily_credits_limit: 30,
+        monthly_credits_limit: 40,
         inherits_defaults: false,
     };
     let resolution = build_account_quota_resolution_with_recharge(
@@ -15,18 +14,17 @@ fn linuxdo_credit_recharge_adds_hourly_daily_and_monthly_quota() {
         linuxdo_credit_recharge_quota_delta(2000),
     );
 
-    assert_eq!(resolution.effective.hourly_any_limit, 10);
-    assert_eq!(resolution.effective.hourly_limit, 60);
-    assert_eq!(resolution.effective.daily_limit, 230);
-    assert_eq!(resolution.effective.monthly_limit, 2040);
+    assert_eq!(resolution.effective.business_calls_1h_limit, 60);
+    assert_eq!(resolution.effective.daily_credits_limit, 230);
+    assert_eq!(resolution.effective.monthly_credits_limit, 2040);
     let recharge = resolution
         .breakdown
         .iter()
         .find(|entry| entry.kind == "recharge")
         .expect("recharge row");
-    assert_eq!(recharge.hourly_delta, 40);
-    assert_eq!(recharge.daily_delta, 200);
-    assert_eq!(recharge.monthly_delta, 2000);
+    assert_eq!(recharge.business_calls_1h_delta, 40);
+    assert_eq!(recharge.daily_credits_delta, 200);
+    assert_eq!(recharge.monthly_credits_delta, 2000);
 }
 
 #[test]

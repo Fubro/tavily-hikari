@@ -19,10 +19,9 @@
   - `icon TEXT`
   - `system_key TEXT UNIQUE`
   - `effect_kind TEXT NOT NULL DEFAULT 'quota_delta'` (`quota_delta` | `block_all`)
-  - `hourly_any_delta INTEGER NOT NULL DEFAULT 0`
-  - `hourly_delta INTEGER NOT NULL DEFAULT 0`
-  - `daily_delta INTEGER NOT NULL DEFAULT 0`
-  - `monthly_delta INTEGER NOT NULL DEFAULT 0`
+  - `business_calls_1h_delta INTEGER NOT NULL DEFAULT 0`
+  - `daily_credits_delta INTEGER NOT NULL DEFAULT 0`
+  - `monthly_credits_delta INTEGER NOT NULL DEFAULT 0`
   - `created_at INTEGER NOT NULL`
   - `updated_at INTEGER NOT NULL`
 
@@ -50,6 +49,7 @@
 ### Migration notes（迁移说明）
 
 - 启动时创建新表，并为 `account_quota_limits` 增列 `inherits_defaults`。
+- 若数据库仍为旧额度列形态，启动期会自动把 `user_tags` 从 `hourly_any_delta/hourly_delta/daily_delta/monthly_delta` 迁到语义列，并物理删除旧列。
 - 一次性 `inherits_defaults` 回填只会把“当前仍等于 env 默认 tuple”的历史行保留为默认跟随；其他 legacy tuple 保守视为自定义基线，避免升级时覆盖管理员手工额度。
 - 初始化时 seed 5 个 LinuxDo 系统标签；重复启动必须幂等。
 - LinuxDo 系统标签默认 delta 直接镜像旧 token 默认额度，自动同步绑定后会按普通 tag delta 参与有效额度叠加。
