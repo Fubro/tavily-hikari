@@ -181,6 +181,7 @@
   story_id_or_title: `admin-components-dashboardoverview--results-area-mode`
   state: `results-area`
   evidence_note: 验证“面积图 · 调用结果”使用最近 6 小时、5 分钟粒度滚动窗口，并按结果分层堆叠展示。
+  PR: include
   image:
   ![管理员仪表盘小时图表：调用结果面积图](./assets/dashboard-hourly-results-area.png)
 
@@ -188,6 +189,7 @@
   story_id_or_title: `admin-components-dashboardoverview--types-area-mode`
   state: `types-area`
   evidence_note: 验证“面积图 · 调用类型”使用最近 6 小时、5 分钟粒度滚动窗口，并按类型分层堆叠展示。
+  PR: include
   image:
   ![管理员仪表盘小时图表：调用类型面积图](./assets/dashboard-hourly-types-area.png)
 
