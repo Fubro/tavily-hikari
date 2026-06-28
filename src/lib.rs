@@ -1015,6 +1015,8 @@ const META_KEY_DASHBOARD_REQUEST_ROLLUP_BUCKETS_V1_DONE: &str =
 const META_KEY_BILLING_LEDGER_STARTUP_HIGH_WATERMARK_V1: &str =
     "billing_ledger_startup_high_watermark_v1";
 const META_KEY_REQUEST_STATS_LAST_FLUSHED_AT_V1: &str = "request_stats_last_flushed_at_v1";
+const META_KEY_REQUEST_LOG_EFFECT_BUCKET_MIGRATION_V1_DONE: &str =
+    "request_log_effect_bucket_migration_v1_done";
 const META_KEY_REQUEST_LOG_CATALOG_ROLLUP_V1_DONE: &str = "request_log_catalog_rollup_v1_done";
 const META_KEY_REQUEST_LOG_CATALOG_ROLLUP_V1_RETENTION_DAYS: &str =
     "request_log_catalog_rollup_v1_retention_days";

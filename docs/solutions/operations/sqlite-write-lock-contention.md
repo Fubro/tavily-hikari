@@ -92,10 +92,10 @@ month-tail public metrics scan.
   whole startup set out in one wave, and keep the fail-closed rule tied to “every subscription
   fetch failed” rather than to a per-batch wall-clock artifact.
 - Align deploy health timing with that stricter contract. In this service the accepted image
-  baseline is `start-period=20s`, `interval=5s`, `timeout=5s`, and `retries=18`, with the
-  healthcheck command itself enforcing the 20-second minimum-success gate. That keeps old Docker
-  builders working while still stopping a fast successful probe from flipping the container healthy
-  before the intended startup hold window has elapsed.
+  baseline is `start-period=20s`, `interval=5s`, `timeout=5s`, and `retries=18`, but the
+  healthcheck command itself should probe only the strict `/health` endpoint. If the service is
+  truly ready, container healthy should flip on that first successful strict probe instead of
+  waiting behind an extra fixed delay.
 - Keep retention cleanup bounded. Large `request_logs` backlogs should be deleted in small batches
   with a runtime/batch budget and a catch-up delay, rather than one daily job holding or repeatedly
   contesting the writer until the whole backlog is gone.
@@ -195,6 +195,15 @@ month-tail public metrics scan.
   connection. Doing both at once makes owner-facing summary flushes and early scheduler enqueues
   contend for one slot, so `/health` may go green while `/api/summary` still returns transient
   500s.
+- Keep startup repairs explicitly partitioned by readiness contract. In this service,
+  `server_pressure_buckets` rebuild is a post-ready best-effort analysis view and belongs in a
+  one-shot background task, while `user_business_calls_1h` history rehydration is an owner-facing
+  startup summary and should be restored cheaply before strict readiness turns green.
+- For legacy one-time startup rewrites such as request-log effect-bucket migration, add a durable
+  completion marker plus a cheap indexed precheck, and commit the rewrite together with that marker
+  in one transaction. Re-running the same full-table `UPDATE` every restart wastes SQLite write
+  budget even when the database is already clean, while a non-atomic marker leaves partial-restart
+  ambiguity behind.
 - When both `main.request_logs` and `observability.request_logs` can coexist temporarily, schema
   probes must target the attached schema explicitly. Generic `pragma_table_info('request_logs')`
   lookups can resolve against the wrong DB and trigger duplicate-column repairs.

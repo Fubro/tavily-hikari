@@ -1314,6 +1314,7 @@ struct RequestLogDiagnosticMetadata {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct UserBusinessCallEventWrite {
     pub(crate) user_id: String,
+    pub(crate) request_log_id: Option<i64>,
     pub(crate) created_at: i64,
     pub(crate) result_status: String,
 }

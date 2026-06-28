@@ -402,11 +402,14 @@ impl TavilyProxy {
                 UserBusinessCallOutcome::Failure
             };
             self.user_business_calls_1h_window
-                .record_event(&event.user_id, event.created_at, outcome)
+                .record_event(&event.user_id, event.request_log_id, event.created_at, outcome)
                 .await;
-            self.key_store
-                .upsert_server_pressure_event(event.created_at, &event.result_status)
-                .await?;
+            self.record_server_pressure_event(
+                event.request_log_id,
+                event.created_at,
+                &event.result_status,
+            )
+            .await?;
         }
         Ok(())
     }
@@ -904,11 +907,14 @@ impl TavilyProxy {
                 UserBusinessCallOutcome::Failure
             };
             self.user_business_calls_1h_window
-                .record_event(&event.user_id, event.created_at, outcome)
+                .record_event(&event.user_id, event.request_log_id, event.created_at, outcome)
                 .await;
-            self.key_store
-                .upsert_server_pressure_event(event.created_at, &event.result_status)
-                .await?;
+            self.record_server_pressure_event(
+                event.request_log_id,
+                event.created_at,
+                &event.result_status,
+            )
+            .await?;
         }
         Ok(log_id)
     }

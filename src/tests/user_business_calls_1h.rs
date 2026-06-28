@@ -348,10 +348,37 @@ async fn user_business_calls_1h_backfill_rehydrates_recent_request_logs() {
     .await
     .expect("reopen proxy");
 
-    let summary = reopened
+    let initial_summary = reopened
         .user_dashboard_summary(&user.user_id, None)
         .await
-        .expect("load backfilled summary");
+        .expect("load summary after startup backfill");
+    assert_eq!(initial_summary.business_calls_1h.success_count, 1);
+    assert_eq!(initial_summary.business_calls_1h.failure_count, 1);
+    assert_eq!(initial_summary.business_calls_1h.total_count, 2);
+
+    assert!(
+        reopened.spawn_user_business_calls_1h_backfill_once(),
+        "post-startup background backfill attempt should still schedule"
+    );
+    assert!(
+        !reopened.spawn_user_business_calls_1h_backfill_once(),
+        "concurrent background backfill attempts should dedupe"
+    );
+
+    let summary = tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            let summary = reopened
+                .user_dashboard_summary(&user.user_id, None)
+                .await
+                .expect("load post-startup refreshed summary");
+            if summary.business_calls_1h.total_count == 2 {
+                return summary;
+            }
+            tokio::time::sleep(Duration::from_millis(25)).await;
+        }
+    })
+    .await
+    .expect("post-startup business-call refresh should complete in time");
     assert_eq!(summary.business_calls_1h.success_count, 1);
     assert_eq!(summary.business_calls_1h.failure_count, 1);
     assert_eq!(summary.business_calls_1h.total_count, 2);
@@ -539,6 +566,345 @@ async fn user_business_calls_1h_series_keeps_late_arriving_older_events_in_order
     assert_eq!(older_point.bars.failure, Some(0));
     assert_eq!(newer_point.bars.success, Some(0));
     assert_eq!(newer_point.bars.failure, Some(1));
+
+    let _ = std::fs::remove_file(db_path);
+}
+
+#[tokio::test]
+async fn user_business_calls_1h_backfill_preserves_live_events_after_snapshot_upper_bound() {
+    let (backend_time, manual_clock) = crate::BackendTime::manual_from_ts(1_700_300_000);
+    let db_path = temp_db_path("user-business-calls-1h-backfill-preserves-live-events");
+    let db_str = db_path.to_string_lossy().to_string();
+    let proxy = TavilyProxy::with_options_and_time(
+        Vec::<String>::new(),
+        DEFAULT_UPSTREAM,
+        &db_str,
+        TavilyProxyOptions::from_database_path(&db_str),
+        backend_time.clone(),
+    )
+    .await
+    .expect("proxy created");
+    let user = proxy
+        .upsert_oauth_account(&OAuthAccountProfile {
+            provider: "github".to_string(),
+            provider_user_id: "business-calls-backfill-live-race".to_string(),
+            username: Some("business_calls_backfill_live_race".to_string()),
+            name: Some("Business Calls Backfill Live Race".to_string()),
+            avatar_template: None,
+            active: true,
+            trust_level: None,
+            raw_payload_json: None,
+        })
+        .await
+        .expect("upsert user");
+    let token = proxy
+        .ensure_user_token_binding(&user.user_id, Some("business-calls-backfill-live-race"))
+        .await
+        .expect("bind token");
+    let request_kind = TokenRequestKind::new("api:search", "API | search", None);
+    let now = manual_clock.now_ts();
+
+    let historical_request_log_id: i64 = sqlx::query_scalar(
+        r#"
+        INSERT INTO request_logs (
+            method,
+            path,
+            status_code,
+            tavily_status_code,
+            result_status,
+            request_kind_key,
+            request_kind_label,
+            counts_business_quota,
+            request_user_id,
+            upstream_operation,
+            created_at
+        ) VALUES ('POST', '/api/tavily/search', 200, 200, 'success', 'api:search', 'API | search', 1, ?, 'http_search', ?)
+        RETURNING id
+        "#,
+    )
+    .bind(&user.user_id)
+    .bind(now - 20 * 60)
+    .fetch_one(&proxy.key_store.pool)
+    .await
+    .expect("insert historical request log");
+
+    let initial_summary = proxy
+        .user_dashboard_summary(&user.user_id, None)
+        .await
+        .expect("load summary before background backfill");
+    assert_eq!(initial_summary.business_calls_1h.total_count, 0);
+
+    assert!(
+        proxy.spawn_user_business_calls_1h_backfill_once(),
+        "initial background backfill should schedule"
+    );
+    tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            let summary = proxy
+                .user_dashboard_summary(&user.user_id, None)
+                .await
+                .expect("load summary after initial backfill");
+            if summary.business_calls_1h.total_count == 1 {
+                return summary;
+            }
+            tokio::time::sleep(Duration::from_millis(25)).await;
+        }
+    })
+    .await
+    .expect("initial background backfill should complete in time");
+
+    let live_request_log_id: i64 = sqlx::query_scalar(
+        r#"
+        INSERT INTO request_logs (
+            method,
+            path,
+            status_code,
+            tavily_status_code,
+            result_status,
+            request_kind_key,
+            request_kind_label,
+            counts_business_quota,
+            request_user_id,
+            upstream_operation,
+            created_at
+        ) VALUES ('POST', '/api/tavily/search', 500, 500, 'error', 'api:search', 'API | search', 1, ?, 'http_search', ?)
+        RETURNING id
+        "#,
+    )
+    .bind(&user.user_id)
+    .bind(now - 5 * 60)
+    .fetch_one(&proxy.key_store.pool)
+    .await
+    .expect("insert live request log");
+    manual_clock.set_now_ts(now);
+    proxy
+        .record_token_attempt_with_kind_request_log_metadata(
+            &token.id,
+            &Method::POST,
+            "/api/tavily/search",
+            Some("q=live"),
+            Some(500),
+            Some(500),
+            true,
+            "error",
+            Some("live startup request"),
+            &request_kind,
+            Some("upstream_error"),
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            Some(live_request_log_id),
+        )
+        .await
+        .expect("record live request");
+
+    assert!(
+        proxy.spawn_user_business_calls_1h_backfill_once(),
+        "second background backfill should schedule"
+    );
+    tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            let summary = proxy
+                .user_dashboard_summary(&user.user_id, None)
+                .await
+                .expect("load summary after second backfill");
+            if summary.business_calls_1h.total_count == 2 {
+                return summary;
+            }
+            tokio::time::sleep(Duration::from_millis(25)).await;
+        }
+    })
+    .await
+    .expect("second background backfill should preserve newer live event");
+
+    let summary = proxy
+        .user_dashboard_summary(&user.user_id, None)
+        .await
+        .expect("load summary after replay-safe backfill");
+    assert_eq!(historical_request_log_id + 1, live_request_log_id);
+    assert_eq!(summary.business_calls_1h.success_count, 1);
+    assert_eq!(summary.business_calls_1h.failure_count, 1);
+    assert_eq!(summary.business_calls_1h.total_count, 2);
+
+    let _ = std::fs::remove_file(db_path);
+}
+
+#[tokio::test]
+async fn user_business_calls_1h_backfill_dedupes_same_request_log_event() {
+    let (backend_time, manual_clock) = crate::BackendTime::manual_from_ts(1_700_400_000);
+    let db_path = temp_db_path("user-business-calls-1h-backfill-dedupes-same-log");
+    let db_str = db_path.to_string_lossy().to_string();
+    let proxy = TavilyProxy::with_options_and_time(
+        Vec::<String>::new(),
+        DEFAULT_UPSTREAM,
+        &db_str,
+        TavilyProxyOptions::from_database_path(&db_str),
+        backend_time.clone(),
+    )
+    .await
+    .expect("proxy created");
+    let user = proxy
+        .upsert_oauth_account(&OAuthAccountProfile {
+            provider: "github".to_string(),
+            provider_user_id: "business-calls-backfill-dedupe".to_string(),
+            username: Some("business_calls_backfill_dedupe".to_string()),
+            name: Some("Business Calls Backfill Dedupe".to_string()),
+            avatar_template: None,
+            active: true,
+            trust_level: None,
+            raw_payload_json: None,
+        })
+        .await
+        .expect("upsert user");
+    let token = proxy
+        .ensure_user_token_binding(&user.user_id, Some("business-calls-backfill-dedupe"))
+        .await
+        .expect("bind token");
+    let request_kind = TokenRequestKind::new("api:search", "API | search", None);
+    let now = manual_clock.now_ts();
+
+    let request_log_id: i64 = sqlx::query_scalar(
+        r#"
+        INSERT INTO request_logs (
+            method,
+            path,
+            status_code,
+            tavily_status_code,
+            result_status,
+            request_kind_key,
+            request_kind_label,
+            counts_business_quota,
+            request_user_id,
+            upstream_operation,
+            created_at
+        ) VALUES ('POST', '/api/tavily/search', 200, 200, 'success', 'api:search', 'API | search', 1, ?, 'http_search', ?)
+        RETURNING id
+        "#,
+    )
+    .bind(&user.user_id)
+    .bind(now - 6 * 60)
+    .fetch_one(&proxy.key_store.pool)
+    .await
+    .expect("insert request log");
+    manual_clock.set_now_ts(now);
+    proxy
+        .record_token_attempt_with_kind_request_log_metadata(
+            &token.id,
+            &Method::POST,
+            "/api/tavily/search",
+            Some("q=dedupe"),
+            Some(200),
+            Some(200),
+            true,
+            OUTCOME_SUCCESS,
+            None,
+            &request_kind,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            Some(request_log_id),
+        )
+        .await
+        .expect("record live request");
+
+    assert!(
+        proxy.spawn_user_business_calls_1h_backfill_once(),
+        "background backfill should schedule"
+    );
+    tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            let summary = proxy
+                .user_dashboard_summary(&user.user_id, None)
+                .await
+                .expect("load deduped summary while backfill runs");
+            if summary.business_calls_1h.total_count == 1 {
+                return summary;
+            }
+            tokio::time::sleep(Duration::from_millis(25)).await;
+        }
+    })
+    .await
+    .expect("backfill should not double-count same request log");
+
+    let summary = proxy
+        .user_dashboard_summary(&user.user_id, None)
+        .await
+        .expect("load deduped summary");
+    assert_eq!(summary.business_calls_1h.success_count, 1);
+    assert_eq!(summary.business_calls_1h.failure_count, 0);
+    assert_eq!(summary.business_calls_1h.total_count, 1);
+
+    let _ = std::fs::remove_file(db_path);
+}
+
+#[tokio::test]
+async fn user_business_calls_1h_metadata_free_token_logs_stay_out_of_live_business_window() {
+    let (backend_time, manual_clock) = crate::BackendTime::manual_from_ts(1_700_500_000);
+    let db_path = temp_db_path("user-business-calls-1h-no-request-log-metadata");
+    let db_str = db_path.to_string_lossy().to_string();
+    let proxy = TavilyProxy::with_options_and_time(
+        Vec::<String>::new(),
+        DEFAULT_UPSTREAM,
+        &db_str,
+        TavilyProxyOptions::from_database_path(&db_str),
+        backend_time,
+    )
+    .await
+    .expect("proxy created");
+    let user = proxy
+        .upsert_oauth_account(&OAuthAccountProfile {
+            provider: "github".to_string(),
+            provider_user_id: "business-calls-no-request-log-metadata".to_string(),
+            username: Some("business_calls_no_request_log_metadata".to_string()),
+            name: Some("Business Calls No Request Log Metadata".to_string()),
+            avatar_template: None,
+            active: true,
+            trust_level: None,
+            raw_payload_json: None,
+        })
+        .await
+        .expect("upsert user");
+    let token = proxy
+        .ensure_user_token_binding(
+            &user.user_id,
+            Some("business-calls-no-request-log-metadata"),
+        )
+        .await
+        .expect("bind token");
+    let request_kind = TokenRequestKind::new("api:search", "API | search", None);
+    let now = manual_clock.now_ts();
+
+    manual_clock.set_now_ts(now);
+    proxy
+        .record_token_attempt_with_kind(
+            &token.id,
+            &Method::POST,
+            "/api/tavily/search",
+            Some("q=legacy-live"),
+            Some(200),
+            Some(200),
+            true,
+            OUTCOME_SUCCESS,
+            None,
+            &request_kind,
+        )
+        .await
+        .expect("record metadata-free token log");
+
+    let summary = proxy
+        .user_dashboard_summary(&user.user_id, None)
+        .await
+        .expect("load summary after metadata-free token log");
+    assert_eq!(summary.business_calls_1h.success_count, 0);
+    assert_eq!(summary.business_calls_1h.failure_count, 0);
+    assert_eq!(summary.business_calls_1h.total_count, 0);
 
     let _ = std::fs::remove_file(db_path);
 }

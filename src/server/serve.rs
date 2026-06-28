@@ -951,7 +951,9 @@ fn spawn_post_ready_serving_tasks_for_role(
         );
         return false;
     }
-    state.proxy.spawn_server_pressure_buckets_rebuild_once()
+    let pressure = state.proxy.spawn_server_pressure_buckets_rebuild_once();
+    let business_calls = state.proxy.spawn_user_business_calls_1h_backfill_once();
+    pressure || business_calls
 }
 
 async fn apply_ha_baseline_response_stream(

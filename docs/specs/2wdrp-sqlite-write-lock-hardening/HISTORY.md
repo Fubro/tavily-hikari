@@ -172,6 +172,17 @@
   request-log snapshot.
 - Cold startup subscription refresh now fans out across the whole configured URL set in one wave,
   so 5-8 slow feeds no longer turn strict readiness into multiple 60-second timeout batches.
-- Tightened the image `HEALTHCHECK` timing to a builder-compatible 20-second minimum gate plus
-  `start-period=20s/interval=5s/timeout=5s/retries=18`, so container healthy state still tracks
-  the stricter serving contract without depending on Docker 25-only `--start-interval`.
+
+## 2026-06-28
+
+- Removed the extra image-side 20-second success gate after production follow-up confirmed it was
+  delaying healthy beyond true strict readiness. The image still uses
+  `start-period=20s/interval=5s/timeout=5s/retries=18`, but healthy now flips on the first
+  successful strict `/health` probe.
+- Closed the implementation/spec drift around startup-critical observability work: the sidecar
+  derived-table rebuild path no longer runs `server_pressure_buckets` synchronously, while
+  `user_business_calls_1h` history rehydration is again loaded during startup so owner-facing
+  business-call summaries are already populated when strict readiness turns green.
+- Added a no-op-aware request-log effect-bucket migration guard so steady-state restarts skip the
+  legacy full-table repair once the migration has completed or a cheap indexed precheck proves no
+  remaining rows need rewriting, and the rewrite plus completion marker now commit atomically.

@@ -83,8 +83,17 @@ struct RequestRateSubject {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct UserBusinessCallEvent {
+    request_log_id: Option<i64>,
     created_at: i64,
     outcome: UserBusinessCallOutcome,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct ServerPressureBufferedEvent {
+    generation: u64,
+    request_log_id: Option<i64>,
+    created_at: i64,
+    result_status: String,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -101,6 +110,7 @@ struct UserBusinessCallCounts {
 
 #[derive(Clone, Debug)]
 struct UserBusinessCalls1hBackfillRow {
+    request_log_id: Option<i64>,
     user_id: String,
     created_at: i64,
     outcome: UserBusinessCallOutcome,
@@ -686,8 +696,10 @@ pub struct TavilyProxy {
     pub(crate) low_quota_depletion_threshold: i64,
     pub(crate) forward_proxy_runtime_started: Arc<AtomicBool>,
     pub(crate) forward_proxy_runtime_transition_lock: Arc<Mutex<()>>,
+    user_business_calls_backfill_started: Arc<AtomicBool>,
     server_pressure_rebuild_started: Arc<AtomicBool>,
     server_pressure_rebuild_generation: Arc<AtomicU64>,
+    server_pressure_rebuild_buffered_events: Arc<Mutex<Vec<ServerPressureBufferedEvent>>>,
     health_readiness_grace_until: tokio::time::Instant,
     pub(crate) backend_time: BackendTime,
 }
@@ -1667,25 +1679,49 @@ impl UserBusinessCalls1hWindow {
     pub(crate) async fn backfill_recent(&self) -> Result<(), ProxyError> {
         let now_ts = self.backend_time.now_ts();
         let since_ts = now_ts.saturating_sub(self.retention_secs);
-        let rows = sqlx::query(
+        let upper_bound_request_log_id = sqlx::query_scalar::<_, i64>(
             r#"
-            SELECT request_user_id, created_at, result_status
+            SELECT COALESCE(MAX(id), 0)
             FROM request_logs INDEXED BY idx_request_logs_time
             WHERE created_at >= ?
               AND request_user_id IS NOT NULL
               AND counts_business_quota = 1
               AND result_status != ?
               AND upstream_operation IS NOT NULL
+            "#,
+        )
+        .bind(since_ts)
+        .bind(OUTCOME_QUOTA_EXHAUSTED)
+        .fetch_one(&self.store.pool)
+        .await?;
+        if upper_bound_request_log_id == 0 {
+            self.backend
+                .replace_from_backfill(&[], upper_bound_request_log_id, now_ts, self.retention_secs)
+                .await;
+            return Ok(());
+        }
+        let rows = sqlx::query(
+            r#"
+            SELECT id, request_user_id, created_at, result_status
+            FROM request_logs INDEXED BY idx_request_logs_time
+            WHERE created_at >= ?
+              AND request_user_id IS NOT NULL
+              AND counts_business_quota = 1
+              AND result_status != ?
+              AND upstream_operation IS NOT NULL
+              AND id <= ?
             ORDER BY created_at ASC, id ASC
             "#,
         )
         .bind(since_ts)
         .bind(OUTCOME_QUOTA_EXHAUSTED)
+        .bind(upper_bound_request_log_id)
         .fetch_all(&self.store.pool)
         .await?;
         let events: Vec<UserBusinessCalls1hBackfillRow> = rows
             .into_iter()
             .filter_map(|row| {
+                let request_log_id = row.try_get::<i64, _>("id").ok();
                 let user_id = row.try_get::<String, _>("request_user_id").ok()?;
                 let created_at = row.try_get::<i64, _>("created_at").ok()?;
                 let result_status = row.try_get::<String, _>("result_status").ok()?;
@@ -1695,6 +1731,7 @@ impl UserBusinessCalls1hWindow {
                     UserBusinessCallOutcome::Failure
                 };
                 Some(UserBusinessCalls1hBackfillRow {
+                    request_log_id,
                     user_id,
                     created_at,
                     outcome,
@@ -1702,7 +1739,12 @@ impl UserBusinessCalls1hWindow {
             })
             .collect();
         self.backend
-            .replace_from_backfill(&events, now_ts, self.retention_secs)
+            .replace_from_backfill(
+                &events,
+                upper_bound_request_log_id,
+                now_ts,
+                self.retention_secs,
+            )
             .await;
         Ok(())
     }
@@ -1710,6 +1752,7 @@ impl UserBusinessCalls1hWindow {
     pub(crate) async fn record_event(
         &self,
         user_id: &str,
+        request_log_id: Option<i64>,
         created_at: i64,
         outcome: UserBusinessCallOutcome,
     ) {
@@ -1717,6 +1760,7 @@ impl UserBusinessCalls1hWindow {
             .record_event(
                 user_id,
                 UserBusinessCallEvent {
+                    request_log_id,
                     created_at,
                     outcome,
                 },
@@ -1963,13 +2007,14 @@ impl UserBusinessCalls1hBackend {
     async fn replace_from_backfill(
         &self,
         rows: &[UserBusinessCalls1hBackfillRow],
+        upper_bound_request_log_id: i64,
         now_ts: i64,
         retention_secs: i64,
     ) {
         match self {
             Self::Memory(backend) => {
                 backend
-                    .replace_from_backfill(rows, now_ts, retention_secs)
+                    .replace_from_backfill(rows, upper_bound_request_log_id, now_ts, retention_secs)
                     .await
             }
         }
@@ -2190,21 +2235,43 @@ impl MemoryUserBusinessCalls1hBackend {
     async fn replace_from_backfill(
         &self,
         rows: &[UserBusinessCalls1hBackfillRow],
+        upper_bound_request_log_id: i64,
         now_ts: i64,
         retention_secs: i64,
     ) {
         let mut state = self.state.lock().await;
+        Self::maybe_gc(&mut state, now_ts, retention_secs);
+        let preserved_live_events: Vec<(String, UserBusinessCallEvent)> = state
+            .entries
+            .iter()
+            .flat_map(|(user_id, queue)| {
+                queue
+                    .iter()
+                    .filter(move |event| {
+                        event.request_log_id.is_some_and(|request_log_id| {
+                            request_log_id > upper_bound_request_log_id
+                        })
+                    })
+                    .cloned()
+                    .map(|event| (user_id.clone(), event))
+            })
+            .collect();
         state.entries.clear();
         state.next_gc_at = 0;
         for row in rows {
-            state
-                .entries
-                .entry(row.user_id.clone())
-                .or_default()
-                .push_back(UserBusinessCallEvent {
+            let queue = state.entries.entry(row.user_id.clone()).or_default();
+            Self::insert_event_sorted(
+                queue,
+                UserBusinessCallEvent {
+                    request_log_id: row.request_log_id,
                     created_at: row.created_at,
                     outcome: row.outcome,
-                });
+                },
+            );
+        }
+        for (user_id, event) in preserved_live_events {
+            let queue = state.entries.entry(user_id).or_default();
+            Self::insert_event_sorted(queue, event);
         }
         Self::maybe_gc(&mut state, now_ts, retention_secs);
     }
@@ -2325,6 +2392,13 @@ impl MemoryUserBusinessCalls1hBackend {
         queue: &mut VecDeque<UserBusinessCallEvent>,
         event: UserBusinessCallEvent,
     ) {
+        if let Some(request_log_id) = event.request_log_id
+            && queue
+                .iter()
+                .any(|existing| existing.request_log_id == Some(request_log_id))
+        {
+            return;
+        }
         let insert_at = queue
             .iter()
             .position(|existing| existing.created_at > event.created_at)
