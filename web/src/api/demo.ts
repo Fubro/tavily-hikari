@@ -886,6 +886,7 @@ function demoSummaryWindows(
 function demoDashboardOverview(now = Date.now()) {
   const pulse = demoPulse(now)
   const currentHourStart = Math.floor(Date.now() / 3_600_000) * 3_600
+  const currentRealtimeBucketStart = Math.floor(Date.now() / 300_000) * 300
   const summaryWindows = demoSummaryWindows(currentHourStart, now)
   const currentMonthDays = Math.max(0, Math.round((summaryWindows.month_period_end - summaryWindows.month_start) / 86_400))
   const previousMonthDays = Math.max(0, Math.round((summaryWindows.previous_month_end - summaryWindows.previous_month_start) / 86_400))
@@ -927,21 +928,21 @@ function demoDashboardOverview(now = Date.now()) {
     summary: demoSummary(now),
     summaryWindows,
     hourlyRequestWindow: {
-      bucketSeconds: 3600,
-      visibleBuckets: 25,
-      retainedBuckets: 49,
-      buckets: range(49).map((index) => ({
-        bucketStart: currentHourStart - (48 - index) * 3_600,
-        secondarySuccess: 8 + index + (index >= 42 ? pulse % 4 : 0),
-        primarySuccess: 24 + index * 2 + (index >= 40 ? (pulse % 5) * 2 : 0),
-        secondaryFailure: (index % 5) + (index >= 44 ? pulse % 2 : 0),
-        primaryFailure429: index % 7 === 0 ? 2 + (index >= 45 ? pulse % 2 : 0) : 0,
-        primaryFailureOther: (index % 4) + (index >= 41 ? pulse % 3 : 0),
-        unknown: index === 48 && pulse % 4 === 0 ? 1 : 0,
-        mcpNonBillable: 4 + (index % 6) + (index >= 43 ? pulse % 2 : 0),
-        mcpBillable: 10 + (index % 8) + (index >= 44 ? pulse % 3 : 0),
-        apiNonBillable: 3 + (index % 5) + (index >= 42 ? pulse % 2 : 0),
-        apiBillable: 18 + index + (index >= 45 ? pulse % 4 : 0),
+      bucketSeconds: 300,
+      visibleBuckets: 73,
+      retainedBuckets: 589,
+      buckets: range(589).map((index) => ({
+        bucketStart: currentRealtimeBucketStart - (588 - index) * 300,
+        secondarySuccess: 2 + (index % 5) + (index >= 576 ? pulse % 4 : 0),
+        primarySuccess: 6 + (index % 18) + (index >= 576 ? (pulse % 5) * 2 : 0),
+        secondaryFailure: (index % 5 === 0 ? 1 : 0) + (index >= 580 ? pulse % 2 : 0),
+        primaryFailure429: index % 41 === 0 ? 2 + (index >= 582 ? pulse % 2 : 0) : 0,
+        primaryFailureOther: (index % 17 === 0 ? 2 : index % 7 === 0 ? 1 : 0) + (index >= 576 ? pulse % 3 : 0),
+        unknown: index === 588 && pulse % 4 === 0 ? 1 : 0,
+        mcpNonBillable: 1 + (index % 3) + (index >= 578 ? pulse % 2 : 0),
+        mcpBillable: 3 + (index % 6) + (index >= 580 ? pulse % 3 : 0),
+        apiNonBillable: 1 + (index % 2) + (index >= 576 ? pulse % 2 : 0),
+        apiBillable: 4 + (index % 10) + (index >= 582 ? pulse % 4 : 0),
       })),
     },
     monthSeries: {

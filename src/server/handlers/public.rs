@@ -20,6 +20,13 @@ async fn fetch_summary(
         })
 }
 
+fn dashboard_hourly_window_anchor(now_ts: i64) -> i64 {
+    const DASHBOARD_HOURLY_WINDOW_BUCKET_SECS: i64 = 5 * 60;
+    now_ts
+        .div_euclid(DASHBOARD_HOURLY_WINDOW_BUCKET_SECS)
+        .saturating_mul(DASHBOARD_HOURLY_WINDOW_BUCKET_SECS)
+}
+
 #[derive(Debug, Clone, Serialize)]
 struct SummaryQuotaChargeView {
     local_estimated_credits: i64,
@@ -1256,12 +1263,7 @@ async fn build_dashboard_overview_payload(
         disabled_tokens.truncate(DASHBOARD_DISABLED_TOKENS_LIMIT);
     }
 
-    let hourly_window_anchor = state
-        .proxy
-        .backend_time()
-        .now_ts()
-        .div_euclid(3600)
-        .saturating_mul(3600);
+    let hourly_window_anchor = dashboard_hourly_window_anchor(state.proxy.backend_time().now_ts());
     let disabled_tokens_error = token_coverage == "error";
     let disabled_token_truncated = token_coverage == "truncated";
     let disabled_token_ids = disabled_tokens
@@ -1589,12 +1591,7 @@ async fn compute_dashboard_overview_freshness(
             .map(|group| (group.id, group.count, group.last_seen))
             .collect(),
         request_log_retention_days,
-        hourly_window_anchor: state
-            .proxy
-            .backend_time()
-            .now_ts()
-            .div_euclid(3600)
-            .saturating_mul(3600),
+        hourly_window_anchor: dashboard_hourly_window_anchor(state.proxy.backend_time().now_ts()),
         retention_since,
     })
 }

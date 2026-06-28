@@ -50,6 +50,10 @@ export const DEFAULT_VISIBLE_TYPE_SERIES = [
 
 export const DASHBOARD_AREA_CHART_STACK_ID = 'area'
 export const DASHBOARD_AREA_CHART_TENSION = 0.18
+export const DASHBOARD_REALTIME_BUCKET_SECONDS = 5 * 60
+export const DASHBOARD_REALTIME_VISIBLE_BUCKETS = 73
+export const DASHBOARD_REALTIME_RETAINED_BUCKETS = 589
+export const DASHBOARD_COMPARISON_BUCKET_SECONDS = 60 * 60
 
 export type DashboardAreaFillTarget = 'origin' | '-1'
 
@@ -72,6 +76,12 @@ export interface DashboardHourlyChartPreferencesInput {
 export interface DashboardHourlyRangeSlot {
   bucketStart: number
   bucket: DashboardHourlyRequestBucket | null
+}
+
+export interface DashboardHourlyWindowView {
+  bucketSeconds: number
+  visibleBuckets: number
+  slots: DashboardHourlyRangeSlot[]
 }
 
 export interface DashboardVisibleWindow {
@@ -245,9 +255,9 @@ function getHourlyBucketLabelFormatters(timeZone?: string): {
 
 export function createEmptyDashboardHourlyRequestWindow(): DashboardHourlyRequestWindow {
   return {
-    bucketSeconds: 3600,
-    visibleBuckets: 25,
-    retainedBuckets: 49,
+    bucketSeconds: DASHBOARD_REALTIME_BUCKET_SECONDS,
+    visibleBuckets: DASHBOARD_REALTIME_VISIBLE_BUCKETS,
+    retainedBuckets: DASHBOARD_REALTIME_RETAINED_BUCKETS,
     buckets: [],
   }
 }
@@ -356,6 +366,72 @@ export function buildHourlyBucketLookup(
   return new Map(buckets.map((bucket) => [bucket.bucketStart, bucket]))
 }
 
+function createEmptyBucket(bucketStart: number): DashboardHourlyRequestBucket {
+  return {
+    bucketStart,
+    secondarySuccess: 0,
+    primarySuccess: 0,
+    secondaryFailure: 0,
+    primaryFailure429: 0,
+    primaryFailureOther: 0,
+    unknown: 0,
+    mcpNonBillable: 0,
+    mcpBillable: 0,
+    apiNonBillable: 0,
+    apiBillable: 0,
+  }
+}
+
+function addBucketValues(target: DashboardHourlyRequestBucket, source: DashboardHourlyRequestBucket): void {
+  target.secondarySuccess += source.secondarySuccess
+  target.primarySuccess += source.primarySuccess
+  target.secondaryFailure += source.secondaryFailure
+  target.primaryFailure429 += source.primaryFailure429
+  target.primaryFailureOther += source.primaryFailureOther
+  target.unknown += source.unknown
+  target.mcpNonBillable += source.mcpNonBillable
+  target.mcpBillable += source.mcpBillable
+  target.apiNonBillable += source.apiNonBillable
+  target.apiBillable += source.apiBillable
+}
+
+export function buildAggregatedHourlySlots(
+  window: DashboardHourlyRequestWindow,
+  rangeStart: number,
+  rangeEnd: number,
+  outputBucketSeconds = DASHBOARD_COMPARISON_BUCKET_SECONDS,
+): DashboardHourlyWindowView {
+  if (!Number.isFinite(rangeStart) || !Number.isFinite(rangeEnd) || rangeEnd <= rangeStart) {
+    return { bucketSeconds: outputBucketSeconds, visibleBuckets: 0, slots: [] }
+  }
+  const bucketSeconds = Number.isFinite(outputBucketSeconds) && outputBucketSeconds > 0
+    ? Math.trunc(outputBucketSeconds)
+    : DASHBOARD_COMPARISON_BUCKET_SECONDS
+  const firstBucketStart = rangeStart
+  const buckets = new Map<number, DashboardHourlyRequestBucket>()
+  const hasValues = new Set<number>()
+  for (const bucket of window.buckets) {
+    if (bucket.bucketStart < rangeStart || bucket.bucketStart >= rangeEnd) continue
+    const bucketStart = rangeStart + Math.floor((bucket.bucketStart - rangeStart) / bucketSeconds) * bucketSeconds
+    const aggregate = buckets.get(bucketStart) ?? createEmptyBucket(bucketStart)
+    addBucketValues(aggregate, bucket)
+    buckets.set(bucketStart, aggregate)
+    hasValues.add(bucketStart)
+  }
+  const slots: DashboardHourlyRangeSlot[] = []
+  for (let bucketStart = firstBucketStart; bucketStart < rangeEnd; bucketStart += bucketSeconds) {
+    slots.push({
+      bucketStart,
+      bucket: hasValues.has(bucketStart) ? buckets.get(bucketStart) ?? createEmptyBucket(bucketStart) : null,
+    })
+  }
+  return {
+    bucketSeconds,
+    visibleBuckets: slots.length,
+    slots,
+  }
+}
+
 export function formatHourlyBucketLabel(bucketStart: number, timeZone?: string): [string, string] {
   const date = new Date(bucketStart * 1000)
   const { dayFormatter, hourFormatter } = getHourlyBucketLabelFormatters(timeZone)
@@ -437,11 +513,37 @@ export function buildDeltaSeriesSlotValues<T extends DashboardResultSeriesId | D
   })
 }
 
+export function formatDashboardRealtimeWindowLabel(
+  copy: string,
+  bucketSeconds: number,
+  visibleBuckets: number,
+  count: number,
+): string {
+  const safeBucketSeconds = Number.isFinite(bucketSeconds) && bucketSeconds > 0
+    ? Math.trunc(bucketSeconds)
+    : DASHBOARD_REALTIME_BUCKET_SECONDS
+  const safeVisibleBuckets = Number.isFinite(visibleBuckets) && visibleBuckets > 0
+    ? Math.trunc(visibleBuckets)
+    : count
+  const durationMinutes = Math.max(0, Math.round((Math.max(0, safeVisibleBuckets - 1) * safeBucketSeconds) / 60))
+  const bucketMinutes = Math.max(1, Math.round(safeBucketSeconds / 60))
+  const durationLabel = durationMinutes % 60 === 0 && durationMinutes >= 60
+    ? `${durationMinutes / 60}h`
+    : `${durationMinutes}m`
+  const bucketLabel = bucketMinutes >= 60 && bucketMinutes % 60 === 0
+    ? `${bucketMinutes / 60}h`
+    : `${bucketMinutes}m`
+  return copy
+    .replace('{range}', durationLabel)
+    .replace('{bucket}', bucketLabel)
+    .replace('{count}', String(count))
+}
+
 export function buildDashboardHourlyRequestWindowFixture({
   currentHourStart = Date.UTC(2026, 3, 7, 12, 0, 0) / 1000,
-  bucketSeconds = 3600,
-  visibleBuckets = 25,
-  retainedBuckets = 49,
+  bucketSeconds = DASHBOARD_REALTIME_BUCKET_SECONDS,
+  visibleBuckets = DASHBOARD_REALTIME_VISIBLE_BUCKETS,
+  retainedBuckets = DASHBOARD_REALTIME_RETAINED_BUCKETS,
   mapBucket,
 }: {
   currentHourStart?: number

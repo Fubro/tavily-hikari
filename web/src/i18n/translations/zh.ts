@@ -276,7 +276,7 @@ export const ZH: TranslationShape = {
         chartSelectionAll: '全部',
         chartEmpty: '当前选择下没有可显示的图表系列。',
         chartUtcWindow: '本地时间横轴 · 固定范围（当前 {count} 组，对比 {comparisonCount} 组）',
-        chartRollingWindow: '本地时间横轴 · 最近 25 组滚动窗口（当前 {count} 组）',
+        chartRollingWindow: '本地时间横轴 · 最近 {range} · {bucket} 粒度（当前 {count} 组）',
         chartDeltaWindow: '本地时间横轴 · 自然日对比窗口（当前 {count} 组，对比 {comparisonCount} 组）',
         chartResultSecondarySuccess: '次要成功',
         chartResultPrimarySuccess: '主要成功',

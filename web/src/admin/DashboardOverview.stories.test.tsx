@@ -24,12 +24,16 @@ describe('DashboardOverview Storybook coverage', () => {
     const args = dashboardStories.HiddenSeriesEmpty.args
     expect(args).toBeDefined()
     const markup = renderToStaticMarkup(createElement(meta.component, args as never))
+    const chartBucketSeconds = 3600
+    const expectedCurrentBuckets = Math.ceil(
+      ((args?.summaryWindows.today_period_end ?? args?.summaryWindows.today_end ?? 0) - (args?.summaryWindows.today_start ?? 0)) / chartBucketSeconds,
+    )
     expect(markup).not.toContain('dashboard-hero-panel')
     expect(markup).not.toContain('Operations Dashboard')
     expect(markup).not.toContain('Global health, risk signals, and actionable activity in one place.')
     expect(markup).toContain('No visible chart series for the current selection.')
     expect(markup).toContain('Traffic Trends')
-    expect(markup).toContain('Local time axis · Rolling 25 buckets')
+    expect(markup).toContain(`Local time axis · Fixed range (${expectedCurrentBuckets} current buckets`)
     expect(markup).toContain('missing buckets are left blank')
     expect(markup).toContain('dashboard-summary-card-backdrop')
   })
@@ -61,11 +65,12 @@ describe('DashboardOverview Storybook coverage', () => {
     expect(args?.initialChartMode).toBe('resultsDelta')
     expect(args?.initialResultDeltaSeries).toBe('primarySuccess')
     expect(args?.hourlyRequestWindow.buckets.length).toBeLessThan(args?.hourlyRequestWindow.retainedBuckets ?? 0)
+    const chartBucketSeconds = 3600
     const expectedCurrentBuckets = Math.ceil(
-      ((args?.summaryWindows.today_end ?? 0) - (args?.summaryWindows.today_start ?? 0)) / 3600,
+      ((args?.summaryWindows.today_end ?? 0) - (args?.summaryWindows.today_start ?? 0)) / chartBucketSeconds,
     )
     const expectedComparisonBuckets = Math.ceil(
-      ((args?.summaryWindows.yesterday_end ?? 0) - (args?.summaryWindows.yesterday_start ?? 0)) / 3600,
+      ((args?.summaryWindows.yesterday_end ?? 0) - (args?.summaryWindows.yesterday_start ?? 0)) / chartBucketSeconds,
     )
     const markup = renderToStaticMarkup(createElement(meta.component, args as never))
     expect(markup).toContain(

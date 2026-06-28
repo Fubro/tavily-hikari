@@ -998,15 +998,17 @@ impl TavilyProxy {
         &self,
         now: chrono::DateTime<Utc>,
     ) -> Result<DashboardHourlyRequestWindow, ProxyError> {
-        const DASHBOARD_HOURLY_BUCKET_SECS: i64 = 3600;
-        const DASHBOARD_HOURLY_VISIBLE_BUCKETS: i64 = 25;
-        const DASHBOARD_HOURLY_RETAINED_BUCKETS: i64 = 49;
+        const DASHBOARD_HOURLY_BUCKET_SECS: i64 = 5 * SECS_PER_MINUTE;
+        const DASHBOARD_HOURLY_VISIBLE_BUCKETS: i64 = 73;
+        const DASHBOARD_HOURLY_RETAINED_BUCKETS: i64 = 589;
 
-        let current_hour_start = start_of_local_hour_utc_ts(now.with_timezone(&Local));
+        let local_now = now.with_timezone(&Local);
+        let local_bucket_start = local_now.timestamp()
+            - local_now.timestamp().rem_euclid(DASHBOARD_HOURLY_BUCKET_SECS);
 
         self.key_store
             .fetch_dashboard_hourly_request_window(
-                current_hour_start,
+                local_bucket_start,
                 DASHBOARD_HOURLY_BUCKET_SECS,
                 DASHBOARD_HOURLY_VISIBLE_BUCKETS,
                 DASHBOARD_HOURLY_RETAINED_BUCKETS,

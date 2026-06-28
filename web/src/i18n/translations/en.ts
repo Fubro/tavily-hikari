@@ -277,7 +277,7 @@ export const EN: TranslationShape = {
         chartSelectionAll: 'All',
         chartEmpty: 'No visible chart series for the current selection.',
         chartUtcWindow: 'Local time axis · Fixed range ({count} current buckets, {comparisonCount} comparison buckets)',
-        chartRollingWindow: 'Local time axis · Rolling 25 buckets ({count} current buckets)',
+        chartRollingWindow: 'Local time axis · Last {range} · {bucket} buckets ({count} current buckets)',
         chartDeltaWindow: 'Local time axis · Natural-day comparison ({count} current buckets, {comparisonCount} comparison buckets)',
         chartResultSecondarySuccess: 'Secondary success',
         chartResultPrimarySuccess: 'Primary success',

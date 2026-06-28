@@ -81,7 +81,7 @@ const strings = {
   chartSelectionAll: 'All',
   chartEmpty: 'No visible chart series for the current selection.',
   chartUtcWindow: 'Local time axis · Fixed range ({count} current buckets, {comparisonCount} comparison buckets)',
-  chartRollingWindow: 'Local time axis · Rolling 25 buckets ({count} current buckets)',
+  chartRollingWindow: 'Local time axis · Last {range} · {bucket} buckets ({count} current buckets)',
   chartDeltaWindow: 'Local time axis · Natural-day comparison ({count} current buckets, {comparisonCount} comparison buckets)',
   chartResultSecondarySuccess: 'Secondary success',
   chartResultPrimarySuccess: 'Primary success',
@@ -463,9 +463,8 @@ const defaultHourlyRequestWindow = buildDashboardHourlyRequestWindowFixture({
 
 const fixedRangeGapHourlyRequestWindow = buildDashboardHourlyRequestWindowFixture({
   currentHourStart: Date.UTC(2026, 3, 7, 12, 0, 0) / 1000,
-  retainedBuckets: 49,
   mapBucket: ({ index, bucket }) => {
-    if ([2, 7, 19, 31, 42].includes(index)) {
+    if ([12, 84, 228, 372, 516].includes(index)) {
       return {
         ...bucket,
         secondarySuccess: 0,
@@ -563,7 +562,7 @@ const zhStrings = {
   chartSelectionAll: '全部',
   chartEmpty: '当前选择下没有可显示的图表系列。',
   chartUtcWindow: '本地时间横轴 · 固定范围（当前 {count} 组，对比 {comparisonCount} 组）',
-  chartRollingWindow: '本地时间横轴 · 最近 25 组滚动窗口（当前 {count} 组）',
+  chartRollingWindow: '本地时间横轴 · 最近 {range} · {bucket} 粒度（当前 {count} 组）',
   chartDeltaWindow: '本地时间横轴 · 自然日对比窗口（当前 {count} 组，对比 {comparisonCount} 组）',
   chartResultSecondarySuccess: '次要成功',
   chartResultPrimarySuccess: '主要成功',

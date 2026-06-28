@@ -362,13 +362,13 @@ describe('admin user tag api helpers', () => {
             },
             forwardProxy: { availableNodes: 1, totalNodes: 1 },
             hourlyRequestWindow: {
-              bucketSeconds: 3600,
-              visibleBuckets: 25,
-              retainedBuckets: 49,
-              buckets: Array.from({ length: 49 }, (_, index) => ({
-                bucketStart: 1_775_534_400 + index * 3600,
+              bucketSeconds: 300,
+              visibleBuckets: 73,
+              retainedBuckets: 589,
+              buckets: Array.from({ length: 589 }, (_, index) => ({
+                bucketStart: 1_775_534_400 + index * 300,
                 secondarySuccess: 0,
-                primarySuccess: index === 48 ? 1 : 0,
+                primarySuccess: index === 588 ? 1 : 0,
                 secondaryFailure: 0,
                 primaryFailure429: 0,
                 primaryFailureOther: 0,
@@ -376,7 +376,7 @@ describe('admin user tag api helpers', () => {
                 mcpNonBillable: 0,
                 mcpBillable: 0,
                 apiNonBillable: 0,
-                apiBillable: index === 48 ? 1 : 0,
+                apiBillable: index === 588 ? 1 : 0,
               })),
             },
             monthSeries: {
@@ -477,7 +477,7 @@ describe('admin user tag api helpers', () => {
     expect((fetchMock.mock.calls[0] as [string])[0]).toBe('/api/dashboard/overview')
     expect(overview.siteStatus.activeKeys).toBe(1)
     expect(overview.trend.request).toHaveLength(8)
-    expect(overview.hourlyRequestWindow.buckets).toHaveLength(49)
+    expect(overview.hourlyRequestWindow.buckets).toHaveLength(589)
     expect(overview.monthSeries.current).toHaveLength(31)
     expect(overview.monthSeries.current[7]?.total).toBeNull()
     expect(overview.monthSeries.comparison[0]?.total).toBe(90)

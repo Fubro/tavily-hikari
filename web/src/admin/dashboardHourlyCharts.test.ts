@@ -2,6 +2,7 @@ import { describe, expect, it } from 'bun:test'
 
 import {
   buildDashboardHourlyRequestWindowFixture,
+  buildAggregatedHourlySlots,
   buildDashboardAreaStackLayers,
   buildDeltaSeriesValues,
   buildDeltaSeriesSlotValues,
@@ -9,12 +10,16 @@ import {
   buildHourlyRangeSlots,
   createDashboardHourlyChartPreferences,
   createEmptyDashboardHourlyRequestWindow,
+  DASHBOARD_REALTIME_BUCKET_SECONDS,
+  DASHBOARD_REALTIME_RETAINED_BUCKETS,
+  DASHBOARD_REALTIME_VISIBLE_BUCKETS,
   DASHBOARD_AREA_CHART_STACK_ID,
   DASHBOARD_AREA_CHART_TENSION,
   DASHBOARD_RESULT_SERIES_ORDER,
   DASHBOARD_TYPE_SERIES_ORDER,
   getCurrentDayHourlyBuckets,
   formatHourlyBucketLabel,
+  formatDashboardRealtimeWindowLabel,
   getHourlyBucketsInRange,
   getVisibleHourlyBuckets,
   getVisibleHourlyWindow,
@@ -27,15 +32,17 @@ describe('dashboardHourlyCharts helpers', () => {
   it('returns the latest visible bucket slice and keeps retained metadata intact', () => {
     const window = buildDashboardHourlyRequestWindowFixture()
 
-    expect(window.retainedBuckets).toBe(49)
-    expect(window.visibleBuckets).toBe(25)
-    expect(getVisibleHourlyBuckets(window)).toHaveLength(25)
-    expect(getVisibleHourlyBuckets(window)[0]?.bucketStart).toBe(window.buckets[24]?.bucketStart)
+    expect(window.retainedBuckets).toBe(DASHBOARD_REALTIME_RETAINED_BUCKETS)
+    expect(window.visibleBuckets).toBe(DASHBOARD_REALTIME_VISIBLE_BUCKETS)
+    expect(getVisibleHourlyBuckets(window)).toHaveLength(DASHBOARD_REALTIME_VISIBLE_BUCKETS)
+    expect(getVisibleHourlyBuckets(window)[0]?.bucketStart).toBe(window.buckets[516]?.bucketStart)
     expect(getVisibleHourlyBuckets(window).at(-1)?.bucketStart).toBe(window.buckets.at(-1)?.bucketStart)
-    expect(window.buckets[0]?.bucketStart).toBe(window.buckets.at(-1)!.bucketStart - 48 * 3600)
+    expect(window.buckets[0]?.bucketStart).toBe(
+      window.buckets.at(-1)!.bucketStart - (DASHBOARD_REALTIME_RETAINED_BUCKETS - 1) * DASHBOARD_REALTIME_BUCKET_SECONDS,
+    )
   })
 
-  it('anchors the latest bucket to the current hour instead of the previous closed hour', () => {
+  it('anchors the latest bucket to the current five-minute bucket instead of the previous closed bucket', () => {
     const currentHourStart = Date.UTC(2026, 3, 7, 12, 0, 0) / 1000
     const window = buildDashboardHourlyRequestWindowFixture({ currentHourStart })
 
@@ -45,6 +52,9 @@ describe('dashboardHourlyCharts helpers', () => {
 
   it('computes yesterday deltas from aligned hourly buckets', () => {
     const window = buildDashboardHourlyRequestWindowFixture({
+      bucketSeconds: 3600,
+      visibleBuckets: 25,
+      retainedBuckets: 49,
       mapBucket: ({ index }) => ({
         primarySuccess: index === 6 ? 10 : index === 30 ? 50 : 0,
       }),
@@ -70,7 +80,12 @@ describe('dashboardHourlyCharts helpers', () => {
 
   it('filters current-day buckets using the requested timezone', () => {
     const currentHourStart = Date.UTC(2026, 3, 7, 4, 0, 0) / 1000
-    const window = buildDashboardHourlyRequestWindowFixture({ currentHourStart })
+    const window = buildDashboardHourlyRequestWindowFixture({
+      currentHourStart,
+      bucketSeconds: 3600,
+      visibleBuckets: 25,
+      retainedBuckets: 49,
+    })
 
     const utcBuckets = getCurrentDayHourlyBuckets(window, 'UTC')
     const shanghaiBuckets = getCurrentDayHourlyBuckets(window, 'Asia/Shanghai')
@@ -85,7 +100,12 @@ describe('dashboardHourlyCharts helpers', () => {
 
   it('filters buckets using explicit server epoch boundaries', () => {
     const currentHourStart = Date.UTC(2026, 3, 7, 4, 0, 0) / 1000
-    const window = buildDashboardHourlyRequestWindowFixture({ currentHourStart })
+    const window = buildDashboardHourlyRequestWindowFixture({
+      currentHourStart,
+      bucketSeconds: 3600,
+      visibleBuckets: 25,
+      retainedBuckets: 49,
+    })
     const rangeStart = Date.UTC(2026, 3, 6, 16, 0, 0) / 1000
 
     const buckets = getHourlyBucketsInRange(window, rangeStart, currentHourStart + 1)
@@ -100,6 +120,8 @@ describe('dashboardHourlyCharts helpers', () => {
     const currentHourStart = Date.UTC(2026, 3, 7, 4, 0, 0) / 1000
     const window = buildDashboardHourlyRequestWindowFixture({
       currentHourStart,
+      bucketSeconds: 3600,
+      visibleBuckets: 4,
       retainedBuckets: 4,
     })
     const rangeStart = currentHourStart - 3 * 3600
@@ -123,6 +145,8 @@ describe('dashboardHourlyCharts helpers', () => {
     const currentHourStart = Date.UTC(2026, 3, 7, 12, 0, 0) / 1000 + kathmanduOffsetSeconds
     const window = buildDashboardHourlyRequestWindowFixture({
       currentHourStart,
+      bucketSeconds: 3600,
+      visibleBuckets: 4,
       retainedBuckets: 4,
     })
     const slots = buildHourlyRangeSlots(window, currentHourStart - 2 * 3600 - 60, currentHourStart + 3600)
@@ -139,6 +163,8 @@ describe('dashboardHourlyCharts helpers', () => {
     const currentHourStart = Date.UTC(2026, 3, 7, 4, 0, 0) / 1000
     const window = buildDashboardHourlyRequestWindowFixture({
       currentHourStart,
+      bucketSeconds: 3600,
+      visibleBuckets: 6,
       retainedBuckets: 6,
       mapBucket: ({ index }) => ({
         primarySuccess: index === 0 ? 10 : index === 4 ? 50 : 0,
@@ -168,11 +194,22 @@ describe('dashboardHourlyCharts helpers', () => {
 
   it('creates an empty fallback window for dashboard boot', () => {
     expect(createEmptyDashboardHourlyRequestWindow()).toEqual({
-      bucketSeconds: 3600,
-      visibleBuckets: 25,
-      retainedBuckets: 49,
+      bucketSeconds: DASHBOARD_REALTIME_BUCKET_SECONDS,
+      visibleBuckets: DASHBOARD_REALTIME_VISIBLE_BUCKETS,
+      retainedBuckets: DASHBOARD_REALTIME_RETAINED_BUCKETS,
       buckets: [],
     })
+  })
+
+  it('formats the realtime window label from bucket metadata', () => {
+    expect(
+      formatDashboardRealtimeWindowLabel(
+        'Local time axis · Last {range} · {bucket} buckets ({count} current buckets)',
+        300,
+        73,
+        73,
+      ),
+    ).toBe('Local time axis · Last 6h · 5m buckets (73 current buckets)')
   })
 
   it('defaults both absolute charts to all visible series', () => {
@@ -285,25 +322,77 @@ describe('dashboardHourlyCharts helpers', () => {
 
     const visible = getVisibleHourlyWindow(window)
 
-    expect(visible.rangeStart).toBe(currentHourStart - 24 * 3600)
-    expect(visible.rangeEnd).toBe(currentHourStart + 3600)
-    expect(visible.slots).toHaveLength(25)
-    expect(visible.slots[0]?.bucketStart).toBe(currentHourStart - 24 * 3600)
+    expect(visible.rangeStart).toBe(currentHourStart - 6 * 3600)
+    expect(visible.rangeEnd).toBe(currentHourStart + DASHBOARD_REALTIME_BUCKET_SECONDS)
+    expect(visible.slots).toHaveLength(DASHBOARD_REALTIME_VISIBLE_BUCKETS)
+    expect(visible.slots[0]?.bucketStart).toBe(currentHourStart - 6 * 3600)
     expect(visible.slots.at(-1)?.bucketStart).toBe(currentHourStart)
   })
 
   it('keeps the rolling window fixed to the latest visible slot count even when buckets are sparse', () => {
     const currentHourStart = Date.UTC(2026, 3, 7, 12, 0, 0) / 1000
     const window = buildDashboardHourlyRequestWindowFixture({ currentHourStart })
-    const missingBucketStart = currentHourStart - 12 * 3600
+    const missingBucketStart = currentHourStart - 3 * 3600
     window.buckets = window.buckets.filter((bucket) => bucket.bucketStart !== missingBucketStart)
 
     const visible = getVisibleHourlyWindow(window)
 
-    expect(visible.rangeStart).toBe(currentHourStart - 24 * 3600)
-    expect(visible.rangeEnd).toBe(currentHourStart + 3600)
-    expect(visible.slots).toHaveLength(25)
-    expect(visible.slots[12]?.bucketStart).toBe(missingBucketStart)
-    expect(visible.slots[12]?.bucket).toBeNull()
+    expect(visible.rangeStart).toBe(currentHourStart - 6 * 3600)
+    expect(visible.rangeEnd).toBe(currentHourStart + DASHBOARD_REALTIME_BUCKET_SECONDS)
+    expect(visible.slots).toHaveLength(DASHBOARD_REALTIME_VISIBLE_BUCKETS)
+    expect(visible.slots[36]?.bucketStart).toBe(missingBucketStart)
+    expect(visible.slots[36]?.bucket).toBeNull()
+  })
+
+  it('aggregates five-minute buckets into hourly slots for fixed and delta charts', () => {
+    const currentHourStart = Date.UTC(2026, 3, 7, 12, 0, 0) / 1000
+    const window = buildDashboardHourlyRequestWindowFixture({
+      currentHourStart,
+      bucketSeconds: 300,
+      visibleBuckets: 73,
+      retainedBuckets: 73,
+      mapBucket: () => ({
+        primarySuccess: 1,
+        apiBillable: 2,
+      }),
+    })
+
+    const aggregated = buildAggregatedHourlySlots(window, currentHourStart - 2 * 3600, currentHourStart + 300)
+
+    expect(aggregated.bucketSeconds).toBe(3600)
+    expect(aggregated.slots.map((slot) => slot.bucketStart)).toEqual([
+      currentHourStart - 2 * 3600,
+      currentHourStart - 3600,
+      currentHourStart,
+    ])
+    expect(aggregated.slots[0]?.bucket?.primarySuccess).toBe(12)
+    expect(aggregated.slots[0]?.bucket?.apiBillable).toBe(24)
+    expect(aggregated.slots[2]?.bucket?.primarySuccess).toBe(1)
+  })
+
+  it('aggregates fixed slots from the requested range start alignment', () => {
+    const kathmanduOffsetSeconds = 5.75 * 3600
+    const currentBucketStart = Date.UTC(2026, 3, 7, 12, 0, 0) / 1000 + kathmanduOffsetSeconds
+    const rangeStart = currentBucketStart - 2 * 3600
+    const window = buildDashboardHourlyRequestWindowFixture({
+      currentHourStart: currentBucketStart,
+      bucketSeconds: 300,
+      visibleBuckets: 25,
+      retainedBuckets: 25,
+      mapBucket: () => ({
+        primarySuccess: 1,
+      }),
+    })
+
+    const aggregated = buildAggregatedHourlySlots(window, rangeStart, currentBucketStart + 300)
+
+    expect(aggregated.slots.map((slot) => slot.bucketStart)).toEqual([
+      rangeStart,
+      rangeStart + 3600,
+      rangeStart + 2 * 3600,
+    ])
+    expect(aggregated.slots[0]?.bucket?.primarySuccess).toBe(12)
+    expect(aggregated.slots[1]?.bucket?.primarySuccess).toBe(12)
+    expect(aggregated.slots[2]?.bucket?.primarySuccess).toBe(1)
   })
 })

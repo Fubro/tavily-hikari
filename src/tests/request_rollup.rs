@@ -965,7 +965,7 @@ async fn summary_windows_return_zero_for_empty_yesterday_bucket() {
 }
 
 #[tokio::test]
-async fn dashboard_hourly_request_window_returns_49_hours_including_current_hour_with_zero_fill() {
+async fn dashboard_hourly_request_window_returns_49_hours_as_five_minute_buckets_with_zero_fill() {
     let db_path = temp_db_path("dashboard-hourly-request-window");
     let db_str = db_path.to_string_lossy().to_string();
 
@@ -990,9 +990,9 @@ async fn dashboard_hourly_request_window_returns_49_hours_including_current_hour
         .with_ymd_and_hms(2026, 4, 7, 12, 10, 0)
         .single()
         .expect("valid utc evaluation time");
-    let current_hour_start = start_of_local_hour_utc_ts(evaluation_time.with_timezone(&Local));
-    let visible_bucket_start = current_hour_start;
-    let previous_day_same_hour_start = visible_bucket_start - 24 * 3600;
+    let visible_bucket_start =
+        evaluation_time.timestamp() - evaluation_time.timestamp().rem_euclid(300);
+    let previous_day_same_bucket_start = visible_bucket_start - 24 * 3600;
 
     insert_dashboard_hourly_log(
         &proxy,
@@ -1058,7 +1058,7 @@ async fn dashboard_hourly_request_window_returns_49_hours_including_current_hour
         &proxy,
         &key_id,
         DashboardHourlyLogSeed {
-            created_at: visible_bucket_start + 300,
+            created_at: visible_bucket_start + 250,
             path: "/api/tavily/extract",
             request_kind_key: "api:extract",
             request_kind_label: "API | extract",
@@ -1073,7 +1073,7 @@ async fn dashboard_hourly_request_window_returns_49_hours_including_current_hour
         &proxy,
         &key_id,
         DashboardHourlyLogSeed {
-            created_at: visible_bucket_start + 360,
+            created_at: visible_bucket_start + 260,
             path: "/api/tavily/usage",
             request_kind_key: "api:usage",
             request_kind_label: "API | usage",
@@ -1088,7 +1088,7 @@ async fn dashboard_hourly_request_window_returns_49_hours_including_current_hour
         &proxy,
         &key_id,
         DashboardHourlyLogSeed {
-            created_at: visible_bucket_start + 420,
+            created_at: visible_bucket_start + 270,
             path: "/api/tavily/unknown",
             request_kind_key: "api:unknown-path",
             request_kind_label: "API | unknown path",
@@ -1103,7 +1103,7 @@ async fn dashboard_hourly_request_window_returns_49_hours_including_current_hour
         &proxy,
         &key_id,
         DashboardHourlyLogSeed {
-            created_at: previous_day_same_hour_start + 60,
+            created_at: previous_day_same_bucket_start + 60,
             path: "/api/tavily/search",
             request_kind_key: "api:search",
             request_kind_label: "API | search",
@@ -1118,7 +1118,7 @@ async fn dashboard_hourly_request_window_returns_49_hours_including_current_hour
         &proxy,
         &key_id,
         DashboardHourlyLogSeed {
-            created_at: current_hour_start + 30,
+            created_at: visible_bucket_start + 30,
             path: "/api/tavily/search",
             request_kind_key: "api:search",
             request_kind_label: "API | search",
@@ -1135,23 +1135,23 @@ async fn dashboard_hourly_request_window_returns_49_hours_including_current_hour
         .await
         .expect("hourly request window");
 
-    assert_eq!(window.bucket_seconds, 3600);
-    assert_eq!(window.visible_buckets, 25);
-    assert_eq!(window.retained_buckets, 49);
-    assert_eq!(window.buckets.len(), 49);
+    assert_eq!(window.bucket_seconds, 300);
+    assert_eq!(window.visible_buckets, 73);
+    assert_eq!(window.retained_buckets, 589);
+    assert_eq!(window.buckets.len(), 589);
     assert_eq!(
         window.buckets.first().map(|bucket| bucket.bucket_start),
-        Some(current_hour_start - 48 * 3600)
+        Some(visible_bucket_start - 588 * 300)
     );
     assert_eq!(
         window.buckets.last().map(|bucket| bucket.bucket_start),
-        Some(current_hour_start)
+        Some(visible_bucket_start)
     );
 
     let zero_bucket = window
         .buckets
         .iter()
-        .find(|bucket| bucket.bucket_start == visible_bucket_start - 3600)
+        .find(|bucket| bucket.bucket_start == visible_bucket_start - 300)
         .expect("zero-filled bucket");
     assert_eq!(zero_bucket.primary_success, 0);
     assert_eq!(zero_bucket.api_billable, 0);
@@ -1201,8 +1201,8 @@ async fn dashboard_hourly_request_window_classifies_non_billable_mcp_batch_from_
         .with_ymd_and_hms(2026, 4, 7, 12, 2, 0)
         .single()
         .expect("valid utc evaluation time");
-    let current_hour_start = start_of_local_hour_utc_ts(evaluation_time.with_timezone(&Local));
-    let visible_bucket_start = current_hour_start;
+    let visible_bucket_start =
+        evaluation_time.timestamp() - evaluation_time.timestamp().rem_euclid(300);
 
     insert_dashboard_hourly_log(
         &proxy,

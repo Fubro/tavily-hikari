@@ -124,6 +124,24 @@ async fn dashboard_overview_snapshot_is_reused_within_the_same_freshness_wave() 
 }
 
 #[tokio::test]
+async fn dashboard_overview_freshness_advances_on_five_minute_window_anchor() {
+    let first_anchor = dashboard_hourly_window_anchor(1_774_070_520);
+    let second_anchor = dashboard_hourly_window_anchor(1_774_070_700);
+
+    assert_eq!(first_anchor, 1_774_070_400);
+    assert_eq!(second_anchor, 1_774_070_700);
+    assert_ne!(
+        second_anchor, first_anchor,
+        "dashboard overview cache must advance with the 5 minute realtime window, not wait for the next hour",
+    );
+    assert_eq!(
+        dashboard_hourly_window_anchor(1_774_073_999),
+        1_774_073_700,
+        "freshness anchor should stay on five minute boundaries within the same hour",
+    );
+}
+
+#[tokio::test]
 async fn dashboard_snapshot_event_uses_rebuilt_freshness_after_pending_rollups() {
     let db_path = temp_db_path("dashboard-overview-emitted-freshness");
     let db_str = db_path.to_string_lossy().to_string();

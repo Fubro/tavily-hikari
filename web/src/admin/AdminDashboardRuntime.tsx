@@ -469,9 +469,9 @@ function createEmptyDashboardTrend(): DashboardTrendBuckets {
 
 function createEmptyDashboardHourlyRequestWindow(): DashboardHourlyRequestWindow {
   return {
-    bucketSeconds: 3600,
-    visibleBuckets: 25,
-    retainedBuckets: 49,
+    bucketSeconds: 300,
+    visibleBuckets: 73,
+    retainedBuckets: 589,
     buckets: [],
   }
 }

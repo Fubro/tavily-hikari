@@ -1109,14 +1109,19 @@ use super::upstream_support_and_manual_jobs::*;
             Some(key_id.as_str())
         );
         assert_eq!(
+            body.pointer("/hourlyRequestWindow/bucketSeconds")
+                .and_then(|value| value.as_i64()),
+            Some(300)
+        );
+        assert_eq!(
             body.pointer("/hourlyRequestWindow/visibleBuckets")
                 .and_then(|value| value.as_i64()),
-            Some(25)
+            Some(73)
         );
         assert_eq!(
             body.pointer("/hourlyRequestWindow/retainedBuckets")
                 .and_then(|value| value.as_i64()),
-            Some(49)
+            Some(589)
         );
         assert!(
             body.pointer("/monthSeries/current")
