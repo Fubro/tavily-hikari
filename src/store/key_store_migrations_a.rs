@@ -1084,26 +1084,23 @@ impl KeyStore {
 
     pub(crate) async fn backfill_account_quota_v1(&self) -> Result<(), ProxyError> {
         let now = self.backend_time.now_ts();
-        let hourly_any_limit = effective_token_hourly_request_limit();
-        let hourly_limit = effective_token_hourly_limit();
-        let daily_limit = effective_token_daily_limit();
-        let monthly_limit = effective_token_monthly_limit();
+        let business_calls_1h_limit = effective_token_hourly_limit();
+        let daily_credits_limit = effective_token_daily_limit();
+        let monthly_credits_limit = effective_token_monthly_limit();
 
         // Ensure every bound account has a default limits row.
         sqlx::query(
             r#"
             INSERT INTO account_quota_limits (
                 user_id,
-                hourly_any_limit,
-                hourly_limit,
-                daily_limit,
-                monthly_limit,
+                business_calls_1h_limit,
+                daily_credits_limit,
+                monthly_credits_limit,
                 created_at,
                 updated_at
             )
             SELECT
                 b.user_id,
-                ?,
                 ?,
                 ?,
                 ?,
@@ -1114,10 +1111,9 @@ impl KeyStore {
             ON CONFLICT(user_id) DO NOTHING
             "#,
         )
-        .bind(hourly_any_limit)
-        .bind(hourly_limit)
-        .bind(daily_limit)
-        .bind(monthly_limit)
+        .bind(business_calls_1h_limit)
+        .bind(daily_credits_limit)
+        .bind(monthly_credits_limit)
         .bind(now)
         .bind(now)
         .execute(&self.pool)

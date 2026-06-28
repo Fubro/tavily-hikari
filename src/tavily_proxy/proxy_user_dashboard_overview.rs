@@ -132,29 +132,29 @@ impl TavilyProxy {
                 now_ts,
             )
             .await?;
-        let quota_hourly = self
-            .build_user_dashboard_quota_hourly_progress(
+        let business_calls_1h = self
+            .build_user_dashboard_business_calls_1h_progress(
                 user_id,
                 user_created_at,
                 summary.business_calls_1h.total_count,
                 summary.business_calls_1h.limit,
             )
             .await?;
-        let quota_daily = self
-            .build_user_dashboard_quota_daily_progress(
+        let daily_credits = self
+            .build_user_dashboard_daily_credits_progress(
                 user_id,
                 user_created_at,
-                summary.quota_daily_used,
-                summary.quota_daily_limit,
+                summary.daily_credits_used,
+                summary.daily_credits_limit,
                 now,
             )
             .await?;
-        let quota_monthly = self
-            .build_user_dashboard_quota_monthly_progress(
+        let monthly_credits = self
+            .build_user_dashboard_monthly_credits_progress(
                 user_id,
                 user_created_at,
-                summary.quota_monthly_used,
-                summary.quota_monthly_limit,
+                summary.monthly_credits_used,
+                summary.monthly_credits_limit,
                 now,
             )
             .await?;
@@ -163,9 +163,9 @@ impl TavilyProxy {
             summary,
             progress: UserDashboardOverviewProgress {
                 request_rate,
-                quota_hourly,
-                quota_daily,
-                quota_monthly,
+                business_calls_1h,
+                daily_credits,
+                monthly_credits,
             },
         })
     }
@@ -212,7 +212,7 @@ impl TavilyProxy {
         })
     }
 
-    async fn build_user_dashboard_quota_hourly_progress(
+    async fn build_user_dashboard_business_calls_1h_progress(
         &self,
         user_id: &str,
         user_created_at: Option<i64>,
@@ -232,7 +232,7 @@ impl TavilyProxy {
         })
     }
 
-    async fn build_user_dashboard_quota_daily_progress(
+    async fn build_user_dashboard_daily_credits_progress(
         &self,
         user_id: &str,
         user_created_at: Option<i64>,
@@ -295,7 +295,7 @@ impl TavilyProxy {
         })
     }
 
-    async fn build_user_dashboard_quota_monthly_progress(
+    async fn build_user_dashboard_monthly_credits_progress(
         &self,
         user_id: &str,
         user_created_at: Option<i64>,

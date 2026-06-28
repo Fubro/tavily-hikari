@@ -1041,10 +1041,10 @@ impl AdminUserActivityScopeQuery {
 #[derive(Debug, Deserialize, Clone, Copy, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 enum AdminUsersSortField {
-    HourlyAnyUsed,
-    QuotaHourlyUsed,
-    QuotaDailyUsed,
-    QuotaMonthlyUsed,
+    RequestRateUsed,
+    BusinessCalls1hUsed,
+    DailyCreditsUsed,
+    MonthlyCreditsUsed,
     DailySuccessRate,
     MonthlySuccessRate,
     MonthlyBrokenCount,

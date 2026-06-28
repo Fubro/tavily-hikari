@@ -2021,7 +2021,7 @@ async fn user_dashboard_summary_daily_quota_includes_legacy_hour_buckets() {
         .await
         .expect("user dashboard summary");
 
-    assert_eq!(summary.quota_daily_used, 10);
+    assert_eq!(summary.daily_credits_used, 10);
 
     let _ = std::fs::remove_file(db_path);
 }

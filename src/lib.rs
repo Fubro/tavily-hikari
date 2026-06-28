@@ -1605,91 +1605,82 @@ const USER_TAG_ICON_LINUXDO: &str = "linuxdo";
 // LinuxDo trust tiers intentionally ship with the legacy token quota tuple as their
 // additive delta, so auto-bound LinuxDo users receive that uplift on top of the
 // account base quota unless an admin edits the system tag effect later.
-fn linuxdo_system_tag_default_deltas() -> (i64, i64, i64, i64) {
+fn linuxdo_system_tag_default_deltas() -> (i64, i64, i64) {
     (
-        effective_token_hourly_request_limit(),
         effective_token_hourly_limit(),
         effective_token_daily_limit(),
         effective_token_monthly_limit(),
     )
 }
 
-fn format_linuxdo_system_tag_default_deltas(value: (i64, i64, i64, i64)) -> String {
-    format!("{},{},{},{}", value.0, value.1, value.2, value.3)
+fn format_linuxdo_system_tag_default_deltas(value: (i64, i64, i64)) -> String {
+    format!("{},{},{}", value.0, value.1, value.2)
 }
 
-fn parse_linuxdo_system_tag_default_deltas(raw: &str) -> Option<(i64, i64, i64, i64)> {
+fn parse_linuxdo_system_tag_default_deltas(raw: &str) -> Option<(i64, i64, i64)> {
     let mut parts = raw.split(',').map(str::trim);
-    let hourly_any = parts.next()?.parse().ok()?;
-    let hourly = parts.next()?.parse().ok()?;
+    let business_calls_1h = parts.next()?.parse().ok()?;
     let daily = parts.next()?.parse().ok()?;
     let monthly = parts.next()?.parse().ok()?;
     if parts.next().is_some() {
         return None;
     }
-    Some((hourly_any, hourly, daily, monthly))
+    Some((business_calls_1h, daily, monthly))
 }
 
 #[derive(Debug, Clone)]
 struct AccountQuotaLimits {
-    hourly_any_limit: i64,
-    hourly_limit: i64,
-    daily_limit: i64,
-    monthly_limit: i64,
+    business_calls_1h_limit: i64,
+    daily_credits_limit: i64,
+    monthly_credits_limit: i64,
     inherits_defaults: bool,
 }
 
 impl AccountQuotaLimits {
     fn zero_base() -> Self {
         Self {
-            hourly_any_limit: 0,
-            hourly_limit: 0,
-            daily_limit: 0,
-            monthly_limit: 0,
+            business_calls_1h_limit: 0,
+            daily_credits_limit: 0,
+            monthly_credits_limit: 0,
             inherits_defaults: false,
         }
     }
 
     fn legacy_defaults() -> Self {
         Self {
-            hourly_any_limit: effective_token_hourly_request_limit(),
-            hourly_limit: effective_token_hourly_limit(),
-            daily_limit: effective_token_daily_limit(),
-            monthly_limit: effective_token_monthly_limit(),
+            business_calls_1h_limit: effective_token_hourly_limit(),
+            daily_credits_limit: effective_token_daily_limit(),
+            monthly_credits_limit: effective_token_monthly_limit(),
             inherits_defaults: true,
         }
     }
 
     fn clamped_non_negative(&self) -> Self {
         Self {
-            hourly_any_limit: self.hourly_any_limit.max(0),
-            hourly_limit: self.hourly_limit.max(0),
-            daily_limit: self.daily_limit.max(0),
-            monthly_limit: self.monthly_limit.max(0),
+            business_calls_1h_limit: self.business_calls_1h_limit.max(0),
+            daily_credits_limit: self.daily_credits_limit.max(0),
+            monthly_credits_limit: self.monthly_credits_limit.max(0),
             inherits_defaults: self.inherits_defaults,
         }
     }
 
     fn same_limits_as(&self, other: &Self) -> bool {
-        self.hourly_any_limit == other.hourly_any_limit
-            && self.hourly_limit == other.hourly_limit
-            && self.daily_limit == other.daily_limit
-            && self.monthly_limit == other.monthly_limit
+        self.business_calls_1h_limit == other.business_calls_1h_limit
+            && self.daily_credits_limit == other.daily_credits_limit
+            && self.monthly_credits_limit == other.monthly_credits_limit
     }
 }
 
 fn account_quota_limits_from_row(
-    hourly_any_limit: i64,
-    hourly_limit: i64,
-    daily_limit: i64,
-    monthly_limit: i64,
+    business_calls_1h_limit: i64,
+    daily_credits_limit: i64,
+    monthly_credits_limit: i64,
     inherits_defaults: i64,
 ) -> AccountQuotaLimits {
     AccountQuotaLimits {
-        hourly_any_limit,
-        hourly_limit,
-        daily_limit,
-        monthly_limit,
+        business_calls_1h_limit,
+        daily_credits_limit,
+        monthly_credits_limit,
         inherits_defaults: inherits_defaults == 1,
     }
 }
@@ -2006,10 +1997,9 @@ struct UserTagRecord {
     icon: Option<String>,
     system_key: Option<String>,
     effect_kind: String,
-    hourly_any_delta: i64,
-    hourly_delta: i64,
-    daily_delta: i64,
-    monthly_delta: i64,
+    business_calls_1h_delta: i64,
+    daily_credits_delta: i64,
+    monthly_credits_delta: i64,
     user_count: i64,
 }
 
@@ -2037,10 +2027,9 @@ struct AccountQuotaBreakdownRecord {
     tag_name: Option<String>,
     source: Option<String>,
     effect_kind: String,
-    hourly_any_delta: i64,
-    hourly_delta: i64,
-    daily_delta: i64,
-    monthly_delta: i64,
+    business_calls_1h_delta: i64,
+    daily_credits_delta: i64,
+    monthly_credits_delta: i64,
 }
 
 #[derive(Debug, Clone)]
@@ -2069,10 +2058,9 @@ fn linuxdo_system_key_for_level(level: i64) -> String {
 
 fn to_admin_quota_limit_set(limits: &AccountQuotaLimits) -> AdminQuotaLimitSet {
     AdminQuotaLimitSet {
-        hourly_any_limit: limits.hourly_any_limit,
-        hourly_limit: limits.hourly_limit,
-        daily_limit: limits.daily_limit,
-        monthly_limit: limits.monthly_limit,
+        business_calls_1h_limit: limits.business_calls_1h_limit,
+        daily_credits_limit: limits.daily_credits_limit,
+        monthly_credits_limit: limits.monthly_credits_limit,
         inherits_defaults: limits.inherits_defaults,
     }
 }
@@ -2085,10 +2073,9 @@ fn to_admin_user_tag(tag: &UserTagRecord) -> AdminUserTag {
         icon: tag.icon.clone(),
         system_key: tag.system_key.clone(),
         effect_kind: tag.effect_kind.clone(),
-        hourly_any_delta: tag.hourly_any_delta,
-        hourly_delta: tag.hourly_delta,
-        daily_delta: tag.daily_delta,
-        monthly_delta: tag.monthly_delta,
+        business_calls_1h_delta: tag.business_calls_1h_delta,
+        daily_credits_delta: tag.daily_credits_delta,
+        monthly_credits_delta: tag.monthly_credits_delta,
         user_count: tag.user_count,
     }
 }
@@ -2101,10 +2088,9 @@ fn to_admin_user_tag_binding(binding: &UserTagBindingRecord) -> AdminUserTagBind
         icon: binding.tag.icon.clone(),
         system_key: binding.tag.system_key.clone(),
         effect_kind: binding.tag.effect_kind.clone(),
-        hourly_any_delta: binding.tag.hourly_any_delta,
-        hourly_delta: binding.tag.hourly_delta,
-        daily_delta: binding.tag.daily_delta,
-        monthly_delta: binding.tag.monthly_delta,
+        business_calls_1h_delta: binding.tag.business_calls_1h_delta,
+        daily_credits_delta: binding.tag.daily_credits_delta,
+        monthly_credits_delta: binding.tag.monthly_credits_delta,
         source: binding.source.clone(),
     }
 }
@@ -2119,10 +2105,9 @@ fn to_admin_quota_breakdown_entry(
         tag_name: entry.tag_name.clone(),
         source: entry.source.clone(),
         effect_kind: entry.effect_kind.clone(),
-        hourly_any_delta: entry.hourly_any_delta,
-        hourly_delta: entry.hourly_delta,
-        daily_delta: entry.daily_delta,
-        monthly_delta: entry.monthly_delta,
+        business_calls_1h_delta: entry.business_calls_1h_delta,
+        daily_credits_delta: entry.daily_credits_delta,
+        monthly_credits_delta: entry.monthly_credits_delta,
     }
 }
 
@@ -2151,10 +2136,9 @@ fn build_account_quota_resolution_with_recharge(
         tag_name: None,
         source: None,
         effect_kind: "base".to_string(),
-        hourly_any_delta: base.hourly_any_limit,
-        hourly_delta: base.hourly_limit,
-        daily_delta: base.daily_limit,
-        monthly_delta: base.monthly_limit,
+        business_calls_1h_delta: base.business_calls_1h_limit,
+        daily_credits_delta: base.daily_credits_limit,
+        monthly_credits_delta: base.monthly_credits_limit,
     }];
     let mut block_all = false;
 
@@ -2166,10 +2150,9 @@ fn build_account_quota_resolution_with_recharge(
             tag_name: Some(binding.tag.name.clone()),
             source: Some(binding.source.clone()),
             effect_kind: binding.tag.effect_kind.clone(),
-            hourly_any_delta: binding.tag.hourly_any_delta,
-            hourly_delta: binding.tag.hourly_delta,
-            daily_delta: binding.tag.daily_delta,
-            monthly_delta: binding.tag.monthly_delta,
+            business_calls_1h_delta: binding.tag.business_calls_1h_delta,
+            daily_credits_delta: binding.tag.daily_credits_delta,
+            monthly_credits_delta: binding.tag.monthly_credits_delta,
         });
 
         if binding.tag.is_block_all() {
@@ -2177,13 +2160,18 @@ fn build_account_quota_resolution_with_recharge(
             continue;
         }
 
-        effective.hourly_any_limit =
-            apply_quota_delta(effective.hourly_any_limit, binding.tag.hourly_any_delta);
-        effective.hourly_limit =
-            apply_quota_delta(effective.hourly_limit, binding.tag.hourly_delta);
-        effective.daily_limit = apply_quota_delta(effective.daily_limit, binding.tag.daily_delta);
-        effective.monthly_limit =
-            apply_quota_delta(effective.monthly_limit, binding.tag.monthly_delta);
+        effective.business_calls_1h_limit = apply_quota_delta(
+            effective.business_calls_1h_limit,
+            binding.tag.business_calls_1h_delta,
+        );
+        effective.daily_credits_limit = apply_quota_delta(
+            effective.daily_credits_limit,
+            binding.tag.daily_credits_delta,
+        );
+        effective.monthly_credits_limit = apply_quota_delta(
+            effective.monthly_credits_limit,
+            binding.tag.monthly_credits_delta,
+        );
     }
 
     if recharge_delta.monthly_delta > 0 {
@@ -2194,25 +2182,27 @@ fn build_account_quota_resolution_with_recharge(
             tag_name: None,
             source: Some("linuxdo_credit".to_string()),
             effect_kind: "quota_delta".to_string(),
-            hourly_any_delta: 0,
-            hourly_delta: recharge_delta.hourly_delta,
-            daily_delta: recharge_delta.daily_delta,
-            monthly_delta: recharge_delta.monthly_delta,
+            business_calls_1h_delta: recharge_delta.hourly_delta,
+            daily_credits_delta: recharge_delta.daily_delta,
+            monthly_credits_delta: recharge_delta.monthly_delta,
         });
-        effective.hourly_limit =
-            apply_quota_delta(effective.hourly_limit, recharge_delta.hourly_delta);
-        effective.daily_limit =
-            apply_quota_delta(effective.daily_limit, recharge_delta.daily_delta);
-        effective.monthly_limit =
-            apply_quota_delta(effective.monthly_limit, recharge_delta.monthly_delta);
+        effective.business_calls_1h_limit = apply_quota_delta(
+            effective.business_calls_1h_limit,
+            recharge_delta.hourly_delta,
+        );
+        effective.daily_credits_limit =
+            apply_quota_delta(effective.daily_credits_limit, recharge_delta.daily_delta);
+        effective.monthly_credits_limit = apply_quota_delta(
+            effective.monthly_credits_limit,
+            recharge_delta.monthly_delta,
+        );
     }
 
     effective = if block_all {
         AccountQuotaLimits {
-            hourly_any_limit: 0,
-            hourly_limit: 0,
-            daily_limit: 0,
-            monthly_limit: 0,
+            business_calls_1h_limit: 0,
+            daily_credits_limit: 0,
+            monthly_credits_limit: 0,
             inherits_defaults: base.inherits_defaults,
         }
     } else {
@@ -2230,10 +2220,9 @@ fn build_account_quota_resolution_with_recharge(
         } else {
             "effective".to_string()
         },
-        hourly_any_delta: effective.hourly_any_limit,
-        hourly_delta: effective.hourly_limit,
-        daily_delta: effective.daily_limit,
-        monthly_delta: effective.monthly_limit,
+        business_calls_1h_delta: effective.business_calls_1h_limit,
+        daily_credits_delta: effective.daily_credits_limit,
+        monthly_credits_delta: effective.monthly_credits_limit,
     });
 
     AccountQuotaResolution {

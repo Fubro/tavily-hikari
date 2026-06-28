@@ -2001,10 +2001,9 @@ impl KeyStore {
             r#"
             CREATE TABLE IF NOT EXISTS account_quota_limits (
                 user_id TEXT PRIMARY KEY,
-                hourly_any_limit INTEGER NOT NULL,
-                hourly_limit INTEGER NOT NULL,
-                daily_limit INTEGER NOT NULL,
-                monthly_limit INTEGER NOT NULL,
+                business_calls_1h_limit INTEGER NOT NULL,
+                daily_credits_limit INTEGER NOT NULL,
+                monthly_credits_limit INTEGER NOT NULL,
                 monthly_broken_limit INTEGER NOT NULL DEFAULT 5,
                 monthly_blocked_key_limit_delta INTEGER NOT NULL DEFAULT 0,
                 inherits_defaults INTEGER NOT NULL DEFAULT 1,
@@ -2016,6 +2015,7 @@ impl KeyStore {
         )
         .execute(&self.pool)
         .await?;
+        self.migrate_quota_schema_to_semantic_columns().await?;
 
         if !self
             .table_column_exists("account_quota_limits", "inherits_defaults")
@@ -2067,10 +2067,9 @@ impl KeyStore {
                 icon TEXT,
                 system_key TEXT UNIQUE,
                 effect_kind TEXT NOT NULL DEFAULT 'quota_delta',
-                hourly_any_delta INTEGER NOT NULL DEFAULT 0,
-                hourly_delta INTEGER NOT NULL DEFAULT 0,
-                daily_delta INTEGER NOT NULL DEFAULT 0,
-                monthly_delta INTEGER NOT NULL DEFAULT 0,
+                business_calls_1h_delta INTEGER NOT NULL DEFAULT 0,
+                daily_credits_delta INTEGER NOT NULL DEFAULT 0,
+                monthly_credits_delta INTEGER NOT NULL DEFAULT 0,
                 created_at INTEGER NOT NULL,
                 updated_at INTEGER NOT NULL
             )
@@ -2200,10 +2199,9 @@ impl KeyStore {
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 user_id TEXT NOT NULL,
                 changed_at INTEGER NOT NULL,
-                hourly_any_limit INTEGER NOT NULL,
-                hourly_limit INTEGER NOT NULL,
-                daily_limit INTEGER NOT NULL,
-                monthly_limit INTEGER NOT NULL,
+                business_calls_1h_limit INTEGER NOT NULL,
+                daily_credits_limit INTEGER NOT NULL,
+                monthly_credits_limit INTEGER NOT NULL,
                 FOREIGN KEY (user_id) REFERENCES users(id)
             )
             "#,

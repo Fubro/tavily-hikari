@@ -1,4 +1,4 @@
-export type QuotaSliderField = 'hourlyAnyLimit' | 'hourlyLimit' | 'dailyLimit' | 'monthlyLimit'
+export type QuotaSliderField = 'businessCalls1hLimit' | 'dailyCreditsLimit' | 'monthlyCreditsLimit'
 
 export interface QuotaSliderSeed {
   field: QuotaSliderField
@@ -9,10 +9,9 @@ export interface QuotaSliderSeed {
 }
 
 const QUOTA_SLIDER_DEFAULT_BASELINES: Readonly<Record<QuotaSliderField, number>> = {
-  hourlyAnyLimit: 1_000,
-  hourlyLimit: 1_000,
-  dailyLimit: 10_000,
-  monthlyLimit: 100_000,
+  businessCalls1hLimit: 1_000,
+  dailyCreditsLimit: 10_000,
+  monthlyCreditsLimit: 100_000,
 }
 
 const QUOTA_LINEAR_STAGE_VALUES = [10, 20, 30, 40, 50, 60, 70, 80, 90, 100] as const

@@ -2849,6 +2849,7 @@ pub(crate) struct KeyStore {
 }
 
 include!("key_store_bootstrap.rs");
+include!("key_store_quota_schema_semantic_migration.rs");
 include!("key_store_observability_sidecar.rs");
 include!("key_store_public_metrics_freshness.rs");
 include!("key_store_request_logs_gc.rs");

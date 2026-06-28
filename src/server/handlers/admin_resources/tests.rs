@@ -21,14 +21,10 @@ mod admin_resources_tests {
                 window_minutes: 60,
                 ..tavily_hikari::BusinessCalls1hSummary::default()
             },
-            hourly_any_used: 0,
-            hourly_any_limit: 0,
-            quota_hourly_used: 0,
-            quota_hourly_limit: 0,
-            quota_daily_used: 0,
-            quota_daily_limit: 0,
-            quota_monthly_used: 0,
-            quota_monthly_limit: 0,
+            daily_credits_used: 0,
+            daily_credits_limit: 0,
+            monthly_credits_used: 0,
+            monthly_credits_limit: 0,
             daily_success: 0,
             daily_failure: 0,
             monthly_success: 0,
@@ -293,12 +289,12 @@ mod admin_resources_tests {
     fn quota_sort_uses_limit_as_secondary_tiebreaker() {
         let mut rows = [
             mock_row("usr_b", Some(10), |summary| {
-                summary.quota_hourly_used = 40;
-                summary.quota_hourly_limit = 200;
+                summary.business_calls_1h.total_count = 40;
+                summary.business_calls_1h.limit = 200;
             }),
             mock_row("usr_a", Some(12), |summary| {
-                summary.quota_hourly_used = 40;
-                summary.quota_hourly_limit = 100;
+                summary.business_calls_1h.total_count = 40;
+                summary.business_calls_1h.limit = 100;
             }),
         ];
 
@@ -306,7 +302,7 @@ mod admin_resources_tests {
             compare_admin_user_rows(
                 left,
                 right,
-                Some(AdminUsersSortField::QuotaHourlyUsed),
+                Some(AdminUsersSortField::BusinessCalls1hUsed),
                 Some(AdminUsersSortDirection::Asc),
             )
         });

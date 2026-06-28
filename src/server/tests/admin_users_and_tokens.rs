@@ -323,7 +323,6 @@ use super::upstream_support_and_manual_jobs::*;
                 "VIP+",
                 Some("star"),
                 "quota_delta",
-                5,
                 10,
                 20,
                 30,
@@ -340,7 +339,6 @@ use super::upstream_support_and_manual_jobs::*;
                 "Legacy Logs",
                 Some("history"),
                 "quota_delta",
-                0,
                 0,
                 0,
                 0,
@@ -929,7 +927,7 @@ use super::upstream_support_and_manual_jobs::*;
         );
 
         let active_only_quota_sort_url = format!(
-            "http://{}/api/users?page=1&per_page=20&activityScope=active90d&sort=quotaMonthlyUsed&order=desc",
+            "http://{}/api/users?page=1&per_page=20&activityScope=active90d&sort=monthlyCreditsUsed&order=desc",
             addr
         );
         let active_only_quota_sort_resp = client
@@ -1042,7 +1040,7 @@ use super::upstream_support_and_manual_jobs::*;
         }
 
         let quota_sort_page_1_url = format!(
-            "http://{}/api/users?page=1&per_page=1&sort=quotaMonthlyUsed&order=desc",
+            "http://{}/api/users?page=1&per_page=1&sort=monthlyCreditsUsed&order=desc",
             addr
         );
         let quota_sort_page_1_resp = client
@@ -1080,7 +1078,7 @@ use super::upstream_support_and_manual_jobs::*;
         );
 
         let quota_sort_page_2_url = format!(
-            "http://{}/api/users?page=2&per_page=1&sort=quotaMonthlyUsed&order=desc",
+            "http://{}/api/users?page=2&per_page=1&sort=monthlyCreditsUsed&order=desc",
             addr
         );
         let quota_sort_page_2_resp = client
@@ -1107,7 +1105,7 @@ use super::upstream_support_and_manual_jobs::*;
         );
 
         let tagged_quota_sort_url = format!(
-            "http://{}/api/users?page=1&per_page=20&q={}&tagId={}&sort=quotaMonthlyUsed&order=desc",
+            "http://{}/api/users?page=1&per_page=20&q={}&tagId={}&sort=monthlyCreditsUsed&order=desc",
             addr,
             urlencoding::encode("VIP+"),
             urlencoding::encode(&vip_tag.id)
@@ -1345,10 +1343,9 @@ use super::upstream_support_and_manual_jobs::*;
         let patch_resp = client
             .patch(&patch_url)
             .json(&serde_json::json!({
-                "hourlyAnyLimit": 123,
-                "hourlyLimit": 45,
-                "dailyLimit": 678,
-                "monthlyLimit": 910,
+                "businessCalls1hLimit": 45,
+                "dailyCreditsLimit": 678,
+                "monthlyCreditsLimit": 910,
             }))
             .send()
             .await
@@ -1465,27 +1462,25 @@ use super::upstream_support_and_manual_jobs::*;
         let invalid_resp = client
             .patch(&patch_url)
             .json(&serde_json::json!({
-                "hourlyAnyLimit": -1,
-                "hourlyLimit": 45,
-                "dailyLimit": 678,
-                "monthlyLimit": 910,
+                "businessCalls1hLimit": -1,
+                "dailyCreditsLimit": 678,
+                "monthlyCreditsLimit": 910,
             }))
             .send()
             .await
-            .expect("legacy hourlyAny patch request");
+            .expect("invalid businessCalls1h patch request");
         assert_eq!(
             invalid_resp.status(),
-            reqwest::StatusCode::NO_CONTENT,
-            "legacy hourlyAnyLimit should be ignored instead of rejected"
+            reqwest::StatusCode::BAD_REQUEST,
+            "negative semantic quota fields should be rejected"
         );
 
         let invalid_business_resp = client
             .patch(&patch_url)
             .json(&serde_json::json!({
-                "hourlyAnyLimit": 999,
-                "hourlyLimit": -1,
-                "dailyLimit": 678,
-                "monthlyLimit": 910,
+                "businessCalls1hLimit": -1,
+                "dailyCreditsLimit": 678,
+                "monthlyCreditsLimit": 910,
             }))
             .send()
             .await
@@ -1495,17 +1490,17 @@ use super::upstream_support_and_manual_jobs::*;
         let omitted_legacy_resp = client
             .patch(&patch_url)
             .json(&serde_json::json!({
-                "hourlyLimit": 46,
-                "dailyLimit": 679,
-                "monthlyLimit": 911,
+                "businessCalls1hLimit": 46,
+                "dailyCreditsLimit": 679,
+                "monthlyCreditsLimit": 911,
             }))
             .send()
             .await
-            .expect("omitted legacy hourlyAny patch request");
+            .expect("semantic quota patch request");
         assert_eq!(
             omitted_legacy_resp.status(),
             reqwest::StatusCode::NO_CONTENT,
-            "missing hourlyAnyLimit should be accepted and ignored"
+            "semantic quota patch should succeed without removed legacy fields"
         );
 
         let detail_omitted_resp = client
@@ -1620,10 +1615,9 @@ use super::upstream_support_and_manual_jobs::*;
                 "displayName": "L4",
                 "icon": "linuxdo",
                 "effectKind": "quota_delta",
-                "hourlyAnyDelta": 0,
-                "hourlyDelta": 0,
-                "dailyDelta": 0,
-                "monthlyDelta": 0,
+                "businessCalls1hDelta": 0,
+                "dailyCreditsDelta": 0,
+                "monthlyCreditsDelta": 0,
             }))
             .send()
             .await
@@ -1637,10 +1631,9 @@ use super::upstream_support_and_manual_jobs::*;
                 "displayName": "L4 blocked",
                 "icon": "linuxdo",
                 "effectKind": "quota_delta",
-                "hourlyAnyDelta": 0,
-                "hourlyDelta": 0,
-                "dailyDelta": 0,
-                "monthlyDelta": 0,
+                "businessCalls1hDelta": 0,
+                "dailyCreditsDelta": 0,
+                "monthlyCreditsDelta": 0,
             }))
             .send()
             .await
@@ -1665,10 +1658,9 @@ use super::upstream_support_and_manual_jobs::*;
                 "displayName": "Suspended",
                 "icon": "ban",
                 "effectKind": "quota_delta",
-                "hourlyAnyDelta": -9,
-                "hourlyDelta": -9,
-                "dailyDelta": -9,
-                "monthlyDelta": -9,
+                "businessCalls1hDelta": -9,
+                "dailyCreditsDelta": -9,
+                "monthlyCreditsDelta": -9,
             }))
             .send()
             .await
@@ -1689,10 +1681,9 @@ use super::upstream_support_and_manual_jobs::*;
                 "displayName": "Suspended Now",
                 "icon": "ban",
                 "effectKind": "block_all",
-                "hourlyAnyDelta": 0,
-                "hourlyDelta": 0,
-                "dailyDelta": 0,
-                "monthlyDelta": 0,
+                "businessCalls1hDelta": 0,
+                "dailyCreditsDelta": 0,
+                "monthlyCreditsDelta": 0,
             }))
             .send()
             .await

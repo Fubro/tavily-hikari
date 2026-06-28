@@ -439,7 +439,7 @@ async fn account_usage_rollup_rebuild_backfills_full_month_chart_horizon() {
         .expect("rebuild account usage rollups");
 
     let series = proxy
-        .admin_user_usage_series(&user.user_id, AdminUserUsageSeriesKind::QuotaMonth)
+        .admin_user_usage_series(&user.user_id, AdminUserUsageSeriesKind::MonthlyCredits)
         .await
         .expect("load monthly series");
 
@@ -673,75 +673,75 @@ async fn user_dashboard_overview_quota_progress_preserves_future_slots_and_utc_m
 
     let hourly_first_visible_index = overview
         .progress
-        .quota_hourly
+        .business_calls_1h
         .points
         .iter()
         .position(|point| point.value.is_some())
         .expect("hourly first visible point");
     let hourly_current_index = overview
         .progress
-        .quota_hourly
+        .business_calls_1h
         .points
         .iter()
         .rposition(|point| point.value.is_some())
         .expect("hourly current point");
     assert_eq!(
-        overview.progress.quota_hourly.points.len(),
+        overview.progress.business_calls_1h.points.len(),
         (SECS_PER_HOUR / SECS_PER_FIVE_MINUTES) as usize
     );
     assert_eq!(
-        overview.progress.quota_hourly.points[hourly_first_visible_index].bucket_start,
+        overview.progress.business_calls_1h.points[hourly_first_visible_index].bucket_start,
         current_hour_start
     );
     assert_eq!(
         hourly_current_index,
-        overview.progress.quota_hourly.points.len() - 1
+        overview.progress.business_calls_1h.points.len() - 1
     );
     assert!(
-        overview.progress.quota_hourly.points[..hourly_first_visible_index]
+        overview.progress.business_calls_1h.points[..hourly_first_visible_index]
             .iter()
             .all(|point| point.value.is_none())
     );
     assert_eq!(
-        overview.progress.quota_hourly.points[hourly_current_index].value,
+        overview.progress.business_calls_1h.points[hourly_current_index].value,
         Some(0)
     );
     assert!(
-        overview.progress.quota_hourly.points[hourly_first_visible_index..]
+        overview.progress.business_calls_1h.points[hourly_first_visible_index..]
             .iter()
             .all(|point| point.value.is_some())
     );
 
     let daily_current_index = overview
         .progress
-        .quota_daily
+        .daily_credits
         .points
         .iter()
         .rposition(|point| point.value.is_some())
         .expect("daily current point");
     assert_eq!(
-        overview.progress.quota_daily.points[daily_current_index].value,
+        overview.progress.daily_credits.points[daily_current_index].value,
         Some(5)
     );
     assert!(
-        overview.progress.quota_daily.points[daily_current_index + 1..]
+        overview.progress.daily_credits.points[daily_current_index + 1..]
             .iter()
             .all(|point| point.value.is_none())
     );
 
     let monthly_current_index = overview
         .progress
-        .quota_monthly
+        .monthly_credits
         .points
         .iter()
         .rposition(|point| point.value.is_some())
         .expect("monthly current point");
     assert_eq!(
-        overview.progress.quota_monthly.points[monthly_current_index].value,
+        overview.progress.monthly_credits.points[monthly_current_index].value,
         Some(5)
     );
     assert!(
-        overview.progress.quota_monthly.points[monthly_current_index + 1..]
+        overview.progress.monthly_credits.points[monthly_current_index + 1..]
             .iter()
             .all(|point| point.value.is_none())
     );
@@ -1016,7 +1016,7 @@ async fn admin_user_usage_series_preserves_gaps_before_user_signup() {
         .expect("rebuild account usage rollups");
 
     let series = proxy
-        .admin_user_usage_series(&user.user_id, AdminUserUsageSeriesKind::QuotaMonth)
+        .admin_user_usage_series(&user.user_id, AdminUserUsageSeriesKind::MonthlyCredits)
         .await
         .expect("load monthly usage series");
 
@@ -1027,7 +1027,7 @@ async fn admin_user_usage_series_preserves_gaps_before_user_signup() {
 }
 
 #[tokio::test]
-async fn admin_user_usage_series_preserves_partially_covered_first_bucket_as_gap() {
+async fn admin_user_usage_series_business_calls_1h_ignores_legacy_rollup_coverage_marker() {
     let db_path = temp_db_path("admin-user-usage-series-partial-coverage-gap");
     let db_str = db_path.to_string_lossy().to_string();
 
@@ -1049,8 +1049,8 @@ async fn admin_user_usage_series_preserves_partially_covered_first_bucket_as_gap
         .expect("upsert user");
 
     let now = Utc::now().timestamp();
-    let current_bucket_start = now - now.rem_euclid(SECS_PER_HOUR);
-    let start = current_bucket_start - 71 * SECS_PER_HOUR;
+    let current_bucket_start = now - now.rem_euclid(SECS_PER_FIVE_MINUTES);
+    let start = current_bucket_start - 287 * SECS_PER_FIVE_MINUTES;
     sqlx::query("UPDATE users SET created_at = ? WHERE id = ?")
         .bind(start)
         .bind(&user.user_id)
@@ -1068,19 +1068,19 @@ async fn admin_user_usage_series_preserves_partially_covered_first_bucket_as_gap
         .expect("set partial quota1h coverage");
 
     let series = proxy
-        .admin_user_usage_series(&user.user_id, AdminUserUsageSeriesKind::Quota1h)
+        .admin_user_usage_series(&user.user_id, AdminUserUsageSeriesKind::BusinessCalls1h)
         .await
-        .expect("load quota1h usage series");
+        .expect("load business calls 1h usage series");
 
-    assert_eq!(series.points.len(), 72);
-    assert_eq!(series.points[0].value, None);
+    assert_eq!(series.points.len(), 288);
+    assert_eq!(series.points[0].value, Some(0));
     assert_eq!(series.points[1].value, Some(0));
 
     let _ = std::fs::remove_file(db_path);
 }
 
 #[tokio::test]
-async fn admin_user_usage_series_preserves_limit_line_before_user_signup() {
+async fn admin_user_usage_series_business_calls_1h_applies_snapshot_limit_per_five_minute_bucket() {
     let db_path = temp_db_path("admin-user-usage-series-signup-limit-gap");
     let db_str = db_path.to_string_lossy().to_string();
 
@@ -1102,8 +1102,8 @@ async fn admin_user_usage_series_preserves_limit_line_before_user_signup() {
         .expect("upsert user");
 
     let now = Utc::now().timestamp();
-    let current_bucket_start = now - now.rem_euclid(SECS_PER_HOUR);
-    let start = current_bucket_start - 71 * SECS_PER_HOUR;
+    let current_bucket_start = now - now.rem_euclid(SECS_PER_FIVE_MINUTES);
+    let start = current_bucket_start - 287 * SECS_PER_FIVE_MINUTES;
     let signup_at = start + 30 * SECS_PER_MINUTE;
     sqlx::query("UPDATE users SET created_at = ? WHERE id = ?")
         .bind(signup_at)
@@ -1118,8 +1118,8 @@ async fn admin_user_usage_series_preserves_limit_line_before_user_signup() {
         .expect("clear auto quota snapshots");
     sqlx::query(
         r#"INSERT INTO account_quota_limit_snapshots
-           (user_id, changed_at, hourly_any_limit, hourly_limit, daily_limit, monthly_limit)
-           VALUES (?, ?, ?, ?, ?, ?)"#,
+           (user_id, changed_at, business_calls_1h_limit, daily_credits_limit, monthly_credits_limit)
+           VALUES (?, ?, ?, ?, ?)"#,
     )
     .bind(&user.user_id)
     .bind(signup_at)
@@ -1132,14 +1132,15 @@ async fn admin_user_usage_series_preserves_limit_line_before_user_signup() {
     .expect("seed deterministic quota snapshot");
 
     let series = proxy
-        .admin_user_usage_series(&user.user_id, AdminUserUsageSeriesKind::Quota1h)
+        .admin_user_usage_series(&user.user_id, AdminUserUsageSeriesKind::BusinessCalls1h)
         .await
-        .expect("load quota1h usage series");
+        .expect("load business calls 1h usage series");
 
-    assert_eq!(series.points.len(), 72);
-    assert_eq!(series.points[0].value, None);
-    assert_eq!(series.points[0].limit_value, Some(120));
-    assert_eq!(series.points[1].limit_value, Some(120));
+    assert_eq!(series.points.len(), 288);
+    assert_eq!(series.points[0].value, Some(0));
+    assert_eq!(series.points[0].limit_value, None);
+    assert_eq!(series.points[5].limit_value, None);
+    assert_eq!(series.points[6].limit_value, Some(100));
 
     let _ = std::fs::remove_file(db_path);
 }
@@ -1207,7 +1208,7 @@ async fn account_limit_snapshot_backfill_treats_unchanged_default_quota_as_long_
         .expect("backfill quota snapshot history");
 
     let series = proxy
-        .admin_user_usage_series(&user.user_id, AdminUserUsageSeriesKind::Quota1h)
+        .admin_user_usage_series(&user.user_id, AdminUserUsageSeriesKind::BusinessCalls1h)
         .await
         .expect("load quota1h series");
 
@@ -1285,7 +1286,7 @@ async fn account_limit_snapshot_backfill_preserves_gaps_for_existing_custom_quot
         .expect("backfill quota snapshot history");
 
     let series = proxy
-        .admin_user_usage_series(&user.user_id, AdminUserUsageSeriesKind::Quota1h)
+        .admin_user_usage_series(&user.user_id, AdminUserUsageSeriesKind::BusinessCalls1h)
         .await
         .expect("load quota1h series");
 
@@ -1726,98 +1727,6 @@ async fn request_user_id_backfill_runs_in_resumable_batches() {
 }
 
 #[tokio::test]
-async fn admin_user_usage_series_quota1h_uses_historical_limit_snapshots() {
-    let db_path = temp_db_path("admin-user-usage-series-quota-limit-snapshots");
-    let db_str = db_path.to_string_lossy().to_string();
-
-    let proxy = TavilyProxy::with_endpoint(Vec::<String>::new(), DEFAULT_UPSTREAM, &db_str)
-        .await
-        .expect("proxy created");
-    let user = proxy
-        .upsert_oauth_account(&OAuthAccountProfile {
-            provider: "github".to_string(),
-            provider_user_id: "usage-series-quota-snapshots".to_string(),
-            username: Some("usage_series_quota_snapshots".to_string()),
-            name: Some("Usage Series Quota Snapshots".to_string()),
-            avatar_template: None,
-            active: true,
-            trust_level: None,
-            raw_payload_json: None,
-        })
-        .await
-        .expect("upsert user");
-
-    proxy
-        .update_account_business_quota_limits(&user.user_id, 600, 6_000, 60_000)
-        .await
-        .expect("update current business quota");
-    sqlx::query("DELETE FROM account_quota_limit_snapshots WHERE user_id = ?")
-        .bind(&user.user_id)
-        .execute(&proxy.key_store.pool)
-        .await
-        .expect("clear auto snapshots");
-
-    let now = Utc::now();
-    let current_bucket_start = now.timestamp() - now.timestamp().rem_euclid(SECS_PER_HOUR);
-    let start = current_bucket_start - 71 * SECS_PER_HOUR;
-    sqlx::query("UPDATE users SET created_at = ? WHERE id = ?")
-        .bind(start)
-        .bind(&user.user_id)
-        .execute(&proxy.key_store.pool)
-        .await
-        .expect("backdate user creation");
-    sqlx::query(
-        r#"INSERT INTO account_quota_limit_snapshots
-           (user_id, changed_at, hourly_any_limit, hourly_limit, daily_limit, monthly_limit)
-           VALUES (?, ?, ?, ?, ?, ?), (?, ?, ?, ?, ?, ?), (?, ?, ?, ?, ?, ?)"#,
-    )
-    .bind(&user.user_id)
-    .bind(start + 12 * SECS_PER_HOUR + 600)
-    .bind(200)
-    .bind(200)
-    .bind(2_000)
-    .bind(20_000)
-    .bind(&user.user_id)
-    .bind(start + 36 * SECS_PER_HOUR + 600)
-    .bind(400)
-    .bind(400)
-    .bind(4_000)
-    .bind(40_000)
-    .bind(&user.user_id)
-    .bind(start + 60 * SECS_PER_HOUR + 600)
-    .bind(600)
-    .bind(600)
-    .bind(6_000)
-    .bind(60_000)
-    .execute(&proxy.key_store.pool)
-    .await
-    .expect("seed deterministic quota snapshots");
-
-    proxy
-        .key_store
-        .set_meta_i64(META_KEY_ACCOUNT_USAGE_ROLLUP_QUOTA1H_COVERAGE_START, start)
-        .await
-        .expect("set quota1h coverage");
-
-    let series = proxy
-        .admin_user_usage_series(&user.user_id, AdminUserUsageSeriesKind::Quota1h)
-        .await
-        .expect("load quota1h series");
-
-    assert_eq!(series.limit, 600);
-    assert_eq!(series.points.len(), 72);
-    assert_eq!(series.points[11].limit_value, None);
-    assert_eq!(series.points[12].limit_value, Some(200));
-    assert_eq!(series.points[35].limit_value, Some(200));
-    assert_eq!(series.points[36].limit_value, Some(400));
-    assert_eq!(series.points[59].limit_value, Some(400));
-    assert_eq!(series.points[60].limit_value, Some(600));
-    assert!(series.points.iter().all(|point| point.value == Some(0)));
-
-    let _ = std::fs::remove_file(db_path);
-}
-
-#[tokio::test]
 async fn admin_user_usage_series_rate5m_uses_historical_request_limit_snapshots() {
     let db_path = temp_db_path("admin-user-usage-series-rate-limit-snapshots");
     let db_str = db_path.to_string_lossy().to_string();
@@ -1938,24 +1847,21 @@ async fn admin_user_usage_series_business_calls_1h_uses_historical_limit_snapsho
         .expect("backdate user creation");
     sqlx::query(
         r#"INSERT INTO account_quota_limit_snapshots
-           (user_id, changed_at, hourly_any_limit, hourly_limit, daily_limit, monthly_limit)
-           VALUES (?, ?, ?, ?, ?, ?), (?, ?, ?, ?, ?, ?), (?, ?, ?, ?, ?, ?)"#,
+           (user_id, changed_at, business_calls_1h_limit, daily_credits_limit, monthly_credits_limit)
+           VALUES (?, ?, ?, ?, ?), (?, ?, ?, ?, ?), (?, ?, ?, ?, ?)"#,
     )
     .bind(&user.user_id)
     .bind(start + 72 * SECS_PER_FIVE_MINUTES + 60)
-    .bind(200)
     .bind(200)
     .bind(2_000)
     .bind(20_000)
     .bind(&user.user_id)
     .bind(start + 144 * SECS_PER_FIVE_MINUTES + 60)
     .bind(400)
-    .bind(400)
     .bind(4_000)
     .bind(40_000)
     .bind(&user.user_id)
     .bind(start + 216 * SECS_PER_FIVE_MINUTES + 60)
-    .bind(600)
     .bind(600)
     .bind(6_000)
     .bind(60_000)

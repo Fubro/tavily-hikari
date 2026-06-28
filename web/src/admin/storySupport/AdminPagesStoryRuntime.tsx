@@ -1045,19 +1045,21 @@ const STORY_RECENT_ALERTS: RecentAlertsSummary = {
   topGroups: [],
 }
 
-function withQuotaDeltaCanonical<
-  T extends {
-    hourlyAnyDelta: number
-    hourlyDelta: number
-    dailyDelta: number
-    monthlyDelta: number
-  },
->(value: T): T & Pick<AdminUserTag, 'businessCalls1hDelta' | 'dailyCreditsDelta' | 'monthlyCreditsDelta'> {
+type SemanticQuotaDelta = Pick<AdminUserTag, 'businessCalls1hDelta' | 'dailyCreditsDelta' | 'monthlyCreditsDelta'>
+
+type LegacyQuotaDelta = {
+  hourlyAnyDelta: number
+  hourlyDelta: number
+  dailyDelta: number
+  monthlyDelta: number
+}
+
+function withQuotaDeltaCanonical<T extends SemanticQuotaDelta | LegacyQuotaDelta>(value: T): T & SemanticQuotaDelta {
   return {
     ...value,
-    businessCalls1hDelta: value.hourlyDelta,
-    dailyCreditsDelta: value.dailyDelta,
-    monthlyCreditsDelta: value.monthlyDelta,
+    businessCalls1hDelta: 'businessCalls1hDelta' in value ? value.businessCalls1hDelta : value.hourlyDelta,
+    dailyCreditsDelta: 'dailyCreditsDelta' in value ? value.dailyCreditsDelta : value.dailyDelta,
+    monthlyCreditsDelta: 'monthlyCreditsDelta' in value ? value.monthlyCreditsDelta : value.monthlyDelta,
   }
 }
 
@@ -1103,26 +1105,27 @@ function withQuotaBreakdownCanonical<
     tagName: string | null
     source: string | null
     effectKind: string
-    hourlyAnyDelta: number
-    hourlyDelta: number
-    dailyDelta: number
-    monthlyDelta: number
-  },
+  } & (SemanticQuotaDelta | LegacyQuotaDelta),
 >(value: T): T & AdminUserQuotaBreakdownEntry {
   return {
     ...value,
-    businessCalls1hDelta: value.hourlyDelta,
-    dailyCreditsDelta: value.dailyDelta,
-    monthlyCreditsDelta: value.monthlyDelta,
-  }
+    businessCalls1hDelta: 'businessCalls1hDelta' in value ? value.businessCalls1hDelta : value.hourlyDelta,
+    dailyCreditsDelta: 'dailyCreditsDelta' in value ? value.dailyCreditsDelta : value.dailyDelta,
+    monthlyCreditsDelta: 'monthlyCreditsDelta' in value ? value.monthlyCreditsDelta : value.monthlyDelta,
+  } as T & AdminUserQuotaBreakdownEntry
 }
 
-const DEFAULT_LINUXDO_TAG_DELTA = withQuotaDeltaCanonical({
-  hourlyAnyDelta: 500,
-  hourlyDelta: 100,
-  dailyDelta: 500,
-  monthlyDelta: 5_000,
-} as const)
+const DEFAULT_LINUXDO_TAG_DELTA = {
+  businessCalls1hDelta: 100,
+  dailyCreditsDelta: 500,
+  monthlyCreditsDelta: 5_000,
+} as const
+
+const EMPTY_QUOTA_DELTA = {
+  businessCalls1hDelta: 0,
+  dailyCreditsDelta: 0,
+  monthlyCreditsDelta: 0,
+} as const
 
 const MOCK_TAG_CATALOG: AdminUserTag[] = [
   {
@@ -1397,15 +1400,6 @@ const MOCK_USER_TOKENS: AdminUserTokenSummary[] = [
 ]
 
 const MOCK_USER_USAGE_SERIES: Record<AdminUserUsageSeriesKey, AdminUserUsageSeries> = {
-  quota1h: {
-    kind: 'quotaLike',
-    limit: 500,
-    points: Array.from({ length: 72 }, (_, index) => ({
-      bucketStart: now - (71 - index) * 3_600,
-      value: [44, 88, 129, 160, 202, 233][index % 6] + Math.floor(index / 10) * 6,
-      limitValue: index < 18 ? 360 : index < 42 ? 420 : 500,
-    })),
-  },
   rate5m: {
     kind: 'quotaLike',
     limit: 100,
@@ -1415,7 +1409,7 @@ const MOCK_USER_USAGE_SERIES: Record<AdminUserUsageSeriesKey, AdminUserUsageSeri
       limitValue: index < 144 ? 80 : 100,
     })),
   },
-  quota24h: {
+  dailyCredits: {
     kind: 'quotaLike',
     limit: 12_000,
     points: Array.from({ length: 7 }, (_, index) => ({
@@ -1424,7 +1418,7 @@ const MOCK_USER_USAGE_SERIES: Record<AdminUserUsageSeriesKey, AdminUserUsageSeri
       limitValue: index < 3 ? 9_000 : 12_000,
     })),
   },
-  quotaMonth: {
+  monthlyCredits: {
     kind: 'quotaLike',
     limit: 160_000,
     points: Array.from({ length: 12 }, (_, index) => ({
@@ -2372,36 +2366,36 @@ function compareAdminUserSummaryRows(
 
   const ordering = (() => {
     switch (sortField) {
-      case 'hourlyAnyUsed':
+      case 'requestRateUsed':
         return compareQuotaUsage(
-          left.hourlyAnyUsed,
-          left.hourlyAnyLimit,
-          right.hourlyAnyUsed,
-          right.hourlyAnyLimit,
+          left.requestRate.used,
+          left.requestRate.limit,
+          right.requestRate.used,
+          right.requestRate.limit,
           direction,
         )
-      case 'quotaHourlyUsed':
+      case 'businessCalls1hUsed':
         return compareQuotaUsage(
-          left.quotaHourlyUsed,
-          left.quotaHourlyLimit,
-          right.quotaHourlyUsed,
-          right.quotaHourlyLimit,
+          left.businessCalls1h.totalCount,
+          left.businessCalls1h.limit,
+          right.businessCalls1h.totalCount,
+          right.businessCalls1h.limit,
           direction,
         )
-      case 'quotaDailyUsed':
+      case 'dailyCreditsUsed':
         return compareQuotaUsage(
-          left.quotaDailyUsed,
-          left.quotaDailyLimit,
-          right.quotaDailyUsed,
-          right.quotaDailyLimit,
+          left.dailyCreditsUsed,
+          left.dailyCreditsLimit,
+          right.dailyCreditsUsed,
+          right.dailyCreditsLimit,
           direction,
         )
-      case 'quotaMonthlyUsed':
+      case 'monthlyCreditsUsed':
         return compareQuotaUsage(
-          left.quotaMonthlyUsed,
-          left.quotaMonthlyLimit,
-          right.quotaMonthlyUsed,
-          right.quotaMonthlyLimit,
+          left.monthlyCreditsUsed,
+          left.monthlyCreditsLimit,
+          right.monthlyCreditsUsed,
+          right.monthlyCreditsLimit,
           direction,
         )
       case 'monthlyBrokenCount':
@@ -2690,10 +2684,9 @@ type StoryQuotaSnapshot = Record<QuotaSliderField, QuotaSliderSeed>
 
 function buildStoryQuotaSnapshot(detail: AdminUserDetail): StoryQuotaSnapshot {
   return {
-    hourlyAnyLimit: createQuotaSliderSeed('hourlyAnyLimit', detail.hourlyAnyUsed, detail.quotaBase.hourlyAnyLimit),
-    hourlyLimit: createQuotaSliderSeed('hourlyLimit', detail.quotaHourlyUsed, detail.quotaBase.hourlyLimit),
-    dailyLimit: createQuotaSliderSeed('dailyLimit', detail.quotaDailyUsed, detail.quotaBase.dailyLimit),
-    monthlyLimit: createQuotaSliderSeed('monthlyLimit', detail.quotaMonthlyUsed, detail.quotaBase.monthlyLimit),
+    businessCalls1hLimit: createQuotaSliderSeed('businessCalls1hLimit', detail.businessCalls1h.totalCount, detail.quotaBase.businessCalls1hLimit),
+    dailyCreditsLimit: createQuotaSliderSeed('dailyCreditsLimit', detail.dailyCreditsUsed, detail.quotaBase.dailyCreditsLimit),
+    monthlyCreditsLimit: createQuotaSliderSeed('monthlyCreditsLimit', detail.monthlyCreditsUsed, detail.quotaBase.monthlyCreditsLimit),
   }
 }
 
@@ -2738,10 +2731,7 @@ function StoryUserTagCatalogCard({
     icon: '',
     systemKey: null,
     effectKind: 'quota_delta',
-    hourlyAnyDelta: 0,
-    hourlyDelta: 0,
-    dailyDelta: 0,
-    monthlyDelta: 0,
+    ...EMPTY_QUOTA_DELTA,
     userCount: 0,
   }
   const isSystem = Boolean(draft.systemKey)
@@ -2852,9 +2842,9 @@ function StoryUserTagCatalogCard({
         ) : (
           <dl className="user-tag-catalog-delta-grid">
             {([
-              [users.quota.hourly, draft.hourlyDelta],
-              [users.quota.daily, draft.dailyDelta],
-              [users.quota.monthly, draft.monthlyDelta],
+              [users.quota.hourly, draft.businessCalls1hDelta],
+              [users.quota.daily, draft.dailyCreditsDelta],
+              [users.quota.monthly, draft.monthlyCreditsDelta],
             ] as const).map(([label, value]) => (
               <div className="user-tag-catalog-delta-item" key={label}>
                 <dt>{label}</dt>
@@ -4920,14 +4910,14 @@ function UsersPageCanvas({
                   <th>{users.table.tags}</th>
                   <StoryAdminUsersSortableHeader
                     label={users.table.daily}
-                    field="quotaDailyUsed"
+                    field="dailyCreditsUsed"
                     activeField={effectiveSortField}
                     activeOrder={effectiveSortOrder}
                     onToggle={toggleSort}
                   />
                   <StoryAdminUsersSortableHeader
                     label={users.table.monthly}
-                    field="quotaMonthlyUsed"
+                    field="monthlyCreditsUsed"
                     activeField={effectiveSortField}
                     activeOrder={effectiveSortOrder}
                     onToggle={toggleSort}
@@ -4957,8 +4947,8 @@ function UsersPageCanvas({
               </thead>
               <tbody>
                 {sortedUsers.map((item) => {
-                  const dailyQuotaMetric = formatQuotaStackValue(item.quotaDailyUsed, item.quotaDailyLimit)
-                  const monthlyQuotaMetric = formatQuotaStackValue(item.quotaMonthlyUsed, item.quotaMonthlyLimit)
+                  const dailyQuotaMetric = formatQuotaStackValue(item.dailyCreditsUsed, item.dailyCreditsLimit)
+                  const monthlyQuotaMetric = formatQuotaStackValue(item.monthlyCreditsUsed, item.monthlyCreditsLimit)
                   const lastActivityMetric = formatStackedTimestamp(item.lastActivity, language)
                   const lastLoginMetric = formatStackedTimestamp(item.lastLoginAt, language)
                   return (
@@ -5818,10 +5808,9 @@ function UserDetailPageCanvas({
   const [detail, setDetail] = useState<AdminUserDetail>(initialDetail)
   const quotaSnapshot = buildStoryQuotaSnapshot(detail)
   const [quotaDraft, setQuotaDraft] = useState<Record<QuotaSliderField, string>>({
-    hourlyAnyLimit: String(detail.quotaBase.hourlyAnyLimit),
-    hourlyLimit: String(detail.quotaBase.hourlyLimit),
-    dailyLimit: String(detail.quotaBase.dailyLimit),
-    monthlyLimit: String(detail.quotaBase.monthlyLimit),
+    businessCalls1hLimit: String(detail.quotaBase.businessCalls1hLimit),
+    dailyCreditsLimit: String(detail.quotaBase.dailyCreditsLimit),
+    monthlyCreditsLimit: String(detail.quotaBase.monthlyCreditsLimit),
   })
   const [monthlyBrokenDrawerOpen, setMonthlyBrokenDrawerOpen] = useState(false)
   const [selectedBindableTagId, setSelectedBindableTagId] = useState<string | undefined>(undefined)
@@ -5992,15 +5981,15 @@ function UserDetailPageCanvas({
                 <div className="token-compact-pair">
                   <div className="token-compact-field">
                     <span className="token-compact-label">{users.quota.hourly}</span>
-                    <span className="token-compact-value">{formatSignedQuotaDelta(tag.hourlyDelta)}</span>
+                    <span className="token-compact-value">{formatSignedQuotaDelta(tag.businessCalls1hDelta)}</span>
                   </div>
                   <div className="token-compact-field">
                     <span className="token-compact-label">{users.quota.daily}</span>
-                    <span className="token-compact-value">{formatSignedQuotaDelta(tag.dailyDelta)}</span>
+                    <span className="token-compact-value">{formatSignedQuotaDelta(tag.dailyCreditsDelta)}</span>
                   </div>
                   <div className="token-compact-field">
                     <span className="token-compact-label">{users.quota.monthly}</span>
-                    <span className="token-compact-value">{formatSignedQuotaDelta(tag.monthlyDelta)}</span>
+                    <span className="token-compact-value">{formatSignedQuotaDelta(tag.monthlyCreditsDelta)}</span>
                   </div>
                 </div>
               </article>
@@ -6021,22 +6010,22 @@ function UserDetailPageCanvas({
         <div className="quota-grid" style={{ marginTop: 12 }}>
           {([
             {
-              field: 'hourlyLimit',
+              field: 'businessCalls1hLimit',
               label: users.quota.hourly,
-              used: detail.quotaHourlyUsed,
-              currentLimit: detail.quotaBase.hourlyLimit,
+              used: detail.businessCalls1h.totalCount,
+              currentLimit: detail.quotaBase.businessCalls1hLimit,
             },
             {
-              field: 'dailyLimit',
+              field: 'dailyCreditsLimit',
               label: users.quota.daily,
-              used: detail.quotaDailyUsed,
-              currentLimit: detail.quotaBase.dailyLimit,
+              used: detail.dailyCreditsUsed,
+              currentLimit: detail.quotaBase.dailyCreditsLimit,
             },
             {
-              field: 'monthlyLimit',
+              field: 'monthlyCreditsLimit',
               label: users.quota.monthly,
-              used: detail.quotaMonthlyUsed,
-              currentLimit: detail.quotaBase.monthlyLimit,
+              used: detail.monthlyCreditsUsed,
+              currentLimit: detail.quotaBase.monthlyCreditsLimit,
             },
           ] as const).map((item) => {
             const sliderSeed = quotaSnapshot[item.field]
@@ -6092,9 +6081,9 @@ function UserDetailPageCanvas({
         {hasBlockAllTag && <div className="alert alert-warning">{users.effectiveQuota.blockAllNotice}</div>}
         <div className="token-info-grid">
           {([
-            ['hourly', users.quota.hourly, detail.effectiveQuota.hourlyLimit],
-            ['daily', users.quota.daily, detail.effectiveQuota.dailyLimit],
-            ['monthly', users.quota.monthly, detail.effectiveQuota.monthlyLimit],
+            ['hourly', users.quota.hourly, detail.effectiveQuota.businessCalls1hLimit],
+            ['daily', users.quota.daily, detail.effectiveQuota.dailyCreditsLimit],
+            ['monthly', users.quota.monthly, detail.effectiveQuota.monthlyCreditsLimit],
           ] as const).map(([key, label, value]) => (
             <div className="token-info-card" key={key}>
               <span className="token-info-label">{label}</span>
@@ -7226,7 +7215,7 @@ export const UserDetailCompact: Story = {
 }
 
 export const UserDetailMonthlyGap: Story = {
-  render: () => <UserDetailPageCanvas initialUsageSeries="quotaMonth" />,
+  render: () => <UserDetailPageCanvas initialUsageSeries="monthlyCredits" />,
 }
 
 export const UserDetailBusinessCalls1h: Story = {

@@ -630,14 +630,10 @@ impl TavilyProxy {
                 window_minutes: 60,
                 ..BusinessCalls1hSummary::default()
             },
-            hourly_any_used: 0,
-            hourly_any_limit: 0,
-            quota_hourly_used: 0,
-            quota_hourly_limit: 0,
-            quota_daily_used: 0,
-            quota_daily_limit: 0,
-            quota_monthly_used: 0,
-            quota_monthly_limit: 0,
+            daily_credits_used: 0,
+            daily_credits_limit: 0,
+            monthly_credits_used: 0,
+            monthly_credits_limit: 0,
             daily_success: 0,
             daily_failure: 0,
             monthly_success: 0,
@@ -748,21 +744,14 @@ impl TavilyProxy {
                                     ..BusinessCalls1hSummary::default()
                                 },
                             );
-                            summary.limit = limits.hourly_limit;
+                            summary.limit = limits.business_calls_1h_limit;
                             summary
                         },
-                        hourly_any_used: request_rate.hourly_used,
-                        hourly_any_limit: request_rate.hourly_limit,
-                        quota_hourly_used: business_calls_1h
-                            .get(&user_id)
-                            .map(|summary| summary.total_count)
-                            .unwrap_or(0),
-                        quota_hourly_limit: limits.hourly_limit,
-                        quota_daily_used: daily_totals.get(&user_id).copied().unwrap_or(0)
+                        daily_credits_used: daily_totals.get(&user_id).copied().unwrap_or(0)
                             + legacy_daily_totals.get(&user_id).copied().unwrap_or(0),
-                        quota_daily_limit: limits.daily_limit,
-                        quota_monthly_used: monthly_totals.get(&user_id).copied().unwrap_or(0),
-                        quota_monthly_limit: limits.monthly_limit,
+                        daily_credits_limit: limits.daily_credits_limit,
+                        monthly_credits_used: monthly_totals.get(&user_id).copied().unwrap_or(0),
+                        monthly_credits_limit: limits.monthly_credits_limit,
                         daily_success: metrics.daily_success,
                         daily_failure: metrics.daily_failure,
                         monthly_success: metrics.monthly_success,
@@ -1014,18 +1003,16 @@ impl TavilyProxy {
     pub async fn update_account_quota_limits(
         &self,
         user_id: &str,
-        hourly_any_limit: i64,
-        hourly_limit: i64,
-        daily_limit: i64,
-        monthly_limit: i64,
+        business_calls_1h_limit: i64,
+        daily_credits_limit: i64,
+        monthly_credits_limit: i64,
     ) -> Result<bool, ProxyError> {
         self.key_store
             .update_account_quota_limits(
                 user_id,
-                hourly_any_limit,
-                hourly_limit,
-                daily_limit,
-                monthly_limit,
+                business_calls_1h_limit,
+                daily_credits_limit,
+                monthly_credits_limit,
             )
             .await
     }
@@ -1034,12 +1021,17 @@ impl TavilyProxy {
     pub async fn update_account_business_quota_limits(
         &self,
         user_id: &str,
-        hourly_limit: i64,
-        daily_limit: i64,
-        monthly_limit: i64,
+        business_calls_1h_limit: i64,
+        daily_credits_limit: i64,
+        monthly_credits_limit: i64,
     ) -> Result<bool, ProxyError> {
         self.key_store
-            .update_account_business_quota_limits(user_id, hourly_limit, daily_limit, monthly_limit)
+            .update_account_business_quota_limits(
+                user_id,
+                business_calls_1h_limit,
+                daily_credits_limit,
+                monthly_credits_limit,
+            )
             .await
     }
 
@@ -1062,10 +1054,9 @@ impl TavilyProxy {
         display_name: &str,
         icon: Option<&str>,
         effect_kind: &str,
-        hourly_any_delta: i64,
-        hourly_delta: i64,
-        daily_delta: i64,
-        monthly_delta: i64,
+        business_calls_1h_delta: i64,
+        daily_credits_delta: i64,
+        monthly_credits_delta: i64,
     ) -> Result<AdminUserTag, ProxyError> {
         self.key_store
             .create_user_tag(
@@ -1073,10 +1064,9 @@ impl TavilyProxy {
                 display_name,
                 icon,
                 effect_kind,
-                hourly_any_delta,
-                hourly_delta,
-                daily_delta,
-                monthly_delta,
+                business_calls_1h_delta,
+                daily_credits_delta,
+                monthly_credits_delta,
             )
             .await
             .map(|tag| to_admin_user_tag(&tag))
@@ -1091,10 +1081,9 @@ impl TavilyProxy {
         display_name: &str,
         icon: Option<&str>,
         effect_kind: &str,
-        hourly_any_delta: i64,
-        hourly_delta: i64,
-        daily_delta: i64,
-        monthly_delta: i64,
+        business_calls_1h_delta: i64,
+        daily_credits_delta: i64,
+        monthly_credits_delta: i64,
     ) -> Result<Option<AdminUserTag>, ProxyError> {
         self.key_store
             .update_user_tag(
@@ -1103,10 +1092,9 @@ impl TavilyProxy {
                 display_name,
                 icon,
                 effect_kind,
-                hourly_any_delta,
-                hourly_delta,
-                daily_delta,
-                monthly_delta,
+                business_calls_1h_delta,
+                daily_credits_delta,
+                monthly_credits_delta,
             )
             .await
             .map(|tag| tag.map(|it| to_admin_user_tag(&it)))

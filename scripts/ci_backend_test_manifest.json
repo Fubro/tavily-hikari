@@ -148,6 +148,7 @@
         "tests::request_rollup::dashboard_",
         "tests::request_rollup::rollup_",
         "tests::account_quota_and_billing::startup_",
+        "tests::account_quota_schema_migration::startup_",
         "tests::jobs_and_request_log_retention::startup_",
         "tests::request_kind_and_core::startup_",
         "tests::request_rollup::startup_",

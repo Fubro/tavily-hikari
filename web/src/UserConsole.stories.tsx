@@ -123,13 +123,8 @@ function withOverviewProgressCanonical<
     dailyCredits: UserDashboardOverview['progress']['dailyCredits']
     monthlyCredits: UserDashboardOverview['progress']['monthlyCredits']
   },
->(value: T): T & Pick<UserDashboardOverview['progress'], 'quotaHourly' | 'quotaDaily' | 'quotaMonthly'> {
-  return {
-    ...value,
-    quotaHourly: value.businessCalls1h,
-    quotaDaily: value.dailyCredits,
-    quotaMonthly: value.monthlyCredits,
-  }
+>(value: T): T {
+  return value
 }
 
 async function expectTokenListProof(
@@ -999,9 +994,6 @@ function emitUserTokenSnapshot(): void {
           totalCount: tokenDetailSample.businessCalls1h.totalCount + 2,
         },
         dailyCreditsUsed: tokenDetailSample.dailyCreditsUsed + 6,
-        hourlyAnyUsed: tokenDetailSample.hourlyAnyUsed + 3,
-        quotaHourlyUsed: tokenDetailSample.quotaHourlyUsed + 2,
-        quotaDailyUsed: tokenDetailSample.quotaDailyUsed + 6,
       },
       logs: [
         {

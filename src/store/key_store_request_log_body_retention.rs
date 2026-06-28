@@ -98,7 +98,7 @@ impl KeyStore {
             .max(recent_minute_used)
             .saturating_add(additional_usage.max(0));
         let resolution = self.resolve_account_quota_resolution(user_id).await?;
-        let daily_limit = resolution.effective.daily_limit;
+        let daily_limit = resolution.effective.daily_credits_limit;
         Ok(daily_limit > 0
             && i128::from(used).saturating_mul(100)
                 >= i128::from(daily_limit).saturating_mul(i128::from(threshold_percent)))

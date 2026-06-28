@@ -2624,21 +2624,20 @@ async fn account_quota_limits_sync_with_env_defaults_on_restart() {
         .await
         .expect("seed account quota row");
 
-    let seeded_limits: (i64, i64, i64, i64) = sqlx::query_as(
-        "SELECT hourly_any_limit, hourly_limit, daily_limit, monthly_limit FROM account_quota_limits WHERE user_id = ?",
+    let seeded_limits: (i64, i64, i64) = sqlx::query_as(
+        "SELECT business_calls_1h_limit, daily_credits_limit, monthly_credits_limit FROM account_quota_limits WHERE user_id = ?",
     )
     .bind(&user.user_id)
     .fetch_one(&proxy.key_store.pool)
     .await
     .expect("read seeded limits");
-    assert_eq!(seeded_limits, (0, 0, 0, 0));
+    assert_eq!(seeded_limits, (0, 0, 0));
 
     sqlx::query(
         r#"UPDATE account_quota_limits
-           SET hourly_any_limit = 11,
-               hourly_limit = 12,
-               daily_limit = 13,
-               monthly_limit = 14,
+           SET business_calls_1h_limit = 12,
+               daily_credits_limit = 13,
+               monthly_credits_limit = 14,
                inherits_defaults = 1
            WHERE user_id = ?"#,
     )
@@ -2659,14 +2658,14 @@ async fn account_quota_limits_sync_with_env_defaults_on_restart() {
     let proxy_after = TavilyProxy::with_endpoint(Vec::<String>::new(), DEFAULT_UPSTREAM, &db_str)
         .await
         .expect("proxy reopened");
-    let second_limits: (i64, i64, i64, i64) = sqlx::query_as(
-        "SELECT hourly_any_limit, hourly_limit, daily_limit, monthly_limit FROM account_quota_limits WHERE user_id = ?",
+    let second_limits: (i64, i64, i64) = sqlx::query_as(
+        "SELECT business_calls_1h_limit, daily_credits_limit, monthly_credits_limit FROM account_quota_limits WHERE user_id = ?",
     )
     .bind(&user.user_id)
     .fetch_one(&proxy_after.key_store.pool)
     .await
     .expect("read second limits");
-    assert_eq!(second_limits, (21, 22, 23, 24));
+    assert_eq!(second_limits, (22, 23, 24));
 
     unsafe {
         std::env::remove_var("TOKEN_HOURLY_REQUEST_LIMIT");
@@ -2725,10 +2724,9 @@ async fn legacy_current_default_account_quota_limits_keep_following_defaults_aft
         .expect("seed account quota row");
     sqlx::query(
         r#"UPDATE account_quota_limits
-           SET hourly_any_limit = 11,
-               hourly_limit = 12,
-               daily_limit = 13,
-               monthly_limit = 14,
+           SET business_calls_1h_limit = 12,
+               daily_credits_limit = 13,
+               monthly_credits_limit = 14,
                inherits_defaults = 1
            WHERE user_id = ?"#,
     )
@@ -2748,14 +2746,14 @@ async fn legacy_current_default_account_quota_limits_keep_following_defaults_aft
         TavilyProxy::with_endpoint(Vec::<String>::new(), DEFAULT_UPSTREAM, &db_str)
             .await
             .expect("proxy reopened for backfill");
-    let first_limits: (i64, i64, i64, i64, i64) = sqlx::query_as(
-        "SELECT hourly_any_limit, hourly_limit, daily_limit, monthly_limit, inherits_defaults FROM account_quota_limits WHERE user_id = ?",
+    let first_limits: (i64, i64, i64, i64) = sqlx::query_as(
+        "SELECT business_calls_1h_limit, daily_credits_limit, monthly_credits_limit, inherits_defaults FROM account_quota_limits WHERE user_id = ?",
     )
     .bind(&user.user_id)
     .fetch_one(&proxy_after_backfill.key_store.pool)
     .await
     .expect("read reclassified default limits");
-    assert_eq!(first_limits, (11, 12, 13, 14, 1));
+    assert_eq!(first_limits, (12, 13, 14, 1));
 
     drop(proxy_after_backfill);
 
@@ -2770,14 +2768,14 @@ async fn legacy_current_default_account_quota_limits_keep_following_defaults_aft
         TavilyProxy::with_endpoint(Vec::<String>::new(), DEFAULT_UPSTREAM, &db_str)
             .await
             .expect("proxy reopened for sync");
-    let second_limits: (i64, i64, i64, i64, i64) = sqlx::query_as(
-        "SELECT hourly_any_limit, hourly_limit, daily_limit, monthly_limit, inherits_defaults FROM account_quota_limits WHERE user_id = ?",
+    let second_limits: (i64, i64, i64, i64) = sqlx::query_as(
+        "SELECT business_calls_1h_limit, daily_credits_limit, monthly_credits_limit, inherits_defaults FROM account_quota_limits WHERE user_id = ?",
     )
     .bind(&user.user_id)
     .fetch_one(&proxy_after_sync.key_store.pool)
     .await
     .expect("read synced default limits");
-    assert_eq!(second_limits, (21, 22, 23, 24, 1));
+    assert_eq!(second_limits, (22, 23, 24, 1));
 
     unsafe {
         for (key, old_value) in env_keys.iter().zip(previous.into_iter()) {
@@ -2866,10 +2864,9 @@ async fn shared_legacy_noncurrent_tuple_is_left_custom_during_reclassification()
     }
     sqlx::query(
         r#"UPDATE account_quota_limits
-           SET hourly_any_limit = 11,
-               hourly_limit = 12,
-               daily_limit = 13,
-               monthly_limit = 14,
+           SET business_calls_1h_limit = 12,
+               daily_credits_limit = 13,
+               monthly_credits_limit = 14,
                inherits_defaults = 1,
                updated_at = created_at + 5
            WHERE user_id IN (?, ?)"#,
@@ -2881,10 +2878,9 @@ async fn shared_legacy_noncurrent_tuple_is_left_custom_during_reclassification()
     .expect("simulate shared non-current tuple rows");
     sqlx::query(
         r#"UPDATE account_quota_limits
-           SET hourly_any_limit = 101,
-               hourly_limit = 102,
-               daily_limit = 103,
-               monthly_limit = 104,
+           SET business_calls_1h_limit = 102,
+               daily_credits_limit = 103,
+               monthly_credits_limit = 104,
                inherits_defaults = 1,
                updated_at = created_at
            WHERE user_id = ?"#,
@@ -2912,23 +2908,23 @@ async fn shared_legacy_noncurrent_tuple_is_left_custom_during_reclassification()
         .await
         .expect("proxy reopened");
     for user_id in [&alpha.user_id, &beta.user_id] {
-        let limits: (i64, i64, i64, i64, i64) = sqlx::query_as(
-            "SELECT hourly_any_limit, hourly_limit, daily_limit, monthly_limit, inherits_defaults FROM account_quota_limits WHERE user_id = ?",
+        let limits: (i64, i64, i64, i64) = sqlx::query_as(
+            "SELECT business_calls_1h_limit, daily_credits_limit, monthly_credits_limit, inherits_defaults FROM account_quota_limits WHERE user_id = ?",
         )
         .bind(user_id)
         .fetch_one(&proxy_after.key_store.pool)
         .await
         .expect("read shared tuple limits");
-        assert_eq!(limits, (11, 12, 13, 14, 0));
+        assert_eq!(limits, (12, 13, 14, 0));
     }
-    let custom_limits: (i64, i64, i64, i64, i64) = sqlx::query_as(
-        "SELECT hourly_any_limit, hourly_limit, daily_limit, monthly_limit, inherits_defaults FROM account_quota_limits WHERE user_id = ?",
+    let custom_limits: (i64, i64, i64, i64) = sqlx::query_as(
+        "SELECT business_calls_1h_limit, daily_credits_limit, monthly_credits_limit, inherits_defaults FROM account_quota_limits WHERE user_id = ?",
     )
     .bind(&custom_user.user_id)
     .fetch_one(&proxy_after.key_store.pool)
     .await
     .expect("read shared custom limits");
-    assert_eq!(custom_limits, (101, 102, 103, 104, 0));
+    assert_eq!(custom_limits, (102, 103, 104, 0));
 
     unsafe {
         for (key, old_value) in env_keys.iter().zip(previous.into_iter()) {

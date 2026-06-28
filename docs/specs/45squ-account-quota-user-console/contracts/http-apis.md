@@ -19,10 +19,10 @@
 
 - `200`
 - body:
-  - `hourlyAnyUsed`, `hourlyAnyLimit`
-  - `quotaHourlyUsed`, `quotaHourlyLimit`
-  - `quotaDailyUsed`, `quotaDailyLimit`
-  - `quotaMonthlyUsed`, `quotaMonthlyLimit`
+  - `requestRate { used, limit, windowMinutes, scope }`
+  - `businessCalls1h { totalCount, successCount, failureCount, limit, windowMinutes }`
+  - `dailyCreditsUsed`, `dailyCreditsLimit`
+  - `monthlyCreditsUsed`, `monthlyCreditsLimit`
   - `dailySuccess`, `dailyFailure`, `monthlySuccess`
   - `lastActivity`
 
@@ -30,8 +30,9 @@
 
 - `dailySuccess` / `dailyFailure`: explicit browser-window today when query params are present; otherwise server timezone current day
 - `monthlySuccess`: current UTC month
-- `quotaDailyUsed` / `quotaDailyLimit`: server timezone natural day
-- `quotaMonthlyUsed` / `quotaMonthlyLimit`: current UTC month
+- `businessCalls1h`: 最近 1 小时实际上游业务请求次数；成功与失败都计入，前置拦截与 `quota_exhausted` 不计入
+- `dailyCreditsUsed` / `dailyCreditsLimit`: server timezone natural day
+- `monthlyCreditsUsed` / `monthlyCreditsLimit`: current UTC month
 
 ### Error
 
@@ -54,10 +55,10 @@
 - `200`
 - body: `UserTokenSummary[]`
   - `tokenId`, `enabled`, `note`, `lastUsedAt`
-  - `hourlyAnyUsed/hourlyAnyLimit`
-  - `quotaHourlyUsed/quotaHourlyLimit`
-  - `quotaDailyUsed/quotaDailyLimit`
-  - `quotaMonthlyUsed/quotaMonthlyLimit`
+  - `requestRate`
+  - `businessCalls1h`
+  - `dailyCreditsUsed/dailyCreditsLimit`
+  - `monthlyCreditsUsed/monthlyCreditsLimit`
   - `dailySuccess`, `dailyFailure`, `monthlySuccess`
 
 ## GET /api/user/tokens/:id

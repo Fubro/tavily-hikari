@@ -221,21 +221,19 @@ impl KeyStore {
                 sqlx::query(
                     r#"INSERT INTO account_quota_limits (
                            user_id,
-                           hourly_any_limit,
-                           hourly_limit,
-                           daily_limit,
-                           monthly_limit,
+                           business_calls_1h_limit,
+                           daily_credits_limit,
+                           monthly_credits_limit,
                            inherits_defaults,
                            created_at,
                            updated_at
                        )
-                       VALUES (?, ?, ?, ?, ?, ?, ?, ?)"#,
+                       VALUES (?, ?, ?, ?, ?, ?, ?)"#,
                 )
                 .bind(&user_id)
-                .bind(zero_base.hourly_any_limit)
-                .bind(zero_base.hourly_limit)
-                .bind(zero_base.daily_limit)
-                .bind(zero_base.monthly_limit)
+                .bind(zero_base.business_calls_1h_limit)
+                .bind(zero_base.daily_credits_limit)
+                .bind(zero_base.monthly_credits_limit)
                 .bind(0)
                 .bind(now)
                 .bind(now)

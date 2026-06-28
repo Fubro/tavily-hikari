@@ -38,10 +38,9 @@ use super::upstream_support_and_manual_jobs::*;
         let patch_resp = client
             .patch(&patch_url)
             .json(&serde_json::json!({
-                "hourlyAnyLimit": 10,
-                "hourlyLimit": 10,
-                "dailyLimit": 100,
-                "monthlyLimit": 1000,
+                "businessCalls1hLimit": 10,
+                "dailyCreditsLimit": 100,
+                "monthlyCreditsLimit": 1000,
             }))
             .send()
             .await

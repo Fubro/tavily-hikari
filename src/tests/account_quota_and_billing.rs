@@ -3,10 +3,9 @@ use super::*;
 #[test]
 fn build_account_quota_resolution_clamps_negative_tag_totals_to_zero() {
     let base = AccountQuotaLimits {
-        hourly_any_limit: 10,
-        hourly_limit: 20,
-        daily_limit: 30,
-        monthly_limit: 40,
+        business_calls_1h_limit: 20,
+        daily_credits_limit: 30,
+        monthly_credits_limit: 40,
         inherits_defaults: false,
     };
     let resolution = build_account_quota_resolution(
@@ -20,20 +19,18 @@ fn build_account_quota_resolution_clamps_negative_tag_totals_to_zero() {
                 icon: Some("sparkles".to_string()),
                 system_key: None,
                 effect_kind: USER_TAG_EFFECT_QUOTA_DELTA.to_string(),
-                hourly_any_delta: -100,
-                hourly_delta: -200,
-                daily_delta: -300,
-                monthly_delta: -400,
+                business_calls_1h_delta: -200,
+                daily_credits_delta: -300,
+                monthly_credits_delta: -400,
                 user_count: 1,
             },
         }],
     );
 
-    assert_eq!(resolution.base.hourly_any_limit, 10);
-    assert_eq!(resolution.effective.hourly_any_limit, 0);
-    assert_eq!(resolution.effective.hourly_limit, 0);
-    assert_eq!(resolution.effective.daily_limit, 0);
-    assert_eq!(resolution.effective.monthly_limit, 0);
+    assert_eq!(resolution.base.business_calls_1h_limit, 20);
+    assert_eq!(resolution.effective.business_calls_1h_limit, 0);
+    assert_eq!(resolution.effective.daily_credits_limit, 0);
+    assert_eq!(resolution.effective.monthly_credits_limit, 0);
     assert_eq!(resolution.breakdown.len(), 3);
     let effective_row = resolution
         .breakdown
@@ -41,10 +38,9 @@ fn build_account_quota_resolution_clamps_negative_tag_totals_to_zero() {
         .find(|entry| entry.kind == "effective")
         .expect("effective row present");
     assert_eq!(effective_row.effect_kind, "effective");
-    assert_eq!(effective_row.hourly_any_delta, 0);
-    assert_eq!(effective_row.hourly_delta, 0);
-    assert_eq!(effective_row.daily_delta, 0);
-    assert_eq!(effective_row.monthly_delta, 0);
+    assert_eq!(effective_row.business_calls_1h_delta, 0);
+    assert_eq!(effective_row.daily_credits_delta, 0);
+    assert_eq!(effective_row.monthly_credits_delta, 0);
 }
 
 #[tokio::test]
@@ -75,24 +71,22 @@ async fn new_account_without_tags_defaults_to_zero_base_and_effective_quota() {
         .await
         .expect("resolve account quota");
 
-    assert_eq!(resolution.base.hourly_any_limit, 0);
-    assert_eq!(resolution.base.hourly_limit, 0);
-    assert_eq!(resolution.base.daily_limit, 0);
-    assert_eq!(resolution.base.monthly_limit, 0);
+    assert_eq!(resolution.base.business_calls_1h_limit, 0);
+    assert_eq!(resolution.base.daily_credits_limit, 0);
+    assert_eq!(resolution.base.monthly_credits_limit, 0);
     assert!(!resolution.base.inherits_defaults);
-    assert_eq!(resolution.effective.hourly_any_limit, 0);
-    assert_eq!(resolution.effective.hourly_limit, 0);
-    assert_eq!(resolution.effective.daily_limit, 0);
-    assert_eq!(resolution.effective.monthly_limit, 0);
+    assert_eq!(resolution.effective.business_calls_1h_limit, 0);
+    assert_eq!(resolution.effective.daily_credits_limit, 0);
+    assert_eq!(resolution.effective.monthly_credits_limit, 0);
 
-    let persisted: (i64, i64, i64, i64, i64) = sqlx::query_as(
-        "SELECT hourly_any_limit, hourly_limit, daily_limit, monthly_limit, inherits_defaults FROM account_quota_limits WHERE user_id = ?",
+    let persisted: (i64, i64, i64, i64) = sqlx::query_as(
+        "SELECT business_calls_1h_limit, daily_credits_limit, monthly_credits_limit, inherits_defaults FROM account_quota_limits WHERE user_id = ?",
     )
     .bind(&user.user_id)
     .fetch_one(&proxy.key_store.pool)
     .await
     .expect("read persisted zero base");
-    assert_eq!(persisted, (0, 0, 0, 0, 0));
+    assert_eq!(persisted, (0, 0, 0, 0));
 
     let _ = std::fs::remove_file(db_path);
 }
@@ -127,25 +121,20 @@ async fn new_linuxdo_account_effective_quota_comes_only_from_tags() {
         .expect("resolve account quota");
     let tag_only_limits = AccountQuotaLimits::legacy_defaults();
 
-    assert_eq!(resolution.base.hourly_any_limit, 0);
-    assert_eq!(resolution.base.hourly_limit, 0);
-    assert_eq!(resolution.base.daily_limit, 0);
-    assert_eq!(resolution.base.monthly_limit, 0);
+    assert_eq!(resolution.base.business_calls_1h_limit, 0);
+    assert_eq!(resolution.base.daily_credits_limit, 0);
+    assert_eq!(resolution.base.monthly_credits_limit, 0);
     assert_eq!(
-        resolution.effective.hourly_any_limit,
-        tag_only_limits.hourly_any_limit
+        resolution.effective.business_calls_1h_limit,
+        tag_only_limits.business_calls_1h_limit
     );
     assert_eq!(
-        resolution.effective.hourly_limit,
-        tag_only_limits.hourly_limit
+        resolution.effective.daily_credits_limit,
+        tag_only_limits.daily_credits_limit
     );
     assert_eq!(
-        resolution.effective.daily_limit,
-        tag_only_limits.daily_limit
-    );
-    assert_eq!(
-        resolution.effective.monthly_limit,
-        tag_only_limits.monthly_limit
+        resolution.effective.monthly_credits_limit,
+        tag_only_limits.monthly_credits_limit
     );
     assert!(
         resolution
@@ -212,10 +201,18 @@ async fn historical_account_without_quota_row_keeps_legacy_defaults_on_first_res
         .expect("resolve historical account quota");
     let expected = AccountQuotaLimits::legacy_defaults();
 
-    assert_eq!(resolution.base.hourly_any_limit, expected.hourly_any_limit);
-    assert_eq!(resolution.base.hourly_limit, expected.hourly_limit);
-    assert_eq!(resolution.base.daily_limit, expected.daily_limit);
-    assert_eq!(resolution.base.monthly_limit, expected.monthly_limit);
+    assert_eq!(
+        resolution.base.business_calls_1h_limit,
+        expected.business_calls_1h_limit
+    );
+    assert_eq!(
+        resolution.base.daily_credits_limit,
+        expected.daily_credits_limit
+    );
+    assert_eq!(
+        resolution.base.monthly_credits_limit,
+        expected.monthly_credits_limit
+    );
     assert!(resolution.base.inherits_defaults);
 
     unsafe {
@@ -259,19 +256,19 @@ async fn manual_account_quota_matching_legacy_defaults_stays_custom_on_restart()
 
     let updated = proxy
         .key_store
-        .update_account_quota_limits(&user.user_id, 11, 12, 13, 14)
+        .update_account_quota_limits(&user.user_id, 12, 13, 14)
         .await
         .expect("update account quota");
     assert!(updated);
 
-    let first_row: (i64, i64, i64, i64, i64) = sqlx::query_as(
-        "SELECT hourly_any_limit, hourly_limit, daily_limit, monthly_limit, inherits_defaults FROM account_quota_limits WHERE user_id = ?",
+    let first_row: (i64, i64, i64, i64) = sqlx::query_as(
+        "SELECT business_calls_1h_limit, daily_credits_limit, monthly_credits_limit, inherits_defaults FROM account_quota_limits WHERE user_id = ?",
     )
     .bind(&user.user_id)
     .fetch_one(&proxy.key_store.pool)
     .await
     .expect("read first row");
-    assert_eq!(first_row, (11, 12, 13, 14, 0));
+    assert_eq!(first_row, (12, 13, 14, 0));
 
     drop(proxy);
 
@@ -285,14 +282,14 @@ async fn manual_account_quota_matching_legacy_defaults_stays_custom_on_restart()
     let proxy_after = TavilyProxy::with_endpoint(Vec::<String>::new(), DEFAULT_UPSTREAM, &db_str)
         .await
         .expect("proxy reopened");
-    let second_row: (i64, i64, i64, i64, i64) = sqlx::query_as(
-        "SELECT hourly_any_limit, hourly_limit, daily_limit, monthly_limit, inherits_defaults FROM account_quota_limits WHERE user_id = ?",
+    let second_row: (i64, i64, i64, i64) = sqlx::query_as(
+        "SELECT business_calls_1h_limit, daily_credits_limit, monthly_credits_limit, inherits_defaults FROM account_quota_limits WHERE user_id = ?",
     )
     .bind(&user.user_id)
     .fetch_one(&proxy_after.key_store.pool)
     .await
     .expect("read second row");
-    assert_eq!(second_row, (11, 12, 13, 14, 0));
+    assert_eq!(second_row, (12, 13, 14, 0));
 
     unsafe {
         std::env::remove_var("TOKEN_HOURLY_REQUEST_LIMIT");
@@ -335,10 +332,9 @@ async fn legacy_default_following_account_keeps_inherits_defaults_on_noop_save()
 
     sqlx::query(
         r#"UPDATE account_quota_limits
-           SET hourly_any_limit = 11,
-               hourly_limit = 12,
-               daily_limit = 13,
-               monthly_limit = 14,
+           SET business_calls_1h_limit = 12,
+               daily_credits_limit = 13,
+               monthly_credits_limit = 14,
                inherits_defaults = 1
            WHERE user_id = ?"#,
     )
@@ -349,19 +345,19 @@ async fn legacy_default_following_account_keeps_inherits_defaults_on_noop_save()
 
     let updated = proxy
         .key_store
-        .update_account_quota_limits(&user.user_id, 11, 12, 13, 14)
+        .update_account_quota_limits(&user.user_id, 12, 13, 14)
         .await
         .expect("update account quota");
     assert!(updated);
 
-    let row: (i64, i64, i64, i64, i64) = sqlx::query_as(
-        "SELECT hourly_any_limit, hourly_limit, daily_limit, monthly_limit, inherits_defaults FROM account_quota_limits WHERE user_id = ?",
+    let row: (i64, i64, i64, i64) = sqlx::query_as(
+        "SELECT business_calls_1h_limit, daily_credits_limit, monthly_credits_limit, inherits_defaults FROM account_quota_limits WHERE user_id = ?",
     )
     .bind(&user.user_id)
     .fetch_one(&proxy.key_store.pool)
     .await
     .expect("read row after noop save");
-    assert_eq!(row, (11, 12, 13, 14, 1));
+    assert_eq!(row, (12, 13, 14, 1));
 
     unsafe {
         std::env::remove_var("TOKEN_HOURLY_REQUEST_LIMIT");
@@ -401,10 +397,17 @@ async fn account_quota_resolution_cache_invalidates_on_binding_and_tag_updates()
         .await
         .expect("initial resolution");
     assert_eq!(
-        initial.effective.hourly_any_limit,
-        defaults.hourly_any_limit
+        initial.effective.business_calls_1h_limit,
+        defaults.business_calls_1h_limit
     );
-    assert_eq!(initial.effective.hourly_limit, defaults.hourly_limit);
+    assert_eq!(
+        initial.effective.daily_credits_limit,
+        defaults.daily_credits_limit
+    );
+    assert_eq!(
+        initial.effective.monthly_credits_limit,
+        defaults.monthly_credits_limit
+    );
 
     let tag = proxy
         .create_user_tag(
@@ -412,7 +415,6 @@ async fn account_quota_resolution_cache_invalidates_on_binding_and_tag_updates()
             "Quota Cache Boost",
             Some("sparkles"),
             USER_TAG_EFFECT_QUOTA_DELTA,
-            7,
             8,
             9,
             10,
@@ -430,10 +432,17 @@ async fn account_quota_resolution_cache_invalidates_on_binding_and_tag_updates()
         .await
         .expect("resolution after bind");
     assert_eq!(
-        after_bind.effective.hourly_any_limit,
-        defaults.hourly_any_limit + 7
+        after_bind.effective.business_calls_1h_limit,
+        defaults.business_calls_1h_limit + 8
     );
-    assert_eq!(after_bind.effective.hourly_limit, defaults.hourly_limit + 8);
+    assert_eq!(
+        after_bind.effective.daily_credits_limit,
+        defaults.daily_credits_limit + 9
+    );
+    assert_eq!(
+        after_bind.effective.monthly_credits_limit,
+        defaults.monthly_credits_limit + 10
+    );
 
     proxy
         .update_user_tag(
@@ -442,7 +451,6 @@ async fn account_quota_resolution_cache_invalidates_on_binding_and_tag_updates()
             "Quota Cache Boost",
             Some("sparkles"),
             USER_TAG_EFFECT_QUOTA_DELTA,
-            11,
             12,
             13,
             14,
@@ -457,20 +465,16 @@ async fn account_quota_resolution_cache_invalidates_on_binding_and_tag_updates()
         .await
         .expect("resolution after update");
     assert_eq!(
-        after_update.effective.hourly_any_limit,
-        defaults.hourly_any_limit + 11
+        after_update.effective.business_calls_1h_limit,
+        defaults.business_calls_1h_limit + 12
     );
     assert_eq!(
-        after_update.effective.hourly_limit,
-        defaults.hourly_limit + 12
+        after_update.effective.daily_credits_limit,
+        defaults.daily_credits_limit + 13
     );
     assert_eq!(
-        after_update.effective.daily_limit,
-        defaults.daily_limit + 13
-    );
-    assert_eq!(
-        after_update.effective.monthly_limit,
-        defaults.monthly_limit + 14
+        after_update.effective.monthly_credits_limit,
+        defaults.monthly_credits_limit + 14
     );
 
     proxy
@@ -483,12 +487,17 @@ async fn account_quota_resolution_cache_invalidates_on_binding_and_tag_updates()
         .await
         .expect("resolution after unbind");
     assert_eq!(
-        after_unbind.effective.hourly_any_limit,
-        defaults.hourly_any_limit
+        after_unbind.effective.business_calls_1h_limit,
+        defaults.business_calls_1h_limit
     );
-    assert_eq!(after_unbind.effective.hourly_limit, defaults.hourly_limit);
-    assert_eq!(after_unbind.effective.daily_limit, defaults.daily_limit);
-    assert_eq!(after_unbind.effective.monthly_limit, defaults.monthly_limit);
+    assert_eq!(
+        after_unbind.effective.daily_credits_limit,
+        defaults.daily_credits_limit
+    );
+    assert_eq!(
+        after_unbind.effective.monthly_credits_limit,
+        defaults.monthly_credits_limit
+    );
 
     let _ = std::fs::remove_file(db_path);
 }
@@ -504,10 +513,9 @@ async fn linuxdo_system_tag_defaults_backfill_repairs_legacy_zero_seed() {
         .expect("proxy created");
     sqlx::query(
         r#"UPDATE user_tags
-           SET hourly_any_delta = 0,
-               hourly_delta = 0,
-               daily_delta = 0,
-               monthly_delta = 0
+           SET business_calls_1h_delta = 0,
+               daily_credits_delta = 0,
+               monthly_credits_delta = 0
            WHERE system_key LIKE 'linuxdo_l%'"#,
     )
     .execute(&proxy.key_store.pool)
@@ -524,18 +532,14 @@ async fn linuxdo_system_tag_defaults_backfill_repairs_legacy_zero_seed() {
         .await
         .expect("proxy recreated");
     let defaults = linuxdo_system_tag_default_deltas();
-    let seeded_rows = sqlx::query_as::<_, (i64, i64, i64, i64)>(
-        "SELECT hourly_any_delta, hourly_delta, daily_delta, monthly_delta FROM user_tags WHERE system_key LIKE 'linuxdo_l%' ORDER BY system_key",
+    let seeded_rows = sqlx::query_as::<_, (i64, i64, i64)>(
+        "SELECT business_calls_1h_delta, daily_credits_delta, monthly_credits_delta FROM user_tags WHERE system_key LIKE 'linuxdo_l%' ORDER BY system_key",
     )
     .fetch_all(&repaired.key_store.pool)
     .await
     .expect("read repaired seeded tag rows");
     assert_eq!(seeded_rows.len(), 5);
-    assert!(
-        seeded_rows
-            .iter()
-            .all(|row| *row == (defaults.0, defaults.1, defaults.2, defaults.3))
-    );
+    assert!(seeded_rows.iter().all(|row| *row == defaults));
 }
 
 #[tokio::test]
@@ -549,10 +553,9 @@ async fn linuxdo_system_tag_defaults_backfill_repairs_partial_legacy_zero_seed()
         .expect("proxy created");
     sqlx::query(
         r#"UPDATE user_tags
-           SET hourly_any_delta = 0,
-               hourly_delta = 0,
-               daily_delta = 0,
-               monthly_delta = 0
+           SET business_calls_1h_delta = 0,
+               daily_credits_delta = 0,
+               monthly_credits_delta = 0
            WHERE system_key IN ('linuxdo_l1', 'linuxdo_l3')"#,
     )
     .execute(&proxy.key_store.pool)
@@ -574,8 +577,8 @@ async fn linuxdo_system_tag_defaults_backfill_repairs_partial_legacy_zero_seed()
         .await
         .expect("proxy recreated");
     let defaults = linuxdo_system_tag_default_deltas();
-    let seeded_rows = sqlx::query_as::<_, (String, i64, i64, i64, i64)>(
-        r#"SELECT system_key, hourly_any_delta, hourly_delta, daily_delta, monthly_delta
+    let seeded_rows = sqlx::query_as::<_, (String, i64, i64, i64)>(
+        r#"SELECT system_key, business_calls_1h_delta, daily_credits_delta, monthly_credits_delta
            FROM user_tags
            WHERE system_key LIKE 'linuxdo_l%'
            ORDER BY system_key"#,
@@ -587,10 +590,7 @@ async fn linuxdo_system_tag_defaults_backfill_repairs_partial_legacy_zero_seed()
     assert!(
         seeded_rows
             .iter()
-            .all(|(_, hourly_any, hourly, daily, monthly)| {
-                (*hourly_any, *hourly, *daily, *monthly)
-                    == (defaults.0, defaults.1, defaults.2, defaults.3)
-            })
+            .all(|(_, hourly, daily, monthly)| (*hourly, *daily, *monthly) == defaults)
     );
 }
 
@@ -619,8 +619,8 @@ async fn linuxdo_system_tag_defaults_follow_env_changes_without_overwriting_cust
     let proxy = TavilyProxy::with_endpoint(Vec::<String>::new(), DEFAULT_UPSTREAM, &db_str)
         .await
         .expect("proxy created");
-    let initial_rows = sqlx::query_as::<_, (String, i64, i64, i64, i64)>(
-        r#"SELECT system_key, hourly_any_delta, hourly_delta, daily_delta, monthly_delta
+    let initial_rows = sqlx::query_as::<_, (String, i64, i64, i64)>(
+        r#"SELECT system_key, business_calls_1h_delta, daily_credits_delta, monthly_credits_delta
            FROM user_tags
            WHERE system_key LIKE 'linuxdo_l%'
            ORDER BY system_key"#,
@@ -632,9 +632,7 @@ async fn linuxdo_system_tag_defaults_follow_env_changes_without_overwriting_cust
     assert!(
         initial_rows
             .iter()
-            .all(|(_, hourly_any, hourly, daily, monthly)| {
-                (*hourly_any, *hourly, *daily, *monthly) == (11, 12, 13, 14)
-            })
+            .all(|(_, hourly, daily, monthly)| (*hourly, *daily, *monthly) == (12, 13, 14))
     );
     drop(proxy);
 
@@ -649,8 +647,8 @@ async fn linuxdo_system_tag_defaults_follow_env_changes_without_overwriting_cust
         TavilyProxy::with_endpoint(Vec::<String>::new(), DEFAULT_UPSTREAM, &db_str)
             .await
             .expect("proxy reopened after default change");
-    let synced_rows = sqlx::query_as::<_, (String, i64, i64, i64, i64)>(
-        r#"SELECT system_key, hourly_any_delta, hourly_delta, daily_delta, monthly_delta
+    let synced_rows = sqlx::query_as::<_, (String, i64, i64, i64)>(
+        r#"SELECT system_key, business_calls_1h_delta, daily_credits_delta, monthly_credits_delta
            FROM user_tags
            WHERE system_key LIKE 'linuxdo_l%'
            ORDER BY system_key"#,
@@ -661,9 +659,7 @@ async fn linuxdo_system_tag_defaults_follow_env_changes_without_overwriting_cust
     assert!(
         synced_rows
             .iter()
-            .all(|(_, hourly_any, hourly, daily, monthly)| {
-                (*hourly_any, *hourly, *daily, *monthly) == (21, 22, 23, 24)
-            })
+            .all(|(_, hourly, daily, monthly)| (*hourly, *daily, *monthly) == (22, 23, 24))
     );
 
     proxy_after_default_change
@@ -673,7 +669,6 @@ async fn linuxdo_system_tag_defaults_follow_env_changes_without_overwriting_cust
             "L2",
             Some("linuxdo"),
             USER_TAG_EFFECT_QUOTA_DELTA,
-            101,
             102,
             103,
             104,
@@ -694,8 +689,8 @@ async fn linuxdo_system_tag_defaults_follow_env_changes_without_overwriting_cust
         TavilyProxy::with_endpoint(Vec::<String>::new(), DEFAULT_UPSTREAM, &db_str)
             .await
             .expect("proxy reopened after system tag customization");
-    let final_rows = sqlx::query_as::<_, (String, i64, i64, i64, i64)>(
-        r#"SELECT system_key, hourly_any_delta, hourly_delta, daily_delta, monthly_delta
+    let final_rows = sqlx::query_as::<_, (String, i64, i64, i64)>(
+        r#"SELECT system_key, business_calls_1h_delta, daily_credits_delta, monthly_credits_delta
            FROM user_tags
            WHERE system_key LIKE 'linuxdo_l%'
            ORDER BY system_key"#,
@@ -704,11 +699,11 @@ async fn linuxdo_system_tag_defaults_follow_env_changes_without_overwriting_cust
     .await
     .expect("read final linuxdo system tag rows");
     assert_eq!(final_rows.len(), 5);
-    for (system_key, hourly_any, hourly, daily, monthly) in final_rows {
+    for (system_key, hourly, daily, monthly) in final_rows {
         if system_key == "linuxdo_l2" {
-            assert_eq!((hourly_any, hourly, daily, monthly), (101, 102, 103, 104));
+            assert_eq!((hourly, daily, monthly), (102, 103, 104));
         } else {
-            assert_eq!((hourly_any, hourly, daily, monthly), (31, 32, 33, 34));
+            assert_eq!((hourly, daily, monthly), (32, 33, 34));
         }
     }
 
@@ -742,8 +737,8 @@ async fn linuxdo_system_tags_seed_backfill_and_trust_level_sync() {
     assert_eq!(seeded_count, 5);
 
     let defaults = linuxdo_system_tag_default_deltas();
-    let seeded_rows = sqlx::query_as::<_, (String, String, Option<String>, i64, i64, i64, i64)>(
-        "SELECT display_name, name, icon, hourly_any_delta, hourly_delta, daily_delta, monthly_delta FROM user_tags WHERE system_key LIKE 'linuxdo_l%' ORDER BY system_key",
+    let seeded_rows = sqlx::query_as::<_, (String, String, Option<String>, i64, i64, i64)>(
+        "SELECT display_name, name, icon, business_calls_1h_delta, daily_credits_delta, monthly_credits_delta FROM user_tags WHERE system_key LIKE 'linuxdo_l%' ORDER BY system_key",
     )
     .fetch_all(&proxy.key_store.pool)
     .await
@@ -758,7 +753,6 @@ async fn linuxdo_system_tags_seed_backfill_and_trust_level_sync() {
             defaults.0,
             defaults.1,
             defaults.2,
-            defaults.3,
         )
     );
     assert_eq!(
@@ -770,7 +764,6 @@ async fn linuxdo_system_tags_seed_backfill_and_trust_level_sync() {
             defaults.0,
             defaults.1,
             defaults.2,
-            defaults.3,
         )
     );
 
@@ -1018,10 +1011,9 @@ async fn legacy_custom_account_quota_limits_with_initial_timestamps_are_reclassi
         .expect("seed account quota row");
     sqlx::query(
         r#"UPDATE account_quota_limits
-           SET hourly_any_limit = 101,
-               hourly_limit = 102,
-               daily_limit = 103,
-               monthly_limit = 104,
+           SET business_calls_1h_limit = 102,
+               daily_credits_limit = 103,
+               monthly_credits_limit = 104,
                inherits_defaults = 1,
                updated_at = created_at
            WHERE user_id = ?"#,
@@ -1048,14 +1040,14 @@ async fn legacy_custom_account_quota_limits_with_initial_timestamps_are_reclassi
     let proxy_after = TavilyProxy::with_endpoint(Vec::<String>::new(), DEFAULT_UPSTREAM, &db_str)
         .await
         .expect("proxy reopened");
-    let limits: (i64, i64, i64, i64, i64) = sqlx::query_as(
-        "SELECT hourly_any_limit, hourly_limit, daily_limit, monthly_limit, inherits_defaults FROM account_quota_limits WHERE user_id = ?",
+    let limits: (i64, i64, i64, i64) = sqlx::query_as(
+        "SELECT business_calls_1h_limit, daily_credits_limit, monthly_credits_limit, inherits_defaults FROM account_quota_limits WHERE user_id = ?",
     )
     .bind(&user.user_id)
     .fetch_one(&proxy_after.key_store.pool)
     .await
     .expect("read persisted legacy custom limits");
-    assert_eq!(limits, (101, 102, 103, 104, 0));
+    assert_eq!(limits, (102, 103, 104, 0));
 
     unsafe {
         for (key, old_value) in env_keys.iter().zip(previous.into_iter()) {
@@ -1115,19 +1107,19 @@ async fn custom_account_quota_limits_survive_default_resync() {
         .await
         .expect("seed account quota row");
     let updated = proxy
-        .update_account_quota_limits(&user.user_id, 101, 102, 103, 104)
+        .update_account_quota_limits(&user.user_id, 102, 103, 104)
         .await
         .expect("update custom base quota");
     assert!(updated);
 
-    let first_limits: (i64, i64, i64, i64, i64) = sqlx::query_as(
-        "SELECT hourly_any_limit, hourly_limit, daily_limit, monthly_limit, inherits_defaults FROM account_quota_limits WHERE user_id = ?",
+    let first_limits: (i64, i64, i64, i64) = sqlx::query_as(
+        "SELECT business_calls_1h_limit, daily_credits_limit, monthly_credits_limit, inherits_defaults FROM account_quota_limits WHERE user_id = ?",
     )
     .bind(&user.user_id)
     .fetch_one(&proxy.key_store.pool)
     .await
     .expect("read custom limits");
-    assert_eq!(first_limits, (101, 102, 103, 104, 0));
+    assert_eq!(first_limits, (102, 103, 104, 0));
 
     drop(proxy);
 
@@ -1141,14 +1133,14 @@ async fn custom_account_quota_limits_survive_default_resync() {
     let proxy_after = TavilyProxy::with_endpoint(Vec::<String>::new(), DEFAULT_UPSTREAM, &db_str)
         .await
         .expect("proxy reopened");
-    let second_limits: (i64, i64, i64, i64, i64) = sqlx::query_as(
-        "SELECT hourly_any_limit, hourly_limit, daily_limit, monthly_limit, inherits_defaults FROM account_quota_limits WHERE user_id = ?",
+    let second_limits: (i64, i64, i64, i64) = sqlx::query_as(
+        "SELECT business_calls_1h_limit, daily_credits_limit, monthly_credits_limit, inherits_defaults FROM account_quota_limits WHERE user_id = ?",
     )
     .bind(&user.user_id)
     .fetch_one(&proxy_after.key_store.pool)
     .await
     .expect("read persisted custom limits");
-    assert_eq!(second_limits, (101, 102, 103, 104, 0));
+    assert_eq!(second_limits, (102, 103, 104, 0));
 
     unsafe {
         for (key, old_value) in env_keys.iter().zip(previous.into_iter()) {
@@ -1196,7 +1188,6 @@ async fn block_all_user_tag_zeroes_effective_quota_and_blocks_account_usage() {
             0,
             0,
             0,
-            0,
         )
         .await
         .expect("create block all tag");
@@ -1211,10 +1202,9 @@ async fn block_all_user_tag_zeroes_effective_quota_and_blocks_account_usage() {
         .await
         .expect("quota details")
         .expect("quota details present");
-    assert_eq!(details.effective.hourly_any_limit, 0);
-    assert_eq!(details.effective.hourly_limit, 0);
-    assert_eq!(details.effective.daily_limit, 0);
-    assert_eq!(details.effective.monthly_limit, 0);
+    assert_eq!(details.effective.business_calls_1h_limit, 0);
+    assert_eq!(details.effective.daily_credits_limit, 0);
+    assert_eq!(details.effective.monthly_credits_limit, 0);
     assert!(
         details
             .breakdown

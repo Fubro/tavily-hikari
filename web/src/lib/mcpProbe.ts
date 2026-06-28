@@ -4,12 +4,14 @@ export type McpProbeStepState = 'success' | 'failed' | 'blocked' | 'skipped'
 export const MCP_PROBE_ACCEPT_HEADER = 'application/json, text/event-stream'
 
 interface QuotaSnapshotLike {
-  quotaHourlyUsed: number
-  quotaHourlyLimit: number
-  quotaDailyUsed: number
-  quotaDailyLimit: number
-  quotaMonthlyUsed: number
-  quotaMonthlyLimit: number
+  businessCalls1h: {
+    totalCount: number
+    limit: number
+  }
+  dailyCreditsUsed: number
+  dailyCreditsLimit: number
+  monthlyCreditsUsed: number
+  monthlyCreditsLimit: number
 }
 
 export class McpProbeRequestError extends Error {
@@ -216,13 +218,13 @@ export function getQuotaExceededWindow(payload: unknown): ProbeQuotaWindow | nul
 
 export function getTokenBusinessQuotaWindow(token: QuotaSnapshotLike | null | undefined): ProbeQuotaWindow | null {
   if (!token) return null
-  if (token.quotaHourlyLimit > 0 && token.quotaHourlyUsed >= token.quotaHourlyLimit) {
+  if (token.businessCalls1h.limit > 0 && token.businessCalls1h.totalCount >= token.businessCalls1h.limit) {
     return 'hour'
   }
-  if (token.quotaDailyLimit > 0 && token.quotaDailyUsed >= token.quotaDailyLimit) {
+  if (token.dailyCreditsLimit > 0 && token.dailyCreditsUsed >= token.dailyCreditsLimit) {
     return 'day'
   }
-  if (token.quotaMonthlyLimit > 0 && token.quotaMonthlyUsed >= token.quotaMonthlyLimit) {
+  if (token.monthlyCreditsLimit > 0 && token.monthlyCreditsUsed >= token.monthlyCreditsLimit) {
     return 'month'
   }
   return null

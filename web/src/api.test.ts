@@ -289,7 +289,7 @@ describe('admin user tag api helpers', () => {
       value: 6,
       limitValue: 60,
     })
-    expect(snapshot.progress.quotaHourly.points[1]?.value).toBeNull()
+    expect(snapshot.progress.businessCalls1h.points[1]?.value).toBeNull()
   })
 
   it('treats user logout 204 and 401 as successful sign-out responses', async () => {
