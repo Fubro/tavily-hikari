@@ -458,6 +458,7 @@
       "include_prefixes": [
         "server::tests::linuxdo_oauth_and_admin_keys::manual_",
         "server::tests::upstream_support_and_manual_jobs::manual_",
+        "server::tests::alerts_and_ha::admin_",
         "server::tests::alerts_and_ha::ha_",
         "server::tests::alerts_and_ha_sync_recovery::ha_",
         "server::tests::alerts_and_ha_node_state::redundant_",
