@@ -21,8 +21,8 @@ import {
   buildDeltaSeriesSlotValues,
   buildAggregatedHourlySlots,
   buildDashboardAreaStackLayers,
-  buildHourlyRangeSlots,
   formatDashboardRealtimeWindowLabel,
+  buildRollingHourlyWindow,
   getVisibleHourlyWindow,
   DASHBOARD_RESULT_SERIES_ORDER,
   DASHBOARD_TYPE_SERIES_ORDER,
@@ -246,19 +246,15 @@ export default function DashboardTrendPanel({
   const isDeltaMode = isDeltaChartMode(chartMode)
   const isAreaMode = isAreaChartMode(chartMode)
   const rollingRangeSlots = visibleWindow.slots
-  const fixedNaturalDayRangeSlots = useMemo(
-    () => buildAggregatedHourlySlots(
-      hourlyRequestWindow,
-      summaryWindows.today_start,
-      summaryWindows.today_period_end ?? summaryWindows.today_end,
-    ).slots,
-    [hourlyRequestWindow, summaryWindows.today_end, summaryWindows.today_period_end, summaryWindows.today_start],
+  const rollingHourlyWindow = useMemo(
+    () => buildRollingHourlyWindow(hourlyRequestWindow),
+    [hourlyRequestWindow],
   )
   const elapsedNaturalDayRangeSlots = useMemo(
     () => buildAggregatedHourlySlots(hourlyRequestWindow, summaryWindows.today_start, summaryWindows.today_end).slots,
     [hourlyRequestWindow, summaryWindows.today_end, summaryWindows.today_start],
   )
-  const rangeSlots = isDeltaMode ? elapsedNaturalDayRangeSlots : isAreaMode ? rollingRangeSlots : fixedNaturalDayRangeSlots
+  const rangeSlots = isDeltaMode ? elapsedNaturalDayRangeSlots : isAreaMode ? rollingRangeSlots : rollingHourlyWindow.slots
   const comparisonRangeSlots = useMemo(
     () => buildAggregatedHourlySlots(hourlyRequestWindow, comparisonRangeStart, comparisonRangeEnd).slots,
     [comparisonRangeEnd, comparisonRangeStart, hourlyRequestWindow],

@@ -96,6 +96,7 @@
   - module data：dashboard overview
 - dashboard route 不再通过通用 `loadData()` 拉 `summary`、token page 或 token groups。
 - `loadDashboardOverview()` 必须收敛为单请求模型，只调用 `fetchDashboardOverview()`。
+- 流量趋势图默认小时序列必须使用滚动 24 小时窗口，并以当前可见小时桶为右边界；前 4 个数据点不得再固定为自然日今日起点。
 - SSE 正常可用时，dashboard 活态增量更新只依赖 `snapshot`；不得再保留独立的 30 秒 dashboard signals polling。
 - SSE `compute_signatures()` 不得再调用会触发 flush-on-read 的 `summary_windows` / month-series
   热路径；它只能消费 cheap freshness contract 与最近一次 shared snapshot freshness。
@@ -225,3 +226,4 @@
   后的 freshness 作为已发送签名；同时将 dashboard snapshot/SSE 回归测试拆分到独立模块以满足
   Rust 行数预算门禁。
 - 2026-06-26: 将 shared snapshot freshness 进一步收敛为 cheap quota charge token + recent-alerts token，新增独立 `DashboardQuotaChargeCache` / `DashboardRecentAlertsCache`，让 cache-hit 不再触发 quota sample baseline/window CTE 与 alerts grouped CTE；同时将 alerts events/groups/dashboard recent alerts 改为 `auth_token_logs` 优先、`request_logs` 按需回退，并补齐 quota/alerts/serialize phase-level perf 事件。
+- 2026-06-29: 修正流量趋势图默认小时窗为滚动 24 小时，确保图表前段不再固定落在自然日今日起点。

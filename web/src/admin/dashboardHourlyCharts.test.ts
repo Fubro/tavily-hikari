@@ -21,6 +21,7 @@ import {
   formatHourlyBucketLabel,
   formatDashboardRealtimeWindowLabel,
   getHourlyBucketsInRange,
+  buildRollingHourlyWindow,
   getVisibleHourlyBuckets,
   getVisibleHourlyWindow,
   readDashboardHourlyChartPreferences,
@@ -48,6 +49,22 @@ describe('dashboardHourlyCharts helpers', () => {
 
     expect(window.buckets.at(-1)?.bucketStart).toBe(currentHourStart)
     expect(getVisibleHourlyBuckets(window).at(-1)?.bucketStart).toBe(currentHourStart)
+  })
+
+  it('builds a rolling 24-hour hourly window ending at the current bucket', () => {
+    const currentHourStart = Date.UTC(2026, 3, 7, 12, 0, 0) / 1000
+    const window = buildDashboardHourlyRequestWindowFixture({
+      currentHourStart,
+      bucketSeconds: 3600,
+      visibleBuckets: 25,
+      retainedBuckets: 49,
+    })
+
+    const rolling = buildRollingHourlyWindow(window)
+
+    expect(rolling.slots).toHaveLength(24)
+    expect(rolling.slots[0]?.bucketStart).toBe(currentHourStart - 23 * 3600)
+    expect(rolling.slots.at(-1)?.bucketStart).toBe(currentHourStart)
   })
 
   it('computes yesterday deltas from aligned hourly buckets', () => {

@@ -298,6 +298,31 @@ export function getVisibleHourlyWindow(window: DashboardHourlyRequestWindow): Da
   }
 }
 
+function floorToLocalHourStart(timestamp: number): number {
+  const date = new Date(timestamp * 1000)
+  date.setMinutes(0, 0, 0)
+  return Math.trunc(date.getTime() / 1000)
+}
+
+export function buildRollingHourlyWindow(window: DashboardHourlyRequestWindow): DashboardHourlyWindowView {
+  const visibleBuckets = getVisibleHourlyBuckets(window)
+  if (visibleBuckets.length === 0) {
+    return {
+      bucketSeconds: DASHBOARD_COMPARISON_BUCKET_SECONDS,
+      visibleBuckets: 0,
+      slots: [],
+    }
+  }
+
+  const bucketSeconds = DASHBOARD_COMPARISON_BUCKET_SECONDS
+  const latestBucketStart = visibleBuckets.at(-1)?.bucketStart ?? 0
+  const latestHourStart = floorToLocalHourStart(latestBucketStart)
+  const rangeEnd = latestHourStart + bucketSeconds
+  const rangeStart = rangeEnd - 24 * bucketSeconds
+
+  return buildAggregatedHourlySlots(window, rangeStart, rangeEnd, bucketSeconds)
+}
+
 export function buildDashboardAreaStackLayers<T extends string>(
   visibleSeries: ReadonlyArray<T>,
 ): DashboardAreaStackLayer<T>[] {
