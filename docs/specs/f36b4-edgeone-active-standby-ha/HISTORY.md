@@ -93,6 +93,22 @@ The full HA node inventory is an operations setting, not global business-page ch
 
 The admin HA page now treats the current instance source as a private, per-node setting that can be switched between direct `IP/域名` and `源站组`. The stored value overrides the Env/CLI default for this instance only, and active/provisional operators can apply the saved source directly to EdgeOne from the same page. Startup defaults now accept `HA_SOURCE_KIND` and `HA_SOURCE_ORIGIN_GROUP_ID`, while `EDGEONE_EXPECTED_ORIGIN_*` remains a direct-origin compatibility input.
 
+## Startup Source Restore Hardening
+
+Restart validation exposed a startup-ordering defect in the HA control plane. The node already persisted its local HA source override, but startup role reconciliation still compared EdgeOne against the Env default source first and only restored the persisted override afterwards. The same stale pre-restore view was then written back into `ha_node_state`, which could downgrade a saved `:1443` override back to the Env default `:443`.
+
+- The accepted contract is that persisted node-local HA source settings remain authoritative across restarts.
+- Startup must therefore restore the persisted local source override before the first EdgeOne authority comparison and before rewriting the startup HA snapshot.
+- This defect is a startup state-restoration bug inside the application. It is not a frontend rendering issue and not an EdgeOne describe-response parsing issue.
+
+## Runtime EdgeOne Outer-Port Parsing Hardening
+
+Production validation exposed a second, separate HA control-plane defect during live `保存并切换 EdgeOne 到此源站` operations. After the admin switched the current node source from `gz.ivanli.cc:443` to `gz.ivanli.cc:1443`, the running authority-refresh loop queried `DescribeAccelerationDomains` again and compared the reported live target against this node's effective source settings. The real EdgeOne target was still the same node on `:1443`, but the describe parser only read `AccelerationDomains[0].OriginDetail` and ignored `OriginProtocol` / `HttpOriginPort` / `HttpsOriginPort` fields carried on the outer domain record. When `OriginDetail` itself omitted the custom port, the parser silently defaulted HTTPS back to `:443`, then mis-demoted the active node into `recovery`.
+
+- The accepted contract is that runtime authority refresh must reconstruct the live EdgeOne target from the full domain record, not from `OriginDetail` in isolation.
+- When outer-record direct-origin fields are present, they must backfill missing `OriginDetail` port/protocol values before the live target is compared with this node's effective source settings.
+- This defect is a runtime authority-refresh parse bug. It is distinct from the startup source-restore ordering bug fixed separately above.
+
 ## Source Settings Contract Hardening
 
 HA source settings originally drifted across layers: the frontend, demo fixtures, and spec already used lowercase `http|https|follow`, but the Rust enum deserializer still expected PascalCase variants, causing direct-origin saves to fail before the handler executed. The accepted contract is now explicitly lowercase on the HA admin JSON wire, with the uppercase `HTTP|HTTPS|FOLLOW` mapping confined to the downstream EdgeOne control-plane payload.

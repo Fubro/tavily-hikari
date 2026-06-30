@@ -1228,10 +1228,12 @@ impl EdgeOneClient {
             .call_with_audit("DescribeAccelerationDomains", payload)
             .await?;
         let origin_detail = value.pointer("/Response/AccelerationDomains/0/OriginDetail");
+        let domain_record = value.pointer("/Response/AccelerationDomains/0");
         Ok((
             origin_detail.and_then(|detail| {
+                let detail = merged_origin_detail(detail, domain_record);
                 origin_detail_to_edgeone_target(
-                    detail,
+                    &detail,
                     self.config.configured_source_settings().ok().flatten(),
                 )
             }),
@@ -1404,6 +1406,25 @@ fn origin_detail_to_edgeone_target(
         direct_origin: Some(direct_origin),
         origin_group_id: None,
     })
+}
+
+fn merged_origin_detail(detail: &Value, domain_record: Option<&Value>) -> Value {
+    let Some(record) = domain_record else {
+        return detail.clone();
+    };
+    let Some(detail_obj) = detail.as_object() else {
+        return detail.clone();
+    };
+    let mut merged = serde_json::Map::with_capacity(detail_obj.len() + 3);
+    merged.extend(detail_obj.clone());
+    for key in ["OriginProtocol", "HttpOriginPort", "HttpsOriginPort"] {
+        if !merged.contains_key(key)
+            && let Some(value) = record.get(key)
+        {
+            merged.insert(key.to_string(), value.clone());
+        }
+    }
+    Value::Object(merged)
 }
 
 fn tc3_authorization(
@@ -1962,6 +1983,93 @@ mod tests {
                 .as_deref(),
             Some("gz.ivanli.cc:443")
         );
+    }
+
+    #[test]
+    fn merged_origin_detail_restores_outer_https_port() {
+        let detail = json!({
+            "Origin": "gz.ivanli.cc",
+            "OriginProtocol": "HTTPS"
+        });
+        let domain_record = json!({
+            "OriginDetail": detail,
+            "HttpsOriginPort": 1443
+        });
+        let merged = merged_origin_detail(
+            domain_record.get("OriginDetail").expect("origin detail"),
+            Some(&domain_record),
+        );
+        assert_eq!(
+            origin_detail_to_public_origin(&merged, OriginScheme::Https)
+                .map(|origin| origin.authority())
+                .as_deref(),
+            Some("gz.ivanli.cc:1443")
+        );
+    }
+
+    #[tokio::test]
+    async fn authority_refresh_keeps_full_master_when_outer_domain_record_carries_https_port() {
+        let edgeone_app = axum::Router::new().fallback(axum::routing::post(|| async {
+            axum::Json(serde_json::json!({
+                "Response": {
+                    "AccelerationDomains": [
+                        {
+                            "HttpsOriginPort": 1443,
+                            "OriginDetail": {
+                                "Origin": "gz.ivanli.cc",
+                                "OriginProtocol": "HTTPS"
+                            }
+                        }
+                    ],
+                    "RequestId": "edgeone-authority-outer-port"
+                }
+            }))
+        }));
+        let edgeone_listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind edgeone mock");
+        let edgeone_addr = edgeone_listener.local_addr().expect("edgeone mock addr");
+        tokio::spawn(async move {
+            axum::serve(edgeone_listener, edgeone_app.into_make_service())
+                .await
+                .expect("serve edgeone mock");
+        });
+
+        let runtime = HaRuntime::new(HaConfig {
+            mode: HaMode::ActiveStandby,
+            node_id: "gz-101".to_string(),
+            node_public_scheme: Some("https".to_string()),
+            node_public_host: Some("gz.ivanli.cc".to_string()),
+            node_public_port: Some(443),
+            edgeone_zone_id: Some("zone-test".to_string()),
+            edgeone_domain: Some("hikari.example.test".to_string()),
+            edgeone_secret_id: Some("secret-id".to_string()),
+            edgeone_secret_key: Some("secret-key".to_string()),
+            edgeone_api_endpoint: format!("http://{edgeone_addr}"),
+            ..HaConfig::default()
+        });
+        runtime
+            .set_local_source_settings(Some(HaSourceSettings {
+                source_kind: HaSourceKind::Direct,
+                direct_origin_scheme: Some(OriginScheme::Https),
+                direct_origin_host: Some("gz.ivanli.cc".to_string()),
+                direct_origin_port: Some(1443),
+                origin_group_id: None,
+            }))
+            .await
+            .expect("set local source settings");
+        {
+            let mut state = runtime.state.write().await;
+            state.role = HaNodeRole::FullMaster;
+        }
+
+        let status = runtime
+            .refresh_authoritative_role()
+            .await
+            .expect("refresh role");
+        assert_eq!(status.role, HaNodeRole::FullMaster);
+        assert_eq!(status.edgeone_origin.as_deref(), Some("gz.ivanli.cc:1443"));
+        assert!(status.recovery_status.is_none());
     }
 
     #[test]
